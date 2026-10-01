@@ -87,6 +87,8 @@ final class NotchService: ObservableObject {
     /// song's notice waits for playback to settle, so the notice rather than
     /// the strip is where the new song first appears.
     @Published private(set) var heldMusic: NotchCompactMusicSnapshot?
+    @Published private(set) var isMusicPausedHolding = false
+    private var musicPauseHoldWork: DispatchWorkItem?
     @Published private(set) var captureActions: AnyView?
     @Published private(set) var captureContent: AnyView?
     /// Bumped when Command-W asks the Scratchpad page to close its selected
@@ -234,10 +236,20 @@ final class NotchService: ObservableObject {
         fullscreenCompact && !geometry.isNotched
     }
 
+    var isPlayerActive: Bool {
+        let front = NSWorkspace.shared.frontmostApplication
+        return NotchMusicSupport.isPlayerActive(
+            playback: NotchMusicService.shared.playback,
+            selectedPID: NotchMusicService.shared.selectedSourcePID,
+            frontPID: front?.processIdentifier,
+            frontBundle: front?.bundleIdentifier
+        )
+    }
+
     /// A Mac without a battery has no charge to show, so a saved battery
     /// choice rests empty there; playing music still shows as before.
     var idleContent: NotchIdleContent {
-        let content = NotchSupport.visibleIdleContent(isPlaying: !awaitsTrackNotice && NotchMusicService.shared.playback?.isPlaying == true)
+        let content = NotchSupport.visibleIdleContent(isPlaying: !awaitsTrackNotice && NotchMusicService.shared.playback?.isPlaying == true, isHoldingPause: isMusicPausedHolding && NotchMusicService.shared.playback != nil, isPlayerActive: isPlayerActive)
         return content == .battery && !PowerSampler.hasInternalBattery ? .none : content
     }
 
@@ -251,7 +263,7 @@ final class NotchService: ObservableObject {
     }
 
     var hasMusicActivity: Bool {
-        NotchSupport.showsMusicActivity(isPlaying: NotchMusicService.shared.playback?.isPlaying == true)
+        NotchSupport.showsMusicActivity(isPlaying: NotchMusicService.shared.playback?.isPlaying == true, isHoldingPause: isMusicPausedHolding && NotchMusicService.shared.playback != nil, isPlayerActive: isPlayerActive)
     }
 
     var hasAgentActivity: Bool {
@@ -834,6 +846,8 @@ final class NotchService: ObservableObject {
     }
 
     private func tearDownPresentation() {
+        musicPauseHoldWork?.cancel(); musicPauseHoldWork = nil
+        isMusicPausedHolding = false
         screenRefreshWork?.cancel(); screenRefreshWork = nil
         captureControlsWork?.cancel(); captureControlsWork = nil
         musicDetailVisible = false
@@ -1779,6 +1793,7 @@ final class NotchService: ObservableObject {
             // The open island already shows the song, or holds something else
             // the person is doing.
             guard !self.expanded, !self.peeking, !self.dragPlaceholder, self.captureControls == nil,
+                  !(self.isPlayerActive && NotchSupport.hidesMusicWhenPlayerActive()),
                   let playback = NotchMusicService.shared.playback, playback.isPlaying,
                   let title = playback.track.title, !title.isEmpty else { return }
             self.show(NotchNotice(event: .track, title: title, detail: playback.track.artist ?? "",
@@ -1982,6 +1997,41 @@ final class NotchService: ObservableObject {
         }
         presentedMusic = NotchCompactMusicSnapshot(playback: playback, artwork: artwork,
                                                   tint: tint, geometry: compactActivityGeometry)
+    }
+
+    private func handleMusicPlaybackState(hasPlayback: Bool, isPlaying: Bool) {
+        if isPlaying {
+            musicPauseHoldWork?.cancel()
+            musicPauseHoldWork = nil
+            if isMusicPausedHolding {
+                isMusicPausedHolding = false
+                objectWillChange.send()
+            }
+        } else if hasPlayback {
+            let timeout = NotchSupport.pauseTimeout()
+            if timeout > 0 {
+                isMusicPausedHolding = true
+                musicPauseHoldWork?.cancel()
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    self.isMusicPausedHolding = false
+                    self.musicPauseHoldWork = nil
+                    self.syncMenuSpaceMonitoring()
+                    self.objectWillChange.send()
+                    self.refreshPresentation()
+                }
+                musicPauseHoldWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: work)
+            } else {
+                musicPauseHoldWork?.cancel()
+                musicPauseHoldWork = nil
+                isMusicPausedHolding = false
+            }
+        } else {
+            musicPauseHoldWork?.cancel()
+            musicPauseHoldWork = nil
+            isMusicPausedHolding = false
+        }
     }
 
     func refreshPresentation(animated: Bool = true, transitionContent: NotchContentTransition = .none) {
@@ -2736,6 +2786,9 @@ final class NotchService: ObservableObject {
                                            pointerInside: windowHost?.containsHover(NSEvent.mouseLocation) == true) {
             collapse()
         }
+        if !expanded, NotchSupport.hidesMusicWhenPlayerActive() {
+            refreshPresentation(animated: false)
+        }
     }
 
     private func syncPanelKey() {
@@ -2982,7 +3035,8 @@ final class NotchService: ObservableObject {
                 .store(in: &subscriptions)
             music.$playback.map { ($0 != nil, $0?.isPlaying == true) }
                 .removeDuplicates { $0 == $1 }.receive(on: DispatchQueue.main)
-                .sink { [weak self] _ in
+                .sink { [weak self] hasPlayback, isPlaying in
+                    self?.handleMusicPlaybackState(hasPlayback: hasPlayback, isPlaying: isPlaying)
                     self?.syncMenuSpaceMonitoring()
                     self?.objectWillChange.send()
                     self?.refreshPresentation()
