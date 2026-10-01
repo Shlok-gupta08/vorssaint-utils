@@ -237,12 +237,13 @@ final class NotchService: ObservableObject {
     }
 
     var isPlayerActive: Bool {
-        let front = NSWorkspace.shared.frontmostApplication
+        guard NotchSupport.hidesMusicWhenPlayerActive() else { return false }
+        guard let front = NSWorkspace.shared.frontmostApplication else { return false }
         return NotchMusicSupport.isPlayerActive(
             playback: NotchMusicService.shared.playback,
             selectedPID: NotchMusicService.shared.selectedSourcePID,
-            frontPID: front?.processIdentifier,
-            frontBundle: front?.bundleIdentifier
+            frontPID: front.processIdentifier,
+            frontBundle: front.bundleIdentifier
         )
     }
 
@@ -848,6 +849,7 @@ final class NotchService: ObservableObject {
     private func tearDownPresentation() {
         musicPauseHoldWork?.cancel(); musicPauseHoldWork = nil
         isMusicPausedHolding = false
+        wasMusicPlaying = false
         screenRefreshWork?.cancel(); screenRefreshWork = nil
         captureControlsWork?.cancel(); captureControlsWork = nil
         musicDetailVisible = false
@@ -1999,7 +2001,12 @@ final class NotchService: ObservableObject {
                                                   tint: tint, geometry: compactActivityGeometry)
     }
 
+    private var wasMusicPlaying = false
+
     private func handleMusicPlaybackState(hasPlayback: Bool, isPlaying: Bool) {
+        let transitionedFromPlaying = wasMusicPlaying && !isPlaying
+        wasMusicPlaying = isPlaying
+
         if isPlaying {
             musicPauseHoldWork?.cancel()
             musicPauseHoldWork = nil
@@ -2007,7 +2014,13 @@ final class NotchService: ObservableObject {
                 isMusicPausedHolding = false
                 objectWillChange.send()
             }
-        } else if hasPlayback {
+        } else if hasPlayback && transitionedFromPlaying {
+            guard !session.locked, !session.sleeping, !session.displaysSleeping else {
+                musicPauseHoldWork?.cancel()
+                musicPauseHoldWork = nil
+                isMusicPausedHolding = false
+                return
+            }
             let timeout = NotchSupport.pauseTimeout()
             if timeout > 0 {
                 isMusicPausedHolding = true
@@ -2026,6 +2039,11 @@ final class NotchService: ObservableObject {
                 musicPauseHoldWork?.cancel()
                 musicPauseHoldWork = nil
                 isMusicPausedHolding = false
+            }
+        } else if !isPlaying && !transitionedFromPlaying {
+            if !isMusicPausedHolding {
+                musicPauseHoldWork?.cancel()
+                musicPauseHoldWork = nil
             }
         } else {
             musicPauseHoldWork?.cancel()
@@ -3034,7 +3052,21 @@ final class NotchService: ObservableObject {
                 .sink { [weak self] in self?.holdEndingTrack() }
                 .store(in: &subscriptions)
             music.$playback.map { ($0 != nil, $0?.isPlaying == true) }
-                .removeDuplicates { $0 == $1 }.receive(on: DispatchQueue.main)
+                .removeDuplicates { $0 == $1 }
+                // Guard the pause-hold flag synchronously on the @Published emission
+                // (always on the main thread) before receive(on:) queues async work.
+                // Without this, the view evaluates showsMusicActivity with
+                // isPlaying=false AND isMusicPausedHolding=false for one frame,
+                // causing the island to collapse and then snap back to the faded state.
+                .handleEvents(receiveOutput: { [weak self] hasPlayback, isPlaying in
+                    guard let self else { return }
+                    let timeout = NotchSupport.pauseTimeout()
+                    if !isPlaying && hasPlayback && self.wasMusicPlaying && timeout > 0
+                        && !self.session.locked && !self.session.sleeping && !self.session.displaysSleeping {
+                        self.isMusicPausedHolding = true
+                    }
+                })
+                .receive(on: DispatchQueue.main)
                 .sink { [weak self] hasPlayback, isPlaying in
                     self?.handleMusicPlaybackState(hasPlayback: hasPlayback, isPlaying: isPlaying)
                     self?.syncMenuSpaceMonitoring()

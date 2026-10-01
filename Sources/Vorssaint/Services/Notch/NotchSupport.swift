@@ -1418,7 +1418,7 @@ enum NotchSupport {
     }
 
     static func showsMusicActivity(isPlaying: Bool, isHoldingPause: Bool = false, in defaults: UserDefaults = .standard, isPlayerActive: Bool = false) -> Bool {
-        (isPlaying || isHoldingPause) && watchesMusicActivity(in: defaults) && !(isPlayerActive && hidesMusicWhenPlayerActive(in: defaults))
+        (isPlaying || isHoldingPause) && watchesMusicActivity(in: defaults) && !(hidesMusicWhenPlayerActive(in: defaults) && isPlayerActive)
     }
 
     static func showsInCaptures(in defaults: UserDefaults = .standard) -> Bool {
