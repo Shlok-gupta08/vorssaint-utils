@@ -247,6 +247,13 @@ final class NotchLockScreenPanel: NSPanel {
     // an inactive window does, flat and dull.
     @objc func _hasActiveAppearanceIgnoringKeyFocus() -> Bool { true }
     override func accessibilitySubrole() -> NSAccessibility.Subrole? { .unknown }
+
+    /// Borderless non-activating panels inside the menu bar / notch area are
+    /// otherwise constrained by AppKit to sit below the menu bar, which drops
+    /// the island down from the camera and leaves a gap beneath the bezel.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
 }
 
 private final class NotchLockScreenHostingView: NSHostingView<AnyView> {
