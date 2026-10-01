@@ -114,7 +114,13 @@ final class NotchLockScreenService {
             scene.append(Self.makePanel(frame: frame, content: NotchLockScreenActivities(model: model, size: frame.size)))
         }
         let island = frames.island.map { frame in
-            Self.makePanel(frame: frame, content: NotchLockScreenIsland(
+            // Extend the panel 8 pts above screen.maxY (islandTopBleed) so the
+            // black background covers the NSHostingView safe-area inset that
+            // would otherwise leave a gap between the capsule and the bezel.
+            let bleed = NotchLockScreenLayout.islandTopBleed
+            let panelFrame = CGRect(x: frame.minX, y: frame.minY,
+                                    width: frame.width, height: frame.height + bleed)
+            return Self.makePanel(frame: panelFrame, content: NotchLockScreenIsland(
                 model: model, size: frame.size, cameraWidth: NotchService.shared.geometry.bareCutout.width))
         }
         let panels = scene + [island].compactMap { $0 }
