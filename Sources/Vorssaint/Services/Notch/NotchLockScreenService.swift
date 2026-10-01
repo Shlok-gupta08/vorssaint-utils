@@ -97,6 +97,7 @@ final class NotchLockScreenService {
         // drawn open from its first frame.
         padlockWork?.cancel()
         model.padlockOpen = closingPadlock
+        model.islandRetracted = closingPadlock
         let gates = NotchLockScreenModel.Gates(
             music: NotchLockScreenSupport.showsMusic(), timer: NotchTimerSupport.isEnabled(),
             agents: NotchAgentSupport.showsLiveActivity(),
@@ -134,15 +135,24 @@ final class NotchLockScreenService {
         self.island = island
         shownFrames = frames
         if closingPadlock {
-            let work = DispatchWorkItem { [weak self] in self?.model.padlockOpen = false }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                    self?.model.islandRetracted = false
+                }
+            }
+            let work = DispatchWorkItem { [weak self] in
+                withAnimation(.smooth(duration: 0.25)) {
+                    self?.model.padlockOpen = false
+                }
+            }
             padlockWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.30, execute: work)
         }
         for panel in panels {
             panel.alphaValue = 0
             panel.orderFrontRegardless()
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.35
+                context.duration = 0.25
                 panel.animator().alphaValue = 1
             }
         }
@@ -194,22 +204,28 @@ final class NotchLockScreenService {
             space.close()
             return
         }
-        // The lock screen is gone about 0.3 s after the unlock is announced;
-        // the player leaves with it rather than lingering over the desktop.
-        // The padlock opens first, then the island underneath takes over.
+        // The lock screen is gone as the unlock is announced. The padlock opens
+        // smoothly, then the island smoothly retracts its wings into the camera notch.
         var remaining = scene.count + (island == nil ? 0 : 1)
         let finished = { remaining -= 1; if remaining == 0 { space.close() } }
         scene.forEach { Self.fadeOut($0, after: 0, completion: finished) }
         if let island {
-            model.padlockOpen = true
-            Self.fadeOut(island, after: 0.55, completion: finished)
+            withAnimation(.smooth(duration: 0.25)) {
+                model.padlockOpen = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                    self?.model.islandRetracted = true
+                }
+            }
+            Self.fadeOut(island, after: 0.40, completion: finished)
         }
     }
 
     private static func fadeOut(_ panel: NSPanel, after delay: TimeInterval, completion: @escaping () -> Void) {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.2
+                context.duration = 0.20
                 panel.animator().alphaValue = 0
             }, completionHandler: {
                 panel.orderOut(nil)

@@ -21,6 +21,7 @@ final class NotchLockScreenModel: ObservableObject {
     /// sleeping and waking, and cleared once it unlocks.
     @Published var playedWhileLocked = false
     @Published var padlockOpen = false
+    @Published var islandRetracted = false
 
     func showsMusic(_ playback: NotchPlayback?) -> Bool {
         gates.music && playback.map {
@@ -90,6 +91,7 @@ struct NotchLockScreenIsland: View {
         let shoulder = NotchLayout.shoulder(height: visibleHeight)
         let wing = max(0, (width - cameraWidth) / 2 - shoulder)
         let playing = model.showsMusic(music.playback) && music.playback?.isPlaying == true
+        let activeWidth = model.islandRetracted ? cameraWidth : width
 
         VStack(spacing: 0) {
             Color.clear.frame(height: bleed)
@@ -102,6 +104,9 @@ struct NotchLockScreenIsland: View {
                     .symbolEffect(.bounce, options: .speed(1.4), value: reduceMotion ? false : model.padlockOpen)
                     .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: model.padlockOpen)
                     .frame(width: wing, height: cameraHeight)
+                    .opacity(model.islandRetracted ? 0 : 1)
+                    .scaleEffect(model.islandRetracted ? 0.7 : 1.0)
+                    .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: model.islandRetracted)
                     .allowsHitTesting(false)
 
                 Spacer(minLength: 0)
@@ -109,20 +114,22 @@ struct NotchLockScreenIsland: View {
                 NotchEqualizerBars(isPlaying: playing, bars: 4, barWidth: 2.5,
                                    height: min(12, cameraHeight * 0.38),
                                    tint: music.artworkTint?.color ?? .white)
-                    .opacity(playing ? 1 : 0)
-                    .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: playing)
+                    .opacity(playing && !model.islandRetracted ? 1 : 0)
+                    .scaleEffect(model.islandRetracted ? 0.7 : 1.0)
+                    .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: model.islandRetracted)
                     .frame(width: wing, height: cameraHeight)
                     .allowsHitTesting(false)
             }
             .padding(.horizontal, shoulder)
             .frame(width: width, height: cameraHeight)
         }
-        .frame(width: width, height: visibleHeight + bleed, alignment: .top)
+        .frame(width: activeWidth, height: visibleHeight + bleed, alignment: .top)
         .background {
             NotchLockScreenIslandShape(radius: radius, bleed: bleed)
                 .fill(.black)
         }
         .clipShape(NotchLockScreenIslandShape(radius: radius, bleed: bleed))
+        .frame(width: width, height: visibleHeight + bleed, alignment: .top)
         .accessibilityHidden(true)
     }
 }
