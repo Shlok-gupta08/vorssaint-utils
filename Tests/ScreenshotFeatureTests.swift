@@ -9,6 +9,7 @@ import CoreGraphics
 import Darwin
 import Foundation
 import ImageIO
+import SwiftUI
 import VMStatisticsCompat
 
 enum ScreenshotFeatureTests {
@@ -1080,6 +1081,76 @@ enum ScreenshotFeatureTests {
                                                             selectionInProgress: false,
                                                             capturePending: false),
                "the capture chooser disappears for the whole drag and while capture is pending")
+        suite.expect(ScreenshotSupport.fullScreenCaptureControlIsAvailable(
+            selectedTool: nil,
+            standaloneScreenshot: true,
+            requiresDraggedRegion: false,
+            scrollingCaptureEnabled: false),
+               "standalone screenshot selection offers the full-screen action")
+        suite.expect(ScreenshotSupport.fullScreenCaptureControlIsAvailable(
+            selectedTool: .screenshot,
+            standaloneScreenshot: false,
+            requiresDraggedRegion: false,
+            scrollingCaptureEnabled: false)
+                && !ScreenshotSupport.fullScreenCaptureControlIsAvailable(
+                    selectedTool: .recording,
+                    standaloneScreenshot: false,
+                    requiresDraggedRegion: false,
+                    scrollingCaptureEnabled: false)
+                && !ScreenshotSupport.fullScreenCaptureControlIsAvailable(
+                    selectedTool: .text,
+                    standaloneScreenshot: false,
+                    requiresDraggedRegion: false,
+                    scrollingCaptureEnabled: false)
+                && !ScreenshotSupport.fullScreenCaptureControlIsAvailable(
+                    selectedTool: .color,
+                    standaloneScreenshot: false,
+                    requiresDraggedRegion: false,
+                    scrollingCaptureEnabled: false),
+               "the unified chooser offers full screen only for screenshots")
+        suite.expect(!ScreenshotSupport.fullScreenCaptureControlIsAvailable(
+            selectedTool: .screenshot,
+            standaloneScreenshot: false,
+            requiresDraggedRegion: true,
+            scrollingCaptureEnabled: false)
+                && !ScreenshotSupport.fullScreenCaptureControlIsAvailable(
+                    selectedTool: .screenshot,
+                    standaloneScreenshot: false,
+                    requiresDraggedRegion: false,
+                    scrollingCaptureEnabled: true),
+               "region-only and scrolling capture modes do not offer a conflicting full-screen action")
+        suite.expect(ScreenshotSupport.fullScreenCaptureControlIsVisible(
+            isAvailable: true,
+            pointerOnDisplay: true,
+            selectionInProgress: false,
+            capturePending: false)
+                && !ScreenshotSupport.fullScreenCaptureControlIsVisible(
+                    isAvailable: true,
+                    pointerOnDisplay: true,
+                    selectionInProgress: true,
+                    capturePending: false)
+                && !ScreenshotSupport.fullScreenCaptureControlIsVisible(
+                    isAvailable: true,
+                    pointerOnDisplay: true,
+                    selectionInProgress: false,
+                    capturePending: true)
+                && !ScreenshotSupport.fullScreenCaptureControlIsVisible(
+                    isAvailable: true,
+                    pointerOnDisplay: false,
+                    selectionInProgress: false,
+                    capturePending: false),
+               "the full-screen action stays on the pointer display and disappears as soon as selection or capture starts")
+        suite.expect(ScreenshotSupport.fullScreenCaptureControlTopInset(
+            screenChromeHeight: 32,
+            notchControlsHeight: nil) == 44
+                && ScreenshotSupport.fullScreenCaptureControlTopInset(
+                    screenChromeHeight: 32,
+                    notchControlsHeight: 168) == 180,
+               "the full-screen action sits below screen chrome and any active notch capture controls")
+        let fullScreenClickHost = PassThroughHostingView(interactiveRootView: Text("Full screen"))
+        suite.expect(!fullScreenClickHost.passesThrough
+                && fullScreenClickHost.acceptsFirstMouse(for: nil),
+               "the interactive full-screen host receives its first click while Dynamic Island owns key focus")
         suite.expect(ScreenshotSupport.offersRepeatLastRegion(isPickingColor: false,
                                                         storedRegionDisplayIsAvailable: true),
                "the repeat hint is offered once a region is stored on a display still in the session")
@@ -3007,6 +3078,7 @@ enum ScreenshotFeatureTests {
         // Muting every microphone, not just the one the Mac is set to: an app
         // pointed at a device of its own has to go silent too.
         suite.expect(MicMuteSupport.isOwnDevice(name: "Vorssaint Mixer")
+                && MicMuteSupport.isOwnDevice(name: "Vorssaint AirPlay")
                 && MicMuteSupport.isOwnDevice(name: "Vorssaint Island Levels")
                 && MicMuteSupport.isOwnDevice(name: "Vorssaint Recorder")
                 && !MicMuteSupport.isOwnDevice(name: "MacBook Air Microphone"),

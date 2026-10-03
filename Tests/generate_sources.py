@@ -367,7 +367,8 @@ def main():
           + "func readSnapshot(volume: Double?, muted: Bool?) { applyOutputControls(volume: volume, muted: muted) }\n"
           + "".join(declaration(mixer, prefix) for prefix in [
               "    func requestOutputAdjustment(", "    private func removeOutputControlListeners(",
-              "    func requestOutputStep(", "    private func settleQueuedOutputSteps(",
+              "    func requestOutputStep(", "    func requestOutputMuteToggle(",
+              "    private func enqueueOutputKey(", "    private func settleQueuedOutputSteps(",
               "    private func applyQueuedOutputSteps(",
               "    private func isCurrentOutputAdjustment(", "    private var hasCurrentOutputAdjustment:",
               "    private func applyOutputControls(", "    private func drainOutputAdjustment("])
@@ -456,6 +457,7 @@ def main():
           + declaration(playback_adapter, "    static func validatedTarget(")
           + declaration(playback_adapter, "    static func readInfo(")
           + declaration(playback_adapter, "    static func supportedCommands(")
+          + declaration(playback_adapter, "    static func readPlaybackState(")
           + declaration(playback_adapter, "    private static func currentPlayerPID(").replace("private static", "static", 1)
           + declaration(playback_adapter, "    static func send(")
           + declaration(playback_adapter, "    private static func makeTarget(").replace("private static", "static", 1)
@@ -712,6 +714,7 @@ def main():
               .replace("NotchSupport.modules()", "NotchSupport.modules(in: ReviewDefaults.current)")
           + declaration(notch, "    func open(_ module:")
               .replace("NotchSupport.isEnabled()", "NotchSupport.isEnabled(in: ReviewDefaults.current)")
+          + "func removeHoverExitMonitors() {}\n"
           + declaration(notch, "    func showScratchpad(")
               .replace("NotchSupport.routesScratchpad()", "NotchSupport.routesScratchpad(in: ReviewDefaults.current)")
           + declaration(notch, "    func toggleSections()")
@@ -795,6 +798,7 @@ def main():
                     + "@State var finishMinimum = NotchAgentSupport.defaultFinishMinimum\n"
                     + "@State var limitThreshold = NotchAgentSupport.defaultLimitThreshold\n"
                     + "@State var dailyBudget = 0.0\n"
+                    + "@State var limitFocus = NotchAgentLimitFocus.mostUsed.rawValue\n"
                     + "var text: NotchAgentStrings { FeatureStrings.notchAgents(language) }\n"
                     + "var locale: Locale { language.formattingLocale() }\n"
                     + "var body: some View {\nGroup {\n"
@@ -804,7 +808,8 @@ def main():
                         ("Readout", '                SettingsMenuRow(symbol: "camera.metering.center.weighted"', True),
                         ("FinishAfter", '                SettingsMenuRow(symbol: "timer"', True),
                         ("LimitAt", '                SettingsMenuRow(symbol: "gauge.with.dots.needle.67percent"', True),
-                        ("Budget", '            SettingsMenuRow(symbol: "dollarsign.circle"', False)])
+                        ("Budget", '            SettingsMenuRow(symbol: "dollarsign.circle"', False),
+                        ("LimitFocus", '            SettingsMenuRow(symbol: "rectangle.topthird.inset.filled"', False)])
           + "}\n")
     media_workspace = "Sources/Vorssaint/UI/Media/MediaWorkspaceView.swift"
     write("MediaWorkspaceLayout.swift", "import AppKit\nimport SwiftUI\nimport UniformTypeIdentifiers\n"
@@ -929,20 +934,40 @@ def main():
         "    private func loadLiveLoupeImages()",
         "    private func markCapturePending()",
         "    private func captureFullDisplayUnderMouse()",
+        "    fileprivate func captureFullScreenFromControl(",
+        "    private func captureFullDisplay(",
         "    private func repeatLastRegion()",
         "    fileprivate func confirmWindow(",
         "    fileprivate func confirmRegion(",
         "    fileprivate func confirmColor(",
     ]
-    write("ScreenshotSelectionRefresh.swift", "import Foundation\nimport AppKit\n"
+    write("ScreenshotSelectionRefresh.swift", "import Foundation\nimport AppKit\nimport SwiftUI\n"
           + "extension ScreenshotSelectionRefreshContract.Chooser {\n"
+          + declaration(selection, "    fileprivate func setSelectionInProgress(").replace("fileprivate func", "func", 1)
           + declaration(selection, "    fileprivate var acceptsCaptureInput:").replace("fileprivate var", "var", 1)
+          + declaration(selection, "    fileprivate var offersFullScreenCapture:").replace("fileprivate var", "var", 1)
+          + declaration(selection, "    fileprivate var acceptsWindowClick:").replace("fileprivate var", "var", 1)
+          + declaration(selection, "    func placeFullScreenControlBelowNotch(")
           + declaration(selection, "    private var repeatTargetPanel:").replace("private var", "var", 1)
           + declaration(selection, "    fileprivate var offersRepeatLastRegion:").replace("fileprivate var", "var", 1)
           + "".join(declaration(selection, prefix).replace("fileprivate func", "func", 1)
                     .replace("private func", "func", 1).replace("UserDefaults.standard", "ReviewDefaults.current")
                     for prefix in refresh_methods)
-          + "}\n")
+          + "}\nextension ScreenshotSelectionRefreshContract.View {\n"
+          + declaration(selection, "    func captureToolDidChange()")
+          + declaration(selection, "    func setNotchCaptureControlsHeight(")
+          + declaration(selection, "    func refreshFullScreenControlVisibility()")
+          + declaration(selection, "    private func pointerIsOverFullScreenControl(").replace("private func", "func", 1)
+          + declaration(selection, "    private func updatePointerHover(").replace("private func", "func", 1)
+          + declaration(selection, "    private func fullScreenControlHoverChanged(").replace("private func", "func", 1)
+          + declaration(selection, "    private func resetFullScreenControlHover(").replace("private func", "func", 1)
+          + declaration(selection, "    private func applyDeferredNotchCaptureControlsHeight(").replace("private func", "func", 1)
+          + "}\nextension ScreenshotSelectionRefreshContract.SurfaceService {\n"
+          + declaration("Sources/Vorssaint/Services/QuickTools/ScreenCaptureService.swift",
+                        "    private func connectCaptureControlsSurface(").replace("private func", "func", 1)
+          + "}\n"
+          + declaration(selection, "private final class PassThroughHostingView<")
+              .replace("private final class", "final class", 1))
     write("NotchCaptureKeyboard.swift", "import Foundation\nimport Carbon.HIToolbox\n\nextension NotchCaptureKeyboardContract {\n"
           + "final class NotchService {\nstatic var shared = NotchService()\n"
           + "var presentationWindow: NSPanel? = NSPanel()\nvar acceptsSystemFeedback = true\n"
@@ -1051,6 +1076,16 @@ def main():
           + "var commands: [NotchPlaybackCommand] = []\n"
           + "func send(_ command: NotchPlaybackCommand) -> Bool { commands.append(command); return sendAllowed && command.message != nil }\n"
           + declaration(music, "    func playQueued(")
+          + "}\n}\n")
+    write("NotchQueueHold.swift", "import Foundation\n\nextension NotchQueueHoldContract {\n"
+          + "final class Service {\nvar queueEnabled = true\nvar queueRequest: UUID?\nvar queueReply: [String: Any]?\n"
+          + "var playback: NotchPlayback?\nvar queueCovers = NotchQueueCovers<Data>()\nvar upcomingArtwork: [String: Data] = [:]\n"
+          + declaration(music, "    @Published private(set) var upcoming:")
+            .replace("@Published private(set) ", "", 1).replace("NSImage.init(data:)", "{ $0 }", 1)
+          + declaration(music, "    var upcomingIsHeld:")
+          + declaration(music, "    var upcomingRows:")
+          + declaration(music, "    private func updateQueue()").replace("private func", "func", 1)
+            .replace("NotchQueueSupport.isEnabled()", "queueEnabled", 1)
           + "}\n}\n")
     write("NotchMusicAutomationBodies.swift", "import Foundation\n\nextension NotchMusicAutomationFlowContract {\n"
           + "final class Service {\ntypealias Command = NotchPlaybackCommand\nvar playback: NotchPlayback?\n"
@@ -1285,6 +1320,18 @@ def main():
           + "extension ScrollingTitleMotionTests {\nfinal class Host: Fixture {\n"
           + declaration("Sources/Vorssaint/UI/Switcher/ScrollingTitle.swift",
                         "    private var shouldScroll:").replace("private var", "var", 1)
+          + "}\n}\n")
+
+    write("AgentUsageArchiveSave.swift", "import Foundation\n"
+          + "extension AgentUsageArchiveSaveTests {\nfinal class Host: Fixture {\n"
+          + declaration("Sources/Vorssaint/Services/AgentUsage/AgentUsageService.swift",
+                        "    private func saveProgress(").replace("private func", "func", 1)
+          + "}\n}\n")
+
+    write("AgentUsageArchiveSettle.swift", "import Foundation\n"
+          + "extension AgentUsageArchiveSettleTests {\nfinal class Host: Fixture {\n"
+          + declaration("Sources/Vorssaint/Services/AgentUsage/AgentUsageService.swift",
+                        "    private func settleArchive(").replace("private func", "func", 1)
           + "}\n}\n")
 
     write("AgentUsageRead.swift", "import Foundation\n"
