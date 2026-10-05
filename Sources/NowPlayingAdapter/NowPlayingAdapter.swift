@@ -33,6 +33,8 @@ let maximumArtworkBytes = 12 * 1_024 * 1_024
 // Only the watch process enables this cache. Its reads run serially.
 private var watching = false
 private var previousArtwork: Data?
+/// Watch only: where the last reply put its recording, by the sample it read.
+private var lastPosition: (revision: UUID, sample: Double, timestamp: Date?, elapsed: Double, rate: Double, at: Date)?
 /// Set by the watch process: schedules another read at a system uptime.
 private var readAt: ((TimeInterval) -> Void)?
 
@@ -57,16 +59,33 @@ func encodedReply(_ reply: [String: Any]) -> Data {
 
 /// Where a song sampled `age` seconds ago is now, and the rate the island
 /// moves it at. A player can update its rate a step late or never, so its own
-/// playing state, when known, wins: a paused song stays where it was sampled,
-/// and a playing one without a rate moves at normal speed from now.
-func playbackPosition(elapsed: Double, age: TimeInterval, rate: Double,
-                      isPlaying: Bool?) -> (elapsed: Double, rate: Double) {
+/// playing state, when known, wins over a rate that contradicts it. The song
+/// then stays at the sample, or goes on from `continuing`, where the last
+/// reply had it while the player kept the same sample.
+func playbackPosition(elapsed: Double, age: TimeInterval, rate: Double, isPlaying: Bool?,
+                      continuing: Double? = nil) -> (elapsed: Double, rate: Double) {
     let rate = max(0, rate)
-    switch isPlaying {
-    case false?: return (elapsed, 0)
-    case true? where rate == 0: return (elapsed, 1)
-    default: return (elapsed + age * rate, rate)
+    guard let isPlaying, isPlaying != (rate > 0) else { return (elapsed + age * rate, rate) }
+    return (continuing ?? elapsed, isPlaying ? 1 : 0)
+}
+
+/// Writes where `sample` puts the song into the reply. Any player's change
+/// reads the followed one again, and a sample it has not replaced must not
+/// send its song back to where that sample was taken.
+func settlePosition(_ reply: inout [String: Any], sample: (elapsed: Double, timestamp: Date?),
+                    revision: UUID?, now: Date = Date()) {
+    let isPlaying = reply["isPlaying"] as? Bool
+    let continuing = lastPosition.flatMap { last -> Double? in
+        guard last.revision == revision, last.sample == sample.elapsed, last.timestamp == sample.timestamp else { return nil }
+        return last.elapsed + max(0, now.timeIntervalSince(last.at)) * last.rate
     }
+    let settled = playbackPosition(elapsed: sample.elapsed,
+                                   age: sample.timestamp.map { max(0, now.timeIntervalSince($0)) } ?? 0,
+                                   rate: reply["kMRMediaRemoteNowPlayingInfoPlaybackRate"] as? Double ?? 0,
+                                   isPlaying: isPlaying, continuing: continuing)
+    reply["kMRMediaRemoteNowPlayingInfoElapsedTime"] = settled.elapsed
+    if isPlaying != nil { reply["kMRMediaRemoteNowPlayingInfoPlaybackRate"] = settled.rate }
+    lastPosition = revision.map { ($0, sample.elapsed, sample.timestamp, settled.elapsed, settled.rate, now) }
 }
 
 func emit(_ reply: [String: Any]) {
@@ -223,21 +242,15 @@ public func vorssaintNowPlayingGet() {
     var snapshot = reply
     let position = sample
     lock.unlock()
-    if let position {
-        let isPlaying = snapshot["isPlaying"] as? Bool
-        let settled = playbackPosition(elapsed: position.elapsed,
-                                       age: position.timestamp.map { max(0, Date().timeIntervalSince($0)) } ?? 0,
-                                       rate: snapshot["kMRMediaRemoteNowPlayingInfoPlaybackRate"] as? Double ?? 0,
-                                       isPlaying: isPlaying)
-        snapshot["kMRMediaRemoteNowPlayingInfoElapsedTime"] = settled.elapsed
-        if isPlaying != nil { snapshot["kMRMediaRemoteNowPlayingInfoPlaybackRate"] = settled.rate }
-    }
+    var revision: UUID?
     if watching, let context = NotchNativePlayback.publish(selected, info: snapshot) {
+        revision = context.revision
         snapshot["playbackRevision"] = context.revision.uuidString
         snapshot["canSendCommandsDirectly"] = NotchNativePlayback.target.map {
             $0.allowsDirectCommands && ($0.itemIdentifier != nil || $0.requiresCurrentPlayer)
         } == true
     }
+    if let position { settlePosition(&snapshot, sample: position, revision: revision) } else { lastPosition = nil }
     // Cover a callback that completed after the snapshot copy but before publish.
     if watching, let selected {
         lock.lock()

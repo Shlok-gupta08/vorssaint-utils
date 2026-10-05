@@ -47,6 +47,7 @@ enum NotchPlaybackRoutingContract {
     static var sendResponses: [NSNumber]? = [0]
     static var playbackState: UInt32 = 0
     static var sourceStates: [Int32: UInt32] = [:]
+    static var lastPosition: (revision: UUID, sample: Double, timestamp: Date?, elapsed: Double, rate: Double, at: Date)?
     static let lock = NSLock()
     static var selected: Target?
     static var identity: Identity?
@@ -351,6 +352,30 @@ enum NotchPlaybackRoutingTests {
                      "a playing song without a rate moves from where it was sampled, not from its old timestamp")
         let unknown = Adapter.playbackPosition(elapsed: 57, age: 3, rate: 1, isPlaying: nil)
         suite.expect(unknown.elapsed == 60 && unknown.rate == 1, "without a state the reported rate moves the song")
+
+        let song = UUID(), start = Date(timeIntervalSince1970: 1_000)
+        func settle(_ elapsed: Double, sampled: TimeInterval, rate: Double, playing: Bool,
+                    at now: TimeInterval, revision: UUID? = nil) -> Double? {
+            var reply: [String: Any] = ["kMRMediaRemoteNowPlayingInfoPlaybackRate": rate, "isPlaying": playing]
+            Adapter.settlePosition(&reply, sample: (elapsed, start.addingTimeInterval(sampled)),
+                                   revision: revision ?? song, now: start.addingTimeInterval(now))
+            return reply["kMRMediaRemoteNowPlayingInfoElapsedTime"] as? Double
+        }
+        defer { Adapter.lastPosition = nil }
+        Adapter.lastPosition = nil
+        _ = settle(57, sampled: 0, rate: 0, playing: true, at: 0)
+        suite.expect(settle(57, sampled: 0, rate: 0, playing: true, at: 30) == 87,
+                     "a refresh that finds the same sample keeps a playing song moving instead of sending it back")
+        suite.expect(settle(20, sampled: 31, rate: 0, playing: true, at: 31) == 20,
+                     "a new sample from the player, such as a seek, places the song again")
+        suite.expect(settle(20, sampled: 31, rate: 0, playing: true, at: 41, revision: UUID()) == 20,
+                     "another recording never continues from this one")
+        Adapter.lastPosition = nil
+        _ = settle(100, sampled: 0, rate: 1, playing: true, at: 0)
+        suite.expect(settle(100, sampled: 0, rate: 1, playing: false, at: 10) == 110,
+                     "a pause that leaves the sample and its rate in place stops where the island had the song")
+        suite.expect(settle(100, sampled: 0, rate: 1, playing: false, at: 40) == 110,
+                     "and the song stays there on later refreshes")
     }
 
     /// JSONSerialization raises an exception `try?` cannot catch on NaN or
