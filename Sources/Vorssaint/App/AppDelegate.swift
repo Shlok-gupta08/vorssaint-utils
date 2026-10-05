@@ -144,6 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             KeepAwakeManager.shared.activateOnLaunchIfNeeded()
         }
         FanControlService.recoverIfNeeded()
+        SpacesOrderHold.recoverIfNeeded()
         // One binding per feature: only available features are touched, so a
         // feature switched off in the hub never even instantiates here.
         FeatureRuntime.shared.syncAtLaunch()
@@ -1115,6 +1116,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // fires on every activation, so rebuilding here would cause churn/flicker.)
         UpdateService.shared.checkIfStale()
         restoreAfterAppUpdateHandoff()
+        if settingsWindow?.isVisible == true {
+            NotificationCenter.default.post(name: LaunchAtLoginSupport.settingsRefreshRequested, object: nil)
+        }
     }
 
     /// Some updates finish in another app. With no Dock icon there is no way
@@ -1658,6 +1662,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // that page's own onAppear, since its view was never removed from
         // the hierarchy; the window itself is the only reliable signal here.
         SecureInputMonitor.shared.setSettingsWindowOpen(true)
+        NotificationCenter.default.post(name: LaunchAtLoginSupport.settingsRefreshRequested, object: nil)
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.settingsWindow else { return }
             self.positionSettingsWindow(window, force: false, on: targetScreen)
@@ -2359,6 +2364,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // A clean install that just saw everything in onboarding should not
         // then get the update tour; only people who updated get it.
         markUpdateHighlightsSeen()
+        // Setup just picked the installed features; a beta adds the companion
+        // for a Command Bar user now.
+        Defaults.installCompanionForBetaCommandBar(in: .standard)
     }
 
     private func markSupportUpdateIntroSeenIfCurrentUpdate() {
