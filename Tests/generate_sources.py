@@ -518,6 +518,7 @@ def main():
           + declaration(playback_adapter, "    private static func makeTarget(").replace("private static", "static", 1)
           + declaration(adapter_entry, "private func sendPlaybackCommand(").replace("private func", "static func", 1)
           + declaration(adapter_entry, "func encodedReply(").replace("func encodedReply", "static func encodedReply", 1)
+          + declaration(adapter_entry, "func playbackPosition(").replace("func playbackPosition", "static func playbackPosition", 1)
           + "}\n")
     usage = "Sources/Vorssaint/Services/SystemMonitor/ProcessUsageService.swift"
     write("ProcessForceQuit.swift", "import Darwin\nimport Foundation\n"

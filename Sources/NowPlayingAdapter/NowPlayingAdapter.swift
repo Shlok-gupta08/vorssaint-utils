@@ -55,6 +55,20 @@ func encodedReply(_ reply: [String: Any]) -> Data {
     return data
 }
 
+/// Where a song sampled `age` seconds ago is now, and the rate the island
+/// moves it at. A player can update its rate a step late or never, so its own
+/// playing state, when known, wins: a paused song stays where it was sampled,
+/// and a playing one without a rate moves at normal speed from now.
+func playbackPosition(elapsed: Double, age: TimeInterval, rate: Double,
+                      isPlaying: Bool?) -> (elapsed: Double, rate: Double) {
+    let rate = max(0, rate)
+    switch isPlaying {
+    case false?: return (elapsed, 0)
+    case true? where rate == 0: return (elapsed, 1)
+    default: return (elapsed + age * rate, rate)
+    }
+}
+
 func emit(_ reply: [String: Any]) {
     let data = encodedReply(reply)
     emissionLock.lock()
@@ -86,6 +100,7 @@ public func vorssaintNowPlayingGet() {
     let group = DispatchGroup()
     let lock = NSLock()
     var reply: [String: Any] = [:]
+    var sample: (elapsed: Double, timestamp: Date?)?
     func set(_ key: String, _ value: Any?) {
         guard let value else { return }
         lock.lock()
@@ -105,9 +120,9 @@ public func vorssaintNowPlayingGet() {
         set("kMRMediaRemoteNowPlayingInfoDuration",
             (info["kMRMediaRemoteNowPlayingInfoDuration"] as? NSNumber)?.doubleValue)
         if let elapsed = (info["kMRMediaRemoteNowPlayingInfoElapsedTime"] as? NSNumber)?.doubleValue {
-            set("rawElapsedTime", elapsed)
-            set("elapsedTimestamp", info["kMRMediaRemoteNowPlayingInfoTimestamp"] as? Date)
-            set("rawPlaybackRate", (info["kMRMediaRemoteNowPlayingInfoPlaybackRate"] as? NSNumber)?.doubleValue ?? 0)
+            lock.lock()
+            sample = (elapsed, info["kMRMediaRemoteNowPlayingInfoTimestamp"] as? Date)
+            lock.unlock()
         }
         set("kMRMediaRemoteNowPlayingInfoPlaybackRate",
             (info["kMRMediaRemoteNowPlayingInfoPlaybackRate"] as? NSNumber)?.doubleValue)
@@ -120,50 +135,42 @@ public func vorssaintNowPlayingGet() {
         if watching { previousArtwork = artwork }
         group.leave()
     }
+    // The followed player's own state, which the system's Now Playing shows.
+    // Some players update their rate a step late or never, so the rate alone
+    // can read a paused song as playing. A missing answer only falls back to
+    // the rate, so it gets its own short wait.
+    let state = DispatchGroup()
     if let selected {
         NotchNativePlayback.readInfo(selected, artwork: true, queue: queue, completion: receiveInfo)
         set("pid", selected.pid)
         set("displayID", selected.applicationBundleIdentifier ?? selected.bundleIdentifier)
+        state.enter()
+        NotchNativePlayback.readPlaybackState(selected, queue: queue) { isPlaying in
+            set("isPlaying", isPlaying)
+            state.leave()
+        }
+    } else { getInfo(queue, receiveInfo) }
+    if selected == nil, let getPID = function(handle, "MRMediaRemoteGetNowPlayingApplicationPID", as: PIDFunction.self) {
         group.enter()
-        NotchNativePlayback.readPlaybackState(selected, queue: queue) { state in
-            if state == 1 {
-                set("isPlaying", true)
-            } else if state == 2 || state == 3 || state == 4 {
-                set("isPlaying", false)
-            } else if let getIsPlaying = function(handle, "MRMediaRemoteGetNowPlayingApplicationIsPlaying",
-                                                   as: IsPlayingFunction.self) {
-                getIsPlaying(queue) { isPlaying in
-                    if selected.pid == (reply["pid"] as? Int32) {
-                        set("isPlaying", isPlaying)
-                    }
-                }
-            }
+        getPID(queue) { pid in
+            set("pid", pid)
             group.leave()
         }
-    } else {
-        getInfo(queue, receiveInfo)
-        if let getPID = function(handle, "MRMediaRemoteGetNowPlayingApplicationPID", as: PIDFunction.self) {
-            group.enter()
-            getPID(queue) { pid in
-                set("pid", pid)
-                group.leave()
-            }
+    }
+    if selected == nil, let getDisplayID = function(handle, "MRMediaRemoteGetNowPlayingApplicationDisplayID",
+                                   as: DisplayIDFunction.self) {
+        group.enter()
+        getDisplayID(queue) { identifier in
+            set("displayID", identifier as String?)
+            group.leave()
         }
-        if let getDisplayID = function(handle, "MRMediaRemoteGetNowPlayingApplicationDisplayID",
-                                       as: DisplayIDFunction.self) {
-            group.enter()
-            getDisplayID(queue) { identifier in
-                set("displayID", identifier as String?)
-                group.leave()
-            }
-        }
-        if let getIsPlaying = function(handle, "MRMediaRemoteGetNowPlayingApplicationIsPlaying",
-                                       as: IsPlayingFunction.self) {
-            group.enter()
-            getIsPlaying(queue) { isPlaying in
-                set("isPlaying", isPlaying)
-                group.leave()
-            }
+    }
+    if selected == nil, let getIsPlaying = function(handle, "MRMediaRemoteGetNowPlayingApplicationIsPlaying",
+                                   as: IsPlayingFunction.self) {
+        group.enter()
+        getIsPlaying(queue) { isPlaying in
+            set("isPlaying", isPlaying)
+            group.leave()
         }
     }
     // Only expose seeking when the current player advertises that command.
@@ -211,29 +218,19 @@ public func vorssaintNowPlayingGet() {
         }
     } else { group.wait() }
     if watching { _ = capabilities.wait(timeout: .now() + 0.2) }
+    _ = state.wait(timeout: .now() + 0.2)
     lock.lock()
     var snapshot = reply
+    let position = sample
     lock.unlock()
-    if let rawElapsed = snapshot["rawElapsedTime"] as? Double {
+    if let position {
         let isPlaying = snapshot["isPlaying"] as? Bool
-        let timestamp = snapshot["elapsedTimestamp"] as? Date
-        let rawRate = snapshot["rawPlaybackRate"] as? Double ?? 0
-        let effectiveRate: Double
-        if isPlaying == false {
-            effectiveRate = 0
-        } else if isPlaying == true {
-            effectiveRate = rawRate > 0 ? rawRate : 1.0
-        } else {
-            effectiveRate = max(0, rawRate)
-        }
-        let age = timestamp.map { max(0, Date().timeIntervalSince($0)) } ?? 0
-        snapshot["kMRMediaRemoteNowPlayingInfoElapsedTime"] = rawElapsed + age * effectiveRate
-        if isPlaying != nil {
-            snapshot["kMRMediaRemoteNowPlayingInfoPlaybackRate"] = effectiveRate
-        }
-        snapshot.removeValue(forKey: "rawElapsedTime")
-        snapshot.removeValue(forKey: "elapsedTimestamp")
-        snapshot.removeValue(forKey: "rawPlaybackRate")
+        let settled = playbackPosition(elapsed: position.elapsed,
+                                       age: position.timestamp.map { max(0, Date().timeIntervalSince($0)) } ?? 0,
+                                       rate: snapshot["kMRMediaRemoteNowPlayingInfoPlaybackRate"] as? Double ?? 0,
+                                       isPlaying: isPlaying)
+        snapshot["kMRMediaRemoteNowPlayingInfoElapsedTime"] = settled.elapsed
+        if isPlaying != nil { snapshot["kMRMediaRemoteNowPlayingInfoPlaybackRate"] = settled.rate }
     }
     if watching, let context = NotchNativePlayback.publish(selected, info: snapshot) {
         snapshot["playbackRevision"] = context.revision.uuidString
@@ -278,7 +275,11 @@ public func vorssaintNowPlayingWatch() {
                  "kMRMediaRemoteNowPlayingApplicationIsPlayingDidChangeNotification",
                  "kMRMediaRemotePlayerNowPlayingInfoDidChangeNotification",
                  "kMRMediaRemoteNowPlayingPlayerStateDidChange",
-                 "kMRMediaRemoteNowPlayingApplicationClientStateDidChange"]
+                 "kMRMediaRemoteNowPlayingApplicationClientStateDidChange",
+                 // Play and pause of any player, not only the system's current one.
+                 "kMRMediaRemotePlayerIsPlayingDidChangeNotification"]
+        // Its name differs from the symbol's (a leading underscore on 27.2).
+        + [NotchNativePlayback.stringConstant("kMRMediaRemotePlayerPlaybackStateDidChangeNotification")].compactMap { $0 }
     func refresh() {
         pending?.cancel()
         let work = DispatchWorkItem { vorssaintNowPlayingGet() }
