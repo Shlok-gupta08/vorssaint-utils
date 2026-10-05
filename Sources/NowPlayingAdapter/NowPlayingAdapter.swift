@@ -60,13 +60,14 @@ func encodedReply(_ reply: [String: Any]) -> Data {
 /// Where a song sampled `age` seconds ago is now, and the rate the island
 /// moves it at. A player can update its rate a step late or never, so its own
 /// playing state, when known, wins over a rate that contradicts it. The song
-/// then stays at the sample, or goes on from `continuing`, where the last
-/// reply had it while the player kept the same sample.
+/// then holds still at the sample, or at `continuing`, where the last reply
+/// had it while the player kept the same sample. A playing song without a
+/// rate may be buffering, so it moves only once the player reports one.
 func playbackPosition(elapsed: Double, age: TimeInterval, rate: Double, isPlaying: Bool?,
                       continuing: Double? = nil) -> (elapsed: Double, rate: Double) {
     let rate = max(0, rate)
     guard let isPlaying, isPlaying != (rate > 0) else { return (elapsed + age * rate, rate) }
-    return (continuing ?? elapsed, isPlaying ? 1 : 0)
+    return (continuing ?? elapsed, 0)
 }
 
 /// Writes where `sample` puts the song into the reply. Any player's change

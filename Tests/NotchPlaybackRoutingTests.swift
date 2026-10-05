@@ -348,8 +348,8 @@ enum NotchPlaybackRoutingTests {
         suite.expect(stopped.elapsed == 57 && stopped.rate == 0,
                      "a paused song stays where it was sampled although its rate still says playing")
         let started = Adapter.playbackPosition(elapsed: 57, age: 120, rate: 0, isPlaying: true)
-        suite.expect(started.elapsed == 57 && started.rate == 1,
-                     "a playing song without a rate moves from where it was sampled, not from its old timestamp")
+        suite.expect(started.elapsed == 57 && started.rate == 0,
+                     "a playing song without a rate, such as a buffering one, stays at its sample and never counts from its old timestamp")
         let unknown = Adapter.playbackPosition(elapsed: 57, age: 3, rate: 1, isPlaying: nil)
         suite.expect(unknown.elapsed == 60 && unknown.rate == 1, "without a state the reported rate moves the song")
 
@@ -364,8 +364,8 @@ enum NotchPlaybackRoutingTests {
         defer { Adapter.lastPosition = nil }
         Adapter.lastPosition = nil
         _ = settle(57, sampled: 0, rate: 0, playing: true, at: 0)
-        suite.expect(settle(57, sampled: 0, rate: 0, playing: true, at: 30) == 87,
-                     "a refresh that finds the same sample keeps a playing song moving instead of sending it back")
+        suite.expect(settle(57, sampled: 0, rate: 0, playing: true, at: 30) == 57,
+                     "a refresh that finds the same sample leaves a stalled song where it was")
         suite.expect(settle(20, sampled: 31, rate: 0, playing: true, at: 31) == 20,
                      "a new sample from the player, such as a seek, places the song again")
         suite.expect(settle(20, sampled: 31, rate: 0, playing: true, at: 41, revision: UUID()) == 20,
