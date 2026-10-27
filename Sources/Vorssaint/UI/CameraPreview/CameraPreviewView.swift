@@ -73,23 +73,32 @@ struct CameraPreviewView: View {
             && (hovering || showsCameraMenu) && service.devices.count > 1
     }
 
+    private var showsCenterStage: Bool {
+        service.state == .running && service.session != nil
+            && (hovering || showsCameraMenu) && service.isCenterStageSupported
+    }
+
     @ViewBuilder
     private var controls: some View {
-        if showsMenu || onStop != nil {
+        if showsMenu || showsCenterStage || onStop != nil {
             // A camera name too long to share the row leaves the picker its
             // icon, so neither control is cut off at the image's edges.
             ViewThatFits(in: .horizontal) {
-                controlRow(showsCameraName: true)
-                controlRow(showsCameraName: false)
+                controlRow(showsCameraName: true, showsCenterStageTitle: true)
+                controlRow(showsCameraName: false, showsCenterStageTitle: true)
+                controlRow(showsCameraName: false, showsCenterStageTitle: false)
             }
             .padding([.horizontal, .bottom], 10)
         }
     }
 
-    private func controlRow(showsCameraName: Bool) -> some View {
+    private func controlRow(showsCameraName: Bool, showsCenterStageTitle: Bool) -> some View {
         HStack(spacing: 6) {
             if showsMenu {
                 cameraMenu(showsName: showsCameraName).transition(.opacity)
+            }
+            if showsCenterStage {
+                centerStageButton(showsTitle: showsCenterStageTitle).transition(.opacity)
             }
             if let onStop {
                 Button(action: onStop) {
@@ -108,6 +117,41 @@ struct CameraPreviewView: View {
                 .fixedSize()
             }
         }
+    }
+
+    private func centerStageButton(showsTitle: Bool) -> some View {
+        Button(action: service.toggleCenterStage) {
+            HStack(spacing: 5) {
+                Image(systemName: "person.fill.viewfinder")
+                    .font(.system(size: 10, weight: .semibold))
+                if showsTitle {
+                    Text(strings.centerStageLabel)
+                        .font(.caption)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                service.isCenterStageEnabled
+                    ? Color.accentColor.opacity(0.75)
+                    : Color.black.opacity(0.55),
+                in: Capsule()
+            )
+            .overlay(
+                Capsule().strokeBorder(
+                    service.isCenterStageEnabled
+                        ? Color.white.opacity(0.35)
+                        : Color.white.opacity(0.14),
+                    lineWidth: 1
+                )
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(NotchButtonStyle(cornerRadius: 12, lifts: false))
+        .foregroundStyle(.white)
+        .fixedSize()
+        .accessibilityLabel(strings.centerStageLabel)
     }
 
     private func cameraMenu(showsName: Bool) -> some View {

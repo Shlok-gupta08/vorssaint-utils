@@ -174,6 +174,7 @@ struct NotchPagePreview: View {
         case .mixer: NotchMixerView(size: size)
         case .music: NotchMusicView(size: size, extrasHeight: notch.geometry.musicExtrasHeight)
         case .clipboard: NotchClipboardView(service: notch, size: size)
+        case .dictation: DictationHistoryView(compact: true)
         case .captures: RecentCapturesView(onClose: nil, notchSize: size)
         case .files: NotchFilesView(service: notch)
         case .system: NotchSystemView(size: size) { _ in }
@@ -371,6 +372,7 @@ extension NotchModule {
         case .mixer: return .purple
         case .music: return .pink
         case .clipboard: return .brown
+        case .dictation: return .mint
         case .captures: return .indigo
         case .files: return .cyan
         case .system: return .green

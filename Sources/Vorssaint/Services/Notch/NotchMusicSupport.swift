@@ -229,4 +229,18 @@ enum NotchMusicSupport {
         let bundle = playback?.track.appBundleIdentifier
         return isPlayerActive(pid: pid, bundle: bundle, frontPID: frontPID, frontBundle: frontBundle)
     }
+
+    static func isSamePlayer(pid: Int32?, bundle: String?, lastPID: Int32?, lastBundle: String?) -> Bool {
+        if let pid, let lastPID {
+            return pid == lastPID
+        }
+        if let bundle, let lastBundle {
+            return bundle == lastBundle
+        }
+        return false
+    }
+
+    static func shouldHoldPause(isPlaying: Bool, wasPlaying: Bool, isSamePlayer: Bool, hasPlayback: Bool) -> Bool {
+        !isPlaying && wasPlaying && isSamePlayer && hasPlayback
+    }
 }

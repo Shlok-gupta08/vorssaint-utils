@@ -48,6 +48,8 @@ enum NotchMusicVisibilityTests {
     enum NSEvent { static let mouseLocation = CGPoint.zero }
 
     class State {
+        var dictationPhase = DictationPhase.idle
+        var showsDictation: Bool { dictationPhase.presentsIsland }
         var activitySelection = NotchActivitySelection()
         var timerCompanions: [NotchCompactActivity] = []
         func compactCompanions(of primary: NotchCompactActivity) -> [NotchCompactActivity] {
@@ -143,6 +145,19 @@ enum NotchMusicVisibilityTests {
         defaults.set(true, forKey: DefaultsKey.notchEnabled)
         defaults.set(false, forKey: DefaultsKey.notchTrackChange)
         let service = Service()
+        let dictation = Service()
+        dictation.hiddenInFullscreen = true
+        dictation.dictationPhase = .recording
+        suite.expect(!dictation.fullscreenCompact && dictation.surfaceSize.width >= 380
+                     && dictation.surfaceSize.height >= 118,
+                     "an explicit recording keeps a usable island in full screen")
+        let recordingSize = dictation.surfaceSize
+        dictation.dictationPhase = .failed
+        suite.expect(dictation.surfaceSize.height > recordingSize.height,
+                     "dictation errors reserve room for an explanation and recovery controls")
+        dictation.dictationPhase = .idle
+        suite.expect(dictation.fullscreenCompact,
+                     "ending dictation restores the user's compact full-screen presentation")
         let reader = NotchMusicService.shared
         service.modules = NotchSupport.modules(in: defaults)
 
@@ -384,5 +399,32 @@ enum NotchMusicVisibilityTests {
                      "player active detects matching process identifier")
         suite.expect(!NotchMusicSupport.isPlayerActive(pid: 100, bundle: "com.example.player", frontPID: 200, frontBundle: "com.example.browser"),
                      "player active returns false when another application is in foreground")
+
+        suite.expect(NotchSupport.showsMusicActivity(isPlaying: false, isHoldingPause: true, in: defaults),
+                     "paused music remains visible during active pause hold")
+        suite.expect(!NotchSupport.showsMusicActivity(isPlaying: false, isHoldingPause: false, in: defaults),
+                     "paused music is not visible without pause hold")
+
+        suite.expect(NotchMusicSupport.isSamePlayer(pid: 100, bundle: "com.google.Chrome", lastPID: 100, lastBundle: "com.google.Chrome"),
+                     "same player matches when PID is identical")
+        suite.expect(!NotchMusicSupport.isSamePlayer(pid: 200, bundle: "com.spotify.client", lastPID: 100, lastBundle: "com.google.Chrome"),
+                     "different player does not match when PID changes from YouTube to Spotify")
+        suite.expect(NotchMusicSupport.isSamePlayer(pid: nil, bundle: "com.apple.Music", lastPID: nil, lastBundle: "com.apple.Music"),
+                     "player matches by bundle identifier when PID is absent")
+        suite.expect(!NotchMusicSupport.isSamePlayer(pid: nil, bundle: "com.spotify.client", lastPID: nil, lastBundle: "com.apple.Music"),
+                     "different player does not match when bundle differs and PID is absent")
+        suite.expect(!NotchMusicSupport.isSamePlayer(pid: 200, bundle: "com.spotify.client", lastPID: nil, lastBundle: nil),
+                     "player does not match when no previous player was tracked")
+
+        suite.expect(!NotchMusicSupport.shouldHoldPause(isPlaying: false, wasPlaying: true, isSamePlayer: false, hasPlayback: true),
+                     "switching PID to an already-paused player never triggers pause hold")
+        suite.expect(NotchMusicSupport.shouldHoldPause(isPlaying: false, wasPlaying: true, isSamePlayer: true, hasPlayback: true),
+                     "pausing active media on the same player triggers pause hold")
+        suite.expect(!NotchMusicSupport.shouldHoldPause(isPlaying: true, wasPlaying: true, isSamePlayer: true, hasPlayback: true),
+                     "active playback never triggers pause hold")
+        suite.expect(!NotchMusicSupport.shouldHoldPause(isPlaying: false, wasPlaying: false, isSamePlayer: true, hasPlayback: true),
+                     "already paused media without prior playback never triggers pause hold")
+        suite.expect(!NotchMusicSupport.shouldHoldPause(isPlaying: false, wasPlaying: true, isSamePlayer: true, hasPlayback: false),
+                     "missing playback never triggers pause hold")
     }
 }

@@ -9,6 +9,9 @@ MouseAccelerationGuard.runIfRequestedAndExit()
 MouseAccelerationService.recoverPendingAtLaunch()
 
 #if VORSSAINT_DEVELOPMENT
+if CommandLine.arguments.contains("--dictation-presentation-test") {
+    DictationPresentationProbe.runAndExit()
+}
 if CommandLine.arguments.contains("--notch-presentation-test") {
     NotchPresentationProbe.runAndExit()
 }

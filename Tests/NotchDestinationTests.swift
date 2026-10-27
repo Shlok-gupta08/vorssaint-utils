@@ -58,6 +58,8 @@ enum NotchDestinationContract {
     enum NotchLockScreenService { static var shared = LockScreen() }
 
     class State {
+        var dictationPhase = DictationPhase.idle
+        var showsDictation: Bool { dictationPhase.presentsIsland }
         var acceptsUserInteraction = true
         func collapse() { expanded = false }
         var hiddenInFullscreen = false

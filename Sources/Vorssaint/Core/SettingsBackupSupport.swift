@@ -99,6 +99,10 @@ enum SettingsBackupSupport {
     /// out by construction (they are not preference keys), listed here only
     /// when they would otherwise slip in through the registered set.
     static let machineStateKeys: Set<String> = [
+        DefaultsKey.dictationModel,
+        DefaultsKey.dictationMicrophone,
+        DefaultsKey.dictationVocabulary,
+        DefaultsKey.dictationReplacements,
         DefaultsKey.dockPreviewRestoreAutohide,
         // A Bluetooth restore owed by one sleeping Mac means nothing on another.
         DefaultsKey.bluetoothSleepRestorePending,

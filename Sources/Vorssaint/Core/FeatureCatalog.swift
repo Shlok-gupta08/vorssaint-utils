@@ -22,7 +22,7 @@ enum AppFeature: String, CaseIterable {
     case clipboardHistory, pastePlain, finderCutPaste, finderRename, shelf, urlCleaner,
          diskImageInstaller
     // Sound
-    case mixer, soundOutputSwitcher, audioPriority, micMute, musicBlock
+    case mixer, soundOutputSwitcher, audioPriority, micMute, musicBlock, dictation
     // Energy and display
     case keepAwake, brightness, extraBrightness, bluetoothSleep
     // Tools
@@ -107,7 +107,7 @@ extension AppFeature {
         case .clipboardHistory, .pastePlain, .finderCutPaste, .finderRename, .shelf, .urlCleaner,
              .diskImageInstaller:
             return .clipboardFiles
-        case .mixer, .soundOutputSwitcher, .audioPriority, .micMute, .musicBlock:
+        case .mixer, .soundOutputSwitcher, .audioPriority, .micMute, .musicBlock, .dictation:
             return .sound
         case .keepAwake, .brightness, .extraBrightness, .bluetoothSleep:
             return .energyDisplay
@@ -160,6 +160,7 @@ extension AppFeature {
         case .soundOutputSwitcher: return "hifispeaker"
         case .audioPriority: return "list.number"
         case .micMute: return "mic.slash"
+        case .dictation: return "waveform"
         case .musicBlock: return "music.note"
         case .keepAwake: return "moon.zzz.fill"
         case .brightness: return "display.2"
@@ -227,6 +228,7 @@ extension AppFeature {
     /// the permissions portal.
     var enabledKeys: [String] {
         switch self {
+        case .dictation: return [DefaultsKey.dictationEnabled]
         case .switcher: return [DefaultsKey.switcherEnabled]
         case .dockPreview: return [DefaultsKey.dockPreviewEnabled]
         case .dockClick: return [DefaultsKey.dockClickMinimize,
@@ -362,6 +364,7 @@ extension AppFeature {
         // typing timing.
         case .screenRecorder: return [.screenRecording, .accessibility, .audioCapture, .microphone]
         case .cameraPreview: return [.camera]
+        case .dictation: return [.microphone, .accessibility]
         case .keepAwake: return [.accessibility]
         case .brightness: return [.accessibility]
         case .cleaner: return [.fullDiskAccess, .filesAndFolders, .notifications]
@@ -469,7 +472,7 @@ extension AppFeature {
              .connectedDevices:
             return true
         case .focusFollowsMouse, .scrollHorizontal, .linearScroll, .diskImageInstaller, .audioPriority,
-             .wallpaper, .killProcess, .portManager, .fanControl:
+             .wallpaper, .killProcess, .portManager, .fanControl, .dictation:
             return false
         }
     }

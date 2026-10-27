@@ -7,7 +7,7 @@ import Foundation
 import CoreGraphics
 
 enum NotchModule: String, CaseIterable, Identifiable {
-    case controls, mixer, music, clipboard, captures, files, system, tools, calendar, notifications, timer, camera, downloads, scratchpad, agents, watch
+    case controls, mixer, music, clipboard, captures, files, system, tools, calendar, notifications, timer, camera, downloads, scratchpad, agents, watch, dictation
     var id: String { rawValue }
 
     var symbol: String {
@@ -23,6 +23,7 @@ enum NotchModule: String, CaseIterable, Identifiable {
         case .notifications: return "bell"
         case .calendar: return "calendar"
         case .clipboard: return "doc.on.clipboard"
+        case .dictation: return "waveform"
         case .captures: return "camera.viewfinder"
         case .files: return "tray.full"
         case .system: return "gauge.with.dots.needle.50percent"
@@ -40,6 +41,7 @@ enum NotchModule: String, CaseIterable, Identifiable {
         case .mixer: return "v"
         case .music: return "m"
         case .clipboard: return "b"
+        case .dictation: return "h"
         case .captures: return "s"
         case .files: return "f"
         case .system: return "i"
@@ -66,6 +68,7 @@ enum NotchModule: String, CaseIterable, Identifiable {
         case .mixer: return AppFeature.mixer.isAvailable(in: defaults)
         case .tools: return AppFeature.quickLauncher.isAvailable(in: defaults)
         case .clipboard: return AppFeature.clipboardHistory.isAvailable(in: defaults)
+        case .dictation: return AppFeature.dictation.isAvailable(in: defaults)
         case .captures:
             return AppFeature.screenshot.isAvailable(in: defaults)
                 || AppFeature.screenRecorder.isAvailable(in: defaults)
@@ -2104,7 +2107,7 @@ struct NotchGeometry: Equatable {
                 // Only the cards a person chose; a short set leaves a short island.
                 contentHeight = min(budget, agentsHeight.map { $0 > 0 ? $0 : NotchLayout.emptyHeight } ?? budget)
             // Lists and previews fill the chosen content budget.
-            case .mixer, .calendar, .clipboard, .captures, .files, .notifications, .downloads, .camera, .scratchpad, .watch:
+            case .mixer, .calendar, .clipboard, .captures, .files, .notifications, .downloads, .camera, .scratchpad, .watch, .dictation:
                 contentHeight = budget
             }
         }
@@ -2167,6 +2170,8 @@ struct NotchSessionState {
     var canPresent: Bool { canRunTimer && !displaysSleeping }
     /// The lock screen itself is on screen, awake and in front of this user.
     var showsLockScreen: Bool { locked && !sleeping && onConsole && !displaysSleeping && !screenSaverRunning }
+    /// The screen saver itself is on screen, awake and in front of this user.
+    var showsScreenSaver: Bool { screenSaverRunning && !sleeping && onConsole && !displaysSleeping }
     /// Someone is at the Mac to hear it lock or unlock, rather than closing
     /// the lid or leaving it to a screen saver or to fall asleep.
     var hearsLockChange: Bool { !sleeping && onConsole && !displaysSleeping && !screenSaverRunning }

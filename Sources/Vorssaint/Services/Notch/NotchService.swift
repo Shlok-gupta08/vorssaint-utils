@@ -61,6 +61,8 @@ final class NotchService: ObservableObject {
     @Published private(set) var geometry = NotchGeometry(
         screen: CGRect(x: 0, y: 0, width: 1440, height: 900), safeAreaTop: 0, cameraWidth: 0)
     @Published private(set) var expanded = false
+    @Published private(set) var dictationPhase: DictationPhase = .idle
+    var showsDictation: Bool { dictationPhase.presentsIsland && AppFeature.dictation.isAvailable }
     @Published private(set) var peeking = false
     @Published private(set) var dragPlaceholder = false
     @Published private(set) var choosingFileDropDestination = false
@@ -227,12 +229,12 @@ final class NotchService: ObservableObject {
     private var hiddenUntilHover: Bool {
         !hiddenInFullscreen && UserDefaults.standard.bool(forKey: DefaultsKey.notchHideUntilHover)
             && UserDefaults.standard.bool(forKey: DefaultsKey.notchOpenOnHover)
-            && !expanded && !peeking && !dragPlaceholder && captureControls == nil
+            && !expanded && !peeking && !dragPlaceholder && captureControls == nil && !showsDictation
     }
 
     /// Full screen keeps a clickable black cutout until the user opens it.
     var fullscreenCompact: Bool {
-        hiddenInFullscreen && !expanded && !peeking
+        hiddenInFullscreen && !expanded && !peeking && !showsDictation
     }
 
     /// A simulated cutout covers no camera, so in full screen it stays out
@@ -657,8 +659,9 @@ final class NotchService: ObservableObject {
     }
     var contentSize: CGSize { expandedGeometry.contentSize(for: expandedSize) }
     var usesGlassSurface: Bool {
-        expanded || peeking || dragPlaceholder || noticeExpanded
+        !showsDictation && (expanded || peeking || dragPlaceholder || noticeExpanded
             || (captureControls != nil && !captureControlsCollapsed)
+        )
     }
 
     /// The open capture controls, measured with their title's font.
@@ -670,6 +673,10 @@ final class NotchService: ObservableObject {
     }
 
     var surfaceSize: CGSize {
+        if showsDictation {
+            return CGSize(width: min(geometry.screen.width - 32, max(380, geometry.cameraWidth + 144)),
+                          height: geometry.safeContentTop + (dictationPhase == .failed ? 156 : dictationPhase == .completed ? 122 : 118))
+        }
         if let capsule = capsuleSurfaceSize { return capsule }
         if fullscreenCompact { return geometry.bareCutout }
         if captureControls != nil {
@@ -941,6 +948,8 @@ final class NotchService: ObservableObject {
         musicPauseHoldWork?.cancel(); musicPauseHoldWork = nil
         isMusicPausedHolding = false
         wasMusicPlaying = false
+        lastPlayingPID = nil
+        lastPlayingBundle = nil
         screenRefreshWork?.cancel(); screenRefreshWork = nil
         captureControlsWork?.cancel(); captureControlsWork = nil
         musicDetailVisible = false
@@ -1045,6 +1054,10 @@ final class NotchService: ObservableObject {
 
     func open(_ module: NotchModule? = nil, pinned: Bool = false, takeFocus: Bool = true,
               appPanel: Bool = false, metric: MetricDetailKind? = nil, feedback: Bool = true, sections: Bool = false) {
+        if showsDictation {
+            guard !dictationPhase.isBusy else { return }
+            dictationPhase = .idle
+        }
         guard NotchSupport.isEnabled(), !suspended else { return }
         if !running || self.panel == nil { syncWithPreferences() }
         else { refreshModules() }
@@ -2123,13 +2136,31 @@ final class NotchService: ObservableObject {
                                                   tint: tint, geometry: compactActivityGeometry)
     }
 
-    private var wasMusicPlaying = false
+    private struct MusicPlaybackStateToken: Equatable {
+        let hasPlayback: Bool
+        let isPlaying: Bool
+        let pid: Int32?
+        let bundle: String?
+    }
 
-    private func handleMusicPlaybackState(hasPlayback: Bool, isPlaying: Bool) {
-        let transitionedFromPlaying = wasMusicPlaying && !isPlaying
-        wasMusicPlaying = isPlaying
+    private var wasMusicPlaying = false
+    private var lastPlayingPID: Int32?
+    private var lastPlayingBundle: String?
+
+    private func isSamePlayer(pid: Int32?, bundle: String?) -> Bool {
+        NotchMusicSupport.isSamePlayer(pid: pid, bundle: bundle, lastPID: lastPlayingPID, lastBundle: lastPlayingBundle)
+    }
+
+    private func handleMusicPlaybackState(hasPlayback: Bool, isPlaying: Bool, pid: Int32?, bundle: String?) {
+        let isSame = isSamePlayer(pid: pid, bundle: bundle)
+        let transitionedFromPlaying = NotchMusicSupport.shouldHoldPause(
+            isPlaying: isPlaying, wasPlaying: wasMusicPlaying, isSamePlayer: isSame, hasPlayback: hasPlayback
+        )
 
         if isPlaying {
+            wasMusicPlaying = true
+            lastPlayingPID = pid
+            lastPlayingBundle = bundle
             musicPauseHoldWork?.cancel()
             musicPauseHoldWork = nil
             if isMusicPausedHolding {
@@ -2137,10 +2168,13 @@ final class NotchService: ObservableObject {
                 objectWillChange.send()
             }
         } else if hasPlayback && transitionedFromPlaying {
+            wasMusicPlaying = false
             guard !session.locked, !session.sleeping, !session.displaysSleeping else {
                 musicPauseHoldWork?.cancel()
                 musicPauseHoldWork = nil
                 isMusicPausedHolding = false
+                lastPlayingPID = nil
+                lastPlayingBundle = nil
                 return
             }
             let timeout = NotchSupport.pauseTimeout()
@@ -2151,6 +2185,8 @@ final class NotchService: ObservableObject {
                     guard let self else { return }
                     self.isMusicPausedHolding = false
                     self.musicPauseHoldWork = nil
+                    self.lastPlayingPID = nil
+                    self.lastPlayingBundle = nil
                     self.syncMenuSpaceMonitoring()
                     self.objectWillChange.send()
                     self.refreshPresentation()
@@ -2161,16 +2197,37 @@ final class NotchService: ObservableObject {
                 musicPauseHoldWork?.cancel()
                 musicPauseHoldWork = nil
                 isMusicPausedHolding = false
+                lastPlayingPID = nil
+                lastPlayingBundle = nil
             }
         } else if !isPlaying && !transitionedFromPlaying {
             if !isMusicPausedHolding {
                 musicPauseHoldWork?.cancel()
                 musicPauseHoldWork = nil
+                lastPlayingPID = nil
+                lastPlayingBundle = nil
+            } else if !isSame {
+                // When PID changes away from the player that was paused/playing,
+                // dismiss the pause-holding state immediately so an already-paused
+                // player does not appear as an expanded notch.
+                musicPauseHoldWork?.cancel()
+                musicPauseHoldWork = nil
+                isMusicPausedHolding = false
+                lastPlayingPID = nil
+                lastPlayingBundle = nil
+                objectWillChange.send()
             }
+            wasMusicPlaying = false
         } else {
+            wasMusicPlaying = false
+            lastPlayingPID = nil
+            lastPlayingBundle = nil
             musicPauseHoldWork?.cancel()
             musicPauseHoldWork = nil
-            isMusicPausedHolding = false
+            if isMusicPausedHolding {
+                isMusicPausedHolding = false
+                objectWillChange.send()
+            }
         }
     }
 
@@ -2199,7 +2256,7 @@ final class NotchService: ObservableObject {
             removeScreenEdgeClickMonitors()
             return
         }
-        let open = expanded || peeking || notice != nil || dragPlaceholder || captureControls != nil
+        let open = expanded || peeking || notice != nil || dragPlaceholder || captureControls != nil || showsDictation
         guard open || (!hiddenAtRestInFullscreen && (geometry.isNotched || geometry.compactSideRoom != nil)) else {
             finishMusicDeparture()
             presentedMusic = nil
@@ -2906,6 +2963,7 @@ final class NotchService: ObservableObject {
             self?.updateSession { $0.locked = false; $0.screenSaverRunning = false }
         }
         observe(distributed, Notification.Name("com.apple.screensaver.didstart")) { [weak self] in
+            self?.collapse()
             self?.updateSession { $0.screenSaverRunning = true }
         }
         observe(distributed, Notification.Name("com.apple.screensaver.didstop")) { [weak self] in
@@ -3166,6 +3224,21 @@ final class NotchService: ObservableObject {
 
     private func bindEvents() {
         subscriptions.removeAll()
+        if AppFeature.dictation.isAvailable {
+            DictationService.shared.$phase.removeDuplicates().receive(on: DispatchQueue.main)
+                .sink { [weak self] phase in
+                    guard let self else { return }
+                    if phase.presentsIsland {
+                        self.noticeWork?.cancel()
+                        self.notice = nil
+                        self.departingNotice = nil
+                        if self.expanded { self.collapse() }
+                        self.peeking = false
+                    }
+                    self.dictationPhase = phase
+                    self.refreshPresentation()
+                }.store(in: &subscriptions)
+        } else { dictationPhase = .idle }
         if modules.contains(.timer) {
             NotchTimerService.shared.$session.removeDuplicates().receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in
@@ -3201,28 +3274,52 @@ final class NotchService: ObservableObject {
             music.trackEnds
                 .sink { [weak self] in self?.holdEndingTrack() }
                 .store(in: &subscriptions)
-            music.$playback.map { ($0 != nil, $0?.isPlaying == true) }
-                .removeDuplicates { $0 == $1 }
-                // Guard the pause-hold flag synchronously on the @Published emission
-                // (always on the main thread) before receive(on:) queues async work.
-                // Without this, the view evaluates showsMusicActivity with
-                // isPlaying=false AND isMusicPausedHolding=false for one frame,
-                // causing the island to collapse and then snap back to the faded state.
-                .handleEvents(receiveOutput: { [weak self] hasPlayback, isPlaying in
-                    guard let self else { return }
-                    let timeout = NotchSupport.pauseTimeout()
-                    if !isPlaying && hasPlayback && self.wasMusicPlaying && timeout > 0
-                        && !self.session.locked && !self.session.sleeping && !self.session.displaysSleeping {
-                        self.isMusicPausedHolding = true
+            music.$playback.map {
+                MusicPlaybackStateToken(
+                    hasPlayback: $0 != nil,
+                    isPlaying: $0?.isPlaying == true,
+                    pid: $0?.track.appPID,
+                    bundle: $0?.track.appBundleIdentifier
+                )
+            }
+            .removeDuplicates()
+            // Guard the pause-hold flag synchronously on the @Published emission
+            // (always on the main thread) before receive(on:) queues async work.
+            // Without this, the view evaluates showsMusicActivity with
+            // isPlaying=false AND isMusicPausedHolding=false for one frame,
+            // causing the island to collapse and then snap back to the faded state.
+            .handleEvents(receiveOutput: { [weak self] token in
+                guard let self else { return }
+                let timeout = NotchSupport.pauseTimeout()
+                let isSame = self.isSamePlayer(pid: token.pid, bundle: token.bundle)
+                let shouldHold = NotchMusicSupport.shouldHoldPause(
+                    isPlaying: token.isPlaying, wasPlaying: self.wasMusicPlaying, isSamePlayer: isSame, hasPlayback: token.hasPlayback
+                )
+                if shouldHold && timeout > 0
+                    && !self.session.locked && !self.session.sleeping && !self.session.displaysSleeping {
+                    self.isMusicPausedHolding = true
+                } else if !token.isPlaying && (!isSame || !token.hasPlayback) {
+                    if self.isMusicPausedHolding {
+                        self.isMusicPausedHolding = false
+                        self.musicPauseHoldWork?.cancel()
+                        self.musicPauseHoldWork = nil
+                        self.lastPlayingPID = nil
+                        self.lastPlayingBundle = nil
                     }
-                })
-                .receive(on: DispatchQueue.main)
-                .sink { [weak self] hasPlayback, isPlaying in
-                    self?.handleMusicPlaybackState(hasPlayback: hasPlayback, isPlaying: isPlaying)
-                    self?.syncMenuSpaceMonitoring()
-                    self?.objectWillChange.send()
-                    self?.refreshPresentation()
-                }.store(in: &subscriptions)
+                } else if token.isPlaying && self.isMusicPausedHolding {
+                    self.isMusicPausedHolding = false
+                    self.musicPauseHoldWork?.cancel()
+                    self.musicPauseHoldWork = nil
+                }
+            })
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] token in
+                self?.handleMusicPlaybackState(hasPlayback: token.hasPlayback, isPlaying: token.isPlaying,
+                                               pid: token.pid, bundle: token.bundle)
+                self?.syncMenuSpaceMonitoring()
+                self?.objectWillChange.send()
+                self?.refreshPresentation()
+            }.store(in: &subscriptions)
             // A capsule names each new song for a moment: the song playing,
             // or the next one once the notice releases the song it held.
             music.$playback.map { $0?.track.title }.removeDuplicates().map { _ in () }
