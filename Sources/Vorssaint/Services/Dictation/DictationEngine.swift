@@ -19,15 +19,85 @@ final class DictationEngine {
         let translate: Bool
         let vocabulary: [String]
         let cpu: Bool
+        var temporaryDirectory: URL? = nil
     }
-    struct Result: Decodable { let text: String?; let language: String?; let error: String? }
+    struct Result: Decodable { let text: String?; let language: String?; let error: String?; let streaming: Bool? }
     private let queue = DispatchQueue(label: "com.vorssaint.dictation.engine", qos: .userInitiated)
     private let lock = NSLock()
     private var process: Process?
     private var lifetime = UUID()
+    private var discardedLiveIDs: Set<UUID> = []
     private var input: FileHandle?
     private var output: FileHandle?
     private var pending = Data()
+    // Accessed exclusively on queue. Every utterance has a separate identity;
+    // a late microphone callback cannot feed the next utterance.
+    private var liveID: UUID?
+    private var liveLifetime: UUID?
+    private var liveActive = false
+
+    @discardableResult
+    func beginLive(_ request: Request, ready: ((Bool) -> Void)? = nil) -> UUID {
+        let id = UUID()
+        lock.lock(); let token = lifetime; lock.unlock()
+        queue.async {
+            guard self.isCurrent(token) else { return }
+            self.liveID = id; self.liveLifetime = token; self.liveActive = false
+            do {
+                try self.startWorker(token: token)
+                var payload = Self.options(request)
+                payload["command"] = "begin"
+                let reply = try self.exchange(payload)
+                self.liveActive = reply.streaming == true && reply.error == nil
+            } catch { /* The complete recording remains available for batch retry. */ }
+            let active = self.liveActive
+            DispatchQueue.main.async { ready?(active) }
+        }
+        return id
+    }
+
+    func appendLive(_ data: Data?, id: UUID) {
+        lock.lock(); let token = lifetime; lock.unlock()
+        queue.async {
+            guard self.isCurrent(token, liveID: id), self.liveID == id, self.liveLifetime == token, self.liveActive else { return }
+            guard let data else { self.liveActive = false; return }
+            do {
+                let reply = try self.exchange(["command": "feed", "pcm": data.base64EncodedString()])
+                if reply.error != nil { self.liveActive = false }
+            } catch { self.liveActive = false }
+        }
+    }
+
+    /// Discard a recording without evicting the loaded model. Revocation is
+    /// immediate; already queued audio skips inference before the reset runs.
+    func discardLive(_ id: UUID) {
+        lock.lock(); let token = lifetime; discardedLiveIDs.insert(id); lock.unlock()
+        queue.async {
+            defer { self.lock.lock(); self.discardedLiveIDs.remove(id); self.lock.unlock() }
+            guard self.isCurrent(token), self.liveID == id, self.liveLifetime == token else { return }
+            self.liveActive = false; self.liveID = nil
+            do { _ = try self.exchange(["command": "reset"]) }
+            catch { if self.isCurrent(token) { self.cancel() } }
+        }
+    }
+
+    private func isCurrent(_ token: UUID, liveID: UUID? = nil) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return lifetime == token && (liveID.map { !discardedLiveIDs.contains($0) } ?? true)
+    }
+
+    private static func options(_ request: Request) -> [String: Any] {
+        ["model": request.model.path, "language": request.language, "translate": request.translate,
+         "vocabulary": request.vocabulary, "cpu": request.cpu]
+    }
+
+    private func exchange(_ payload: [String: Any]) throws -> Result {
+        var bytes = try JSONSerialization.data(withJSONObject: payload)
+        bytes.append(10)
+        guard let input else { throw DictationError.message("The speech engine is unavailable.") }
+        try input.write(contentsOf: bytes)
+        return try readReply()
+    }
 
     func cancel() {
         lock.lock()
@@ -42,30 +112,35 @@ final class DictationEngine {
         }
     }
 
-    func transcribe(_ request: Request, completion: @escaping (Swift.Result<Result, Error>) -> Void) {
+    func transcribe(_ request: Request, finishingLive id: UUID? = nil,
+                    completion: @escaping (Swift.Result<Result, Error>) -> Void) {
         lock.lock(); let token = lifetime; lock.unlock()
         queue.async {
-            var pcm: URL?
             do {
-                self.lock.lock(); let valid = self.lifetime == token; self.lock.unlock()
-                guard valid else { throw CancellationError() }
-                pcm = try Self.convertAudio(request.audio)
-                defer { if let pcm { try? FileManager.default.removeItem(at: pcm) } }
-                try self.startWorker(token: token)
-                let payload: [String: Any] = ["audio": pcm!.path, "model": request.model.path,
-                    "language": request.language, "translate": request.translate,
-                    "vocabulary": request.vocabulary, "cpu": request.cpu]
-                var bytes = try JSONSerialization.data(withJSONObject: payload)
-                bytes.append(10)
-                try self.input?.write(contentsOf: bytes)
-                let reply = try self.readReply()
-                if let error = reply.error { throw DictationError.message("Transcription failed: \(error)") }
-                guard reply.text != nil else { throw DictationError.message("The dictation engine returned an invalid result.") }
-                DispatchQueue.main.async { completion(.success(reply)) }
+                guard self.isCurrent(token) else { throw CancellationError() }
+                var result: Result?
+                if let id, self.liveID == id, self.liveLifetime == token, self.liveActive {
+                    if let reply = try? self.exchange(["command": "finalize"]), reply.error == nil,
+                       reply.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                        result = reply
+                    }
+                }
+                self.liveID = nil; self.liveActive = false
+                if result == nil {
+                    let pcm = try Self.convertAudio(request.audio, temporaryDirectory: request.temporaryDirectory)
+                    defer { try? FileManager.default.removeItem(at: pcm) }
+                    try self.startWorker(token: token)
+                    var payload = Self.options(request)
+                    payload["audio"] = pcm.path
+                    let reply = try self.exchange(payload)
+                    if let error = reply.error { throw DictationError.message("Transcription failed: \(error)") }
+                    guard reply.text != nil else { throw DictationError.message("The dictation engine returned an invalid result.") }
+                    result = reply
+                }
+                guard self.isCurrent(token), let result else { throw CancellationError() }
+                DispatchQueue.main.async { completion(.success(result)) }
             } catch {
-                if let pcm { try? FileManager.default.removeItem(at: pcm) }
-                self.lock.lock(); let current = self.lifetime == token; self.lock.unlock()
-                if current { self.cancel() }
+                if self.isCurrent(token) { self.cancel() }
                 DispatchQueue.main.async { completion(.failure(error)) }
             }
         }
@@ -111,14 +186,14 @@ final class DictationEngine {
 
     /// AVFoundation decodes/resamples all supported imports into the engine's
     /// 16 kHz mono float32 format, with a bounded buffer and no shell commands.
-    static func convertAudio(_ source: URL) throws -> URL {
+    static func convertAudio(_ source: URL, temporaryDirectory: URL? = nil) throws -> URL {
         let file = try AVAudioFile(forReading: source)
         guard file.length > 0, Double(file.length) / file.processingFormat.sampleRate <= 3600,
               let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false),
               let converter = AVAudioConverter(from: file.processingFormat, to: format),
               let input = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 32768),
               let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 32768),
-              let directory = PrivateFileStore.containerURL?.appendingPathComponent("Dictation/Temporary", isDirectory: true),
+              let directory = temporaryDirectory ?? PrivateFileStore.containerURL?.appendingPathComponent("Dictation/Temporary", isDirectory: true),
               PrivateFileStore.createDirectory(at: directory) else {
             throw DictationError.message("Choose a nonempty audio file shorter than one hour.")
         }
@@ -133,8 +208,14 @@ final class DictationEngine {
             while true {
                 var conversionError: NSError?
                 let status = converter.convert(to: output, error: &conversionError) { requested, state in
+                    // Some CAF readers throw eofErr (-39) rather than returning
+                    // an empty buffer on the next read. Signal EOF ourselves,
+                    // after delivering the final partial buffer exactly once.
+                    let remaining = file.length - file.framePosition
+                    guard remaining > 0 else { state.pointee = .endOfStream; return nil }
                     do {
-                        try file.read(into: input, frameCount: min(requested, input.frameCapacity))
+                        let count = AVAudioFrameCount(min(AVAudioFramePosition(min(requested, input.frameCapacity)), remaining))
+                        try file.read(into: input, frameCount: count)
                         state.pointee = input.frameLength == 0 ? .endOfStream : .haveData
                         return input.frameLength == 0 ? nil : input
                     } catch { readError = error; state.pointee = .endOfStream; return nil }

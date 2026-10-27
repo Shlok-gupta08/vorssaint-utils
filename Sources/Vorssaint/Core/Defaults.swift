@@ -1216,7 +1216,7 @@ enum Defaults {
         DefaultsKey.dictationLanguage: "",
         DefaultsKey.dictationTranslate: false,
         DefaultsKey.dictationMicrophone: "",
-        DefaultsKey.dictationDelivery: "copy",
+        DefaultsKey.dictationDelivery: "paste",
         DefaultsKey.dictationRetainAudio: 0,
         DefaultsKey.dictationHistoryLimit: 200,
         DefaultsKey.dictationVocabulary: "",

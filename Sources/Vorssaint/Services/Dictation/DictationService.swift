@@ -20,7 +20,7 @@ final class DictationService: ObservableObject {
         didSet { shortcut.setBusy(phase.isBusy) }
     }
     @Published private(set) var elapsed = 0.0
-    @Published private(set) var levels = [Double](repeating: 0, count: 48)
+    @Published private(set) var waveform = [Double](repeating: 0, count: DictationSpectrum.count)
     @Published private(set) var result = ""
     @Published private(set) var status = ""
     @Published private(set) var error: String?
@@ -33,6 +33,7 @@ final class DictationService: ObservableObject {
     private var unloadWork: DispatchWorkItem?
     private var processingWatchdog: DispatchWorkItem?
     private var cleanupTask: Task<Void, Never>?
+    private var liveID: UUID?
     private var recordingURL: URL?
     private var ownsRecording = false
     private var started = ProcessInfo.processInfo.systemUptime
@@ -161,7 +162,7 @@ final class DictationService: ObservableObject {
         targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         if targetPID == ProcessInfo.processInfo.processIdentifier { targetPID = nil }
         error = nil; result = ""; elapsed = 0; heardSpeech = false; lastSpeech = 0
-        levels = [Double](repeating: 0, count: 48)
+        waveform = [Double](repeating: 0, count: DictationSpectrum.count)
         phase = .requestingPermission
         let authorization = AVCaptureDevice.authorizationStatus(for: .audio)
         if authorization == .authorized { startRecording(token: token) }
@@ -183,11 +184,17 @@ final class DictationService: ObservableObject {
         let url = directory.appendingPathComponent(UUID().uuidString + ".caf")
         do {
             recordingURL = url; ownsRecording = true
-            try recorder.start(at: url, microphoneUID: defaults.string(forKey: DefaultsKey.dictationMicrophone) ?? "")
+            unloadWork?.cancel(); unloadWork = nil
+            guard let model = activeModelURL else { throw DictationError.message("The selected model is unavailable.") }
+            let id = engine.beginLive(makeRequest(audio: url, model: model))
+            liveID = id
+            try recorder.start(at: url, microphoneUID: defaults.string(forKey: DefaultsKey.dictationMicrophone) ?? "") { [weak engine] data in
+                engine?.appendLive(data, id: id)
+            }
             started = ProcessInfo.processInfo.systemUptime
             phase = .recording
             if defaults.bool(forKey: DefaultsKey.dictationSound) { NSSound(named: "Tink")?.play() }
-            let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.tick() }
+            let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
             self.timer = timer
             RunLoop.main.add(timer, forMode: .common)
         } catch { fail(error.localizedDescription) }
@@ -198,7 +205,7 @@ final class DictationService: ObservableObject {
         elapsed = ProcessInfo.processInfo.systemUptime - started
         let reading = recorder.reading()
         if let error = reading.error { fail("Recording failed: \(error.localizedDescription)"); return }
-        levels.removeFirst(); levels.append(reading.level)
+        waveform = reading.waveform
         if reading.level > 0.035 { heardSpeech = true; lastSpeech = elapsed }
         let silence = defaults.double(forKey: DefaultsKey.dictationSilenceStop)
         if elapsed >= DictationSupport.maximumRecordingSeconds || (silence >= 1 && heardSpeech && elapsed - lastSpeech >= silence) { finish() }
@@ -244,32 +251,39 @@ final class DictationService: ObservableObject {
         } catch { fail(error.localizedDescription) }
     }
 
+    private func makeRequest(audio: URL, model: URL) -> DictationEngine.Request {
+        DictationEngine.Request(audio: audio, model: model, language: activeLanguage, translate: activeTranslate,
+            vocabulary: Array((defaults.string(forKey: DefaultsKey.dictationVocabulary) ?? "").split(separator: "\n").map(String.init).prefix(256)),
+            cpu: defaults.bool(forKey: DefaultsKey.dictationCPUOnly))
+    }
+
     private func process(_ url: URL, duration: TimeInterval, deliver: Bool) {
         guard let model = activeModelURL else { fail("The selected model is unavailable."); return }
         unloadWork?.cancel(); unloadWork = nil
         phase = .processing
         let token = generation
         let began = ProcessInfo.processInfo.systemUptime
-        let request = DictationEngine.Request(audio: url, model: model, language: activeLanguage, translate: activeTranslate,
-            vocabulary: Array((defaults.string(forKey: DefaultsKey.dictationVocabulary) ?? "").split(separator: "\n").map(String.init).prefix(256)),
-            cpu: defaults.bool(forKey: DefaultsKey.dictationCPUOnly))
+        let request = makeRequest(audio: url, model: model)
+        let finishingLive = deliver ? liveID : nil
+        liveID = nil
         let timeout = DispatchWorkItem { [weak self] in
             guard let self, self.generation == token, self.phase == .processing else { return }
             self.engine.cancel(); self.fail("Transcription took too long. Try a smaller model or CPU mode.")
         }
         processingWatchdog = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + max(120, duration * 3), execute: timeout)
-        engine.transcribe(request) { [weak self] response in
+        engine.transcribe(request, finishingLive: finishingLive) { [weak self] response in
             guard let self, self.generation == token, self.isEnabled, self.phase == .processing else { return }
             self.processingWatchdog?.cancel(); self.processingWatchdog = nil
             switch response {
             case .failure(let error): self.fail(error.localizedDescription)
             case .success(let reply):
                 let original = reply.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                guard !original.isEmpty else { self.fail("No speech was recognized. Try again closer to the microphone."); return }
+                guard !original.isEmpty else { self.finishWithoutTranscript(); return }
                 let language = reply.language?.isEmpty == false ? reply.language! : self.activeLanguage
                 let cleaned = DictationSupport.cleaned(original, replacements: self.defaults.string(forKey: DefaultsKey.dictationReplacements) ?? "",
                     removeFillers: self.defaults.bool(forKey: DefaultsKey.dictationRemoveFillers), language: language)
+                guard !cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { self.finishWithoutTranscript(); return }
                 self.cleanupTask = Task { @MainActor [weak self] in
                     guard let self else { return }
                     var output = cleaned
@@ -279,6 +293,9 @@ final class DictationService: ObservableObject {
                         catch { cleanupError = error.localizedDescription }
                     }
                     guard !Task.isCancelled, self.generation == token, self.isEnabled else { return }
+                    if cleanupError == nil, output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        self.finishWithoutTranscript(); return
+                    }
                     self.result = output
                     let entry = DictationEntry(text: output, originalText: original, modelID: self.activeModelID, language: language,
                         duration: duration, processingDuration: ProcessInfo.processInfo.systemUptime - began)
@@ -298,32 +315,30 @@ final class DictationService: ObservableObject {
 
     private func deliver(_ value: String, token: UUID) {
         let value = value + (defaults.bool(forKey: DefaultsKey.dictationTrailingSpace) ? " " : "")
-        let delivery = DictationDelivery(rawValue: defaults.string(forKey: DefaultsKey.dictationDelivery) ?? "") ?? .copy
+        let delivery = DictationDelivery(rawValue: defaults.string(forKey: DefaultsKey.dictationDelivery) ?? "") ?? .paste
         let targetIsActive = targetPID != nil && NSWorkspace.shared.frontmostApplication?.processIdentifier == targetPID
         if delivery != .copy, targetIsActive, AXIsProcessTrusted(), !IsSecureEventInputEnabled() {
-            if delivery == .pasteAndRestore {
-                let accepted = TransientPaste.shared.paste(value,
-                    canPostShortcut: { [weak self] in
-                        guard let self else { return false }
-                        return self.generation == token && AXIsProcessTrusted() && !IsSecureEventInputEnabled()
-                            && NSWorkspace.shared.frontmostApplication?.processIdentifier == self.targetPID
-                    },
-                    didPostShortcut: { [weak self] in
-                        guard let self, self.generation == token else { return }
-                        self.status = "Text pasted"; self.complete()
-                    }, didFail: { [weak self] in
-                        guard let self, self.generation == token else { return }
-                        self.copy(value, token: token)
-                    })
-                if !accepted { copy(value, token: token) }
-                return
-            }
+            let accepted = TransientPaste.shared.paste(value, restoreClipboard: delivery == .pasteAndRestore, suppressClipboardNotice: true,
+                canPostShortcut: { [weak self] in
+                    guard let self else { return false }
+                    return self.generation == token && AXIsProcessTrusted() && !IsSecureEventInputEnabled()
+                        && NSWorkspace.shared.frontmostApplication?.processIdentifier == self.targetPID
+                },
+                didPostShortcut: { [weak self] in
+                    guard let self, self.generation == token else { return }
+                    self.status = "Text pasted"; self.complete()
+                }, didFail: { [weak self] in
+                    guard let self, self.generation == token else { return }
+                    self.copy(value, token: token)
+                })
+            if !accepted { copy(value, token: token) }
+            return
         }
         // Clipboard delivery also acts as a safe fallback when focus changed.
-        copy(value, token: token, paste: delivery == .paste && targetIsActive && AXIsProcessTrusted() && !IsSecureEventInputEnabled())
+        copy(value, token: token)
     }
 
-    private func copy(_ value: String, token: UUID, paste: Bool = false) {
+    private func copy(_ value: String, token: UUID) {
         guard generation == token else { return }
         let validity = deliveryValidity
         GeneralPasteboardAccess.shared.async {
@@ -331,35 +346,43 @@ final class DictationService: ObservableObject {
             let board = NSPasteboard.general
             board.clearContents()
             let succeeded = board.setString(value, forType: .string)
+            if succeeded { board.setString("1", forType: NSPasteboard.PasteboardType(ClipboardHistoryCapturePolicy.dictationOriginType)) }
             DispatchQueue.main.async {
                 guard self.generation == token else { return }
                 guard succeeded else { self.fail("The transcript is in speech history, but copying failed."); return }
-                if paste, NSWorkspace.shared.frontmostApplication?.processIdentifier == self.targetPID, !IsSecureEventInputEnabled() {
-                    let down = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: true)
-                    let up = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: false)
-                    down?.flags = .maskCommand; up?.flags = .maskCommand
-                    down?.post(tap: .cghidEventTap); up?.post(tap: .cghidEventTap)
-                    self.status = "Text pasted"
-                } else { self.status = self.text.copied }
+                self.status = self.text.copied
                 self.complete()
             }
         }
     }
 
-    func copyEntry(_ entry: DictationEntry) {
-        guard AppFeature.dictation.isAvailable else { return }
+    func copyEntry(_ entry: DictationEntry, completion: ((Bool) -> Void)? = nil) {
+        guard AppFeature.dictation.isAvailable else { completion?(false); return }
         GeneralPasteboardAccess.shared.async {
             NSPasteboard.general.clearContents()
             let succeeded = NSPasteboard.general.setString(entry.text, forType: .string)
-            DispatchQueue.main.async {
-                if succeeded { NotchService.shared.show(NotchNotice(event: .clipboard, title: self.text.copied, detail: self.text.title, symbol: "waveform")) }
-            }
+            if succeeded { NSPasteboard.general.setString("1", forType: NSPasteboard.PasteboardType(ClipboardHistoryCapturePolicy.dictationOriginType)) }
+            DispatchQueue.main.async { completion?(succeeded) }
         }
     }
 
     func copyResult() {
         guard !result.isEmpty, !phase.isBusy else { return }
         copy(result, token: generation)
+    }
+
+    /// Silence/empty recognition is a normal end to a recording. Nothing is
+    /// copied or saved, and the warm model remains available for the next press.
+    private func finishWithoutTranscript() {
+        generation = UUID()
+        timer?.invalidate(); timer = nil
+        processingWatchdog?.cancel(); processingWatchdog = nil
+        cleanupTask?.cancel(); cleanupTask = nil
+        cleanupPrevious()
+        liveID = nil; pressTime = nil; startedWithShortcut = false
+        result = ""; status = ""; error = nil; elapsed = 0
+        phase = .idle
+        scheduleUnload()
     }
 
     private func complete() {
@@ -379,13 +402,17 @@ final class DictationService: ObservableObject {
     }
 
     func cancel() {
+        let abandoned = phase == .recording && enabled && isEnabled ? liveID : nil
         generation = UUID()
         timer?.invalidate(); timer = nil
         processingWatchdog?.cancel(); processingWatchdog = nil
         completionWork?.cancel(); completionWork = nil
         cleanupTask?.cancel(); cleanupTask = nil
-        recorder.stop(); engine.cancel()
+        recorder.stop()
+        if let abandoned { engine.discardLive(abandoned) } else { engine.cancel() }
+        liveID = nil
         unloadWork?.cancel(); unloadWork = nil
+        if abandoned != nil { scheduleUnload() }
         cleanupPrevious()
         pressTime = nil; startedWithShortcut = false
         phase = .idle; error = nil
@@ -393,6 +420,7 @@ final class DictationService: ObservableObject {
 
     private func fail(_ message: String) {
         timer?.invalidate(); timer = nil; recorder.stop()
+        if liveID != nil { engine.cancel(); liveID = nil }
         processingWatchdog?.cancel(); processingWatchdog = nil
         cleanupPrevious()
         error = message
@@ -418,11 +446,24 @@ final class DictationService: ObservableObject {
     }
 
 #if VORSSAINT_DEVELOPMENT
+    static func verifiesEmptyOutcome() -> Bool {
+        let fixture = presentationFixture(.processing)
+        fixture.finishWithoutTranscript()
+        return fixture.phase == .idle && fixture.error == nil && fixture.result.isEmpty && fixture.status.isEmpty
+    }
+
     /// Inert view fixture: never starts input taps, capture, inference or storage.
     static func presentationFixture(_ phase: DictationPhase) -> DictationService {
         let service = DictationService()
         service.elapsed = 12
-        service.levels = (0..<48).map { index in 0.03 + abs(sin(Double(index) * 0.57)) * 0.38 }
+        let samples = DictationSpectrum()
+        let audio: [Float] = (0..<7680).map { index in
+            let phase = Double(index)
+            let envelope = 0.06 + 0.12 * pow(sin(phase * 0.0005), 2)
+            return Float(sin(phase * 0.09) * envelope)
+        }
+        samples.append(audio)
+        service.waveform = samples.bars
         service.result = "A quieter place for your thoughts. Everything you say, right here on your Mac."
         service.status = "Text copied"
         service.error = "Download or import a speech model in Dictation settings first."

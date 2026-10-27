@@ -7,6 +7,7 @@ import SwiftUI
 
 enum DictationPresentationProbe {
     static func runAndExit() -> Never {
+        guard DictationService.verifiesEmptyOutcome() else { print("Empty recognition must collapse without an error"); exit(1) }
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         app.appearance = NSAppearance(named: .darkAqua)
