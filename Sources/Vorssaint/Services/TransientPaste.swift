@@ -20,6 +20,8 @@ final class TransientPaste {
 
     @discardableResult
     func paste(_ text: String,
+               restoreClipboard: Bool = true,
+               suppressClipboardNotice: Bool = false,
                canPostShortcut: (() -> Bool)? = nil,
                willPostShortcut: (() -> Void)? = nil,
                didPostShortcut: (() -> Void)? = nil,
@@ -36,7 +38,11 @@ final class TransientPaste {
             let pasteboard = NSPasteboard.general
             let originalChangeCount = pasteboard.changeCount
             let snapshot: [NSPasteboardItem]?
-            if let previous, pasteboard.changeCount == previous.changeCount {
+            if !restoreClipboard {
+                // Keeping the transcript needs no snapshot. Resolving promised
+                // clipboard flavors can otherwise delay insertion or fail it.
+                snapshot = []
+            } else if let previous, pasteboard.changeCount == previous.changeCount {
                 snapshot = previous.snapshot
             } else {
                 snapshot = Self.snapshot(of: pasteboard)
@@ -65,10 +71,13 @@ final class TransientPaste {
                 }
                 return
             }
+            if suppressClipboardNotice {
+                pasteboard.setString("1", forType: NSPasteboard.PasteboardType(ClipboardHistoryCapturePolicy.dictationOriginType))
+            }
             let changeCount = pasteboard.changeCount
 
             DispatchQueue.main.async {
-                ClipboardHistoryService.shared.ignoreNextChange(upTo: changeCount)
+                if restoreClipboard { ClipboardHistoryService.shared.ignoreNextChange(upTo: changeCount) }
                 self.pendingRestore = (snapshot, changeCount)
                 Self.postPasteWhenModifiersReleased(
                     attempt: 0,
@@ -78,7 +87,8 @@ final class TransientPaste {
                     didFail: didFail
                 ) {
                     self.isPerforming = false
-                    self.scheduleRestore(snapshot: snapshot, changeCount: changeCount)
+                    if restoreClipboard { self.scheduleRestore(snapshot: snapshot, changeCount: changeCount) }
+                    else { self.pendingRestore = nil }
                 }
             }
         }

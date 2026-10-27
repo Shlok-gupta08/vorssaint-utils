@@ -96,9 +96,10 @@ enum SettingsDirectory {
             $0.id == .page(.notch)
         } ?? []
         let sound: [SettingsSidebarItem] = essentials.items.filter { item in
-            item.destination.page == .general
+            item.destination.page == .dictation
+                || (item.destination.page == .general
                 && item.destination.sectionAnchor != nil
-                && item.destination.sectionAnchor != .panelConfiguration
+                && item.destination.sectionAnchor != .panelConfiguration)
         }
         let energy: [SettingsSidebarItem] = essentials.items.filter {
             $0.destination.page == .energy

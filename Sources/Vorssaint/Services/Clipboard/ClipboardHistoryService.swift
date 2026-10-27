@@ -666,7 +666,7 @@ final class ClipboardHistoryService: ObservableObject {
         let includeImagesFiles = UserDefaults.standard.bool(
             forKey: DefaultsKey.clipboardHistoryIncludeImagesFiles)
         GeneralPasteboardAccess.shared.async(timeout: Self.pasteboardTimeout, { isExpired
-            -> (changeCount: Int, content: CapturedContent?)? in
+            -> (changeCount: Int, content: CapturedContent?, announce: Bool)? in
             let changeCount = NSPasteboard.general.changeCount
             guard !isExpired() else { return nil }
             // Read during a baseline too, not only on a detected change: a
@@ -678,7 +678,8 @@ final class ClipboardHistoryService: ObservableObject {
             let content: CapturedContent? = (baseline || changeCount != sinceChangeCount)
                 ? Self.readPasteboard(includeImagesFiles: includeImagesFiles)
                 : nil
-            return (changeCount, content)
+            let announce = ClipboardHistoryCapturePolicy.shouldAnnounce(types: (NSPasteboard.general.types ?? []).map(\.rawValue))
+            return (changeCount, content, announce)
         }, then: { [weak self] result in
             guard let self else { return }
             guard let result else {
@@ -715,7 +716,7 @@ final class ClipboardHistoryService: ObservableObject {
             switch content {
             case .files(let paths): self.promoteFiles(paths)
             case .image(let image): self.promoteImage(image)
-            case .text(let text): self.promote(text)
+            case .text(let text): self.promote(text, announce: result.announce)
             }
         }, didFinish: { [weak self] _ in
             self?.captureState.finish()
@@ -872,7 +873,7 @@ final class ClipboardHistoryService: ObservableObject {
         return (scheme == "http" || scheme == "https") && url.host != nil
     }
 
-    private func promote(_ raw: String) {
+    private func promote(_ raw: String, announce: Bool = true) {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, text.count <= ClipboardHistoryEditing.maxCharacters else { return }
         if UserDefaults.standard.bool(forKey: DefaultsKey.clipboardHistorySkipSensitive),
@@ -886,9 +887,9 @@ final class ClipboardHistoryService: ObservableObject {
             insertPromoted(ClipboardHistoryEntry(id: existing.id,
                                                  text: text,
                                                  copiedAt: Date(),
-                                                 pinnedAt: existing.pinnedAt))
+                                                 pinnedAt: existing.pinnedAt), announce: announce)
         } else {
-            insertPromoted(ClipboardHistoryEntry(text: text))
+            insertPromoted(ClipboardHistoryEntry(text: text), announce: announce)
         }
         normalizeEntryOrder()
         trimToLimit()
@@ -914,14 +915,14 @@ final class ClipboardHistoryService: ObservableObject {
         entries.firstIndex { !$0.isPinned } ?? entries.endIndex
     }
 
-    private func insertPromoted(_ entry: ClipboardHistoryEntry) {
+    private func insertPromoted(_ entry: ClipboardHistoryEntry, announce: Bool = true) {
         if entry.isPinned {
             entries.insert(entry, at: 0)
         } else {
             entries.insert(entry, at: firstRecentIndex)
         }
         latestPasteboardEntry = entry
-        capturedEntry.send(entry)
+        if announce { capturedEntry.send(entry) }
     }
 
     private func normalizeEntryOrder() {

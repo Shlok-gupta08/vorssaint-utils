@@ -1141,6 +1141,18 @@ struct NotchQuickAccessConfiguration: Equatable, Codable {
         return (try? encoder.encode(sanitized())) ?? Data()
     }
 
+    /// An explicit add preserves the person's existing buttons and positions.
+    /// A full layout stays intact so Settings can offer the placement editor.
+    @discardableResult
+    mutating func addSpeechHistory(label: String) -> Bool {
+        guard !actions.contains(.module(.dictation)) else { return true }
+        guard let side = [NotchQuickAccessSide.right, .bottom, .left].first(where: { candidate in
+            buttons.filter { $0.side == candidate }.count < Self.maximumPerSide
+        }) else { return false }
+        buttons.append(NotchQuickButton(action: .module(.dictation), side: side, label: label))
+        return true
+    }
+
     static func stored(in defaults: UserDefaults = .standard) -> Self {
         if let data = defaults.data(forKey: DefaultsKey.notchQuickAccessLayout), !data.isEmpty, data.count <= 32_768,
            let value = try? JSONDecoder().decode(Self.self, from: data), value.version == 1 {

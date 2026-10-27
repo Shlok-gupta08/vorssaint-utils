@@ -15,7 +15,7 @@ struct DictationSettings: View {
     @AppStorage(DefaultsKey.dictationLanguage) private var language = ""
     @AppStorage(DefaultsKey.dictationTranslate) private var translate = false
     @AppStorage(DefaultsKey.dictationMicrophone) private var microphone = ""
-    @AppStorage(DefaultsKey.dictationDelivery) private var delivery = "copy"
+    @AppStorage(DefaultsKey.dictationDelivery) private var delivery = "paste"
     @AppStorage(DefaultsKey.dictationRetainAudio) private var retention = 0
     @AppStorage(DefaultsKey.dictationHistoryLimit) private var historyLimit = 200
     @AppStorage(DefaultsKey.dictationVocabulary) private var vocabulary = ""
@@ -35,17 +35,17 @@ struct DictationSettings: View {
     @State private var tab = "general"
     @State private var apiKey = ""
     @State private var credentialMessage = ""
+    @State private var shortcutMessage = ""
     private var text: DictationStrings { .localized(l10n.language) }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
-                Image(systemName: "waveform").font(.system(size: 23, weight: .medium))
-                    .foregroundStyle(.mint).frame(width: 48, height: 48)
-                    .background(.mint.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                Image(systemName: "mic").font(.system(size: 24, weight: .regular))
+                    .foregroundStyle(.secondary).frame(width: 32, height: 40)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(text.title).font(.title2.bold())
-                    Text("Speak naturally. Keep it on your Mac.").font(.callout).foregroundStyle(.secondary)
+                    Text("On-device speech recognition").font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Toggle(text.title, isOn: $enabled).labelsHidden().toggleStyle(.switch)
@@ -56,7 +56,7 @@ struct DictationSettings: View {
                 Text("Models").tag("models")
                 Text(text.history).tag("history")
                 Text("Advanced").tag("advanced")
-            }.pickerStyle(.segmented).padding(.horizontal, 24).padding(.bottom, 18)
+            }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 24).padding(.bottom, 18)
             if tab == "history" {
                 DictationHistoryView().padding(.horizontal, 24).padding(.bottom, 24)
             } else {
@@ -69,6 +69,8 @@ struct DictationSettings: View {
                 }
             }
         }
+        .frame(maxWidth: 808)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear { microphones = DictationRecorder.microphones(); models.refresh() }
         .onChange(of: permissions.accessibility) { _, _ in speech.syncWithPreferences() }
         .accessibilityIdentifier("settings.dictation")
@@ -94,6 +96,16 @@ struct DictationSettings: View {
                     }
                 }
                 Button("Transcribe an audio file…", action: speech.importAudio).disabled(!enabled || speech.phase.isBusy || models.selectedURL == nil)
+                Divider()
+                HStack {
+                    Button("Open speech history in Dynamic Island") { NotchService.shared.open(.dictation) }
+                        .disabled(!NotchSupport.isEnabled())
+                    Spacer()
+                    Button("Add island quick button") { addHistoryShortcut() }
+                        .disabled(!NotchSupport.isEnabled())
+                        .accessibilityIdentifier("dictation.addIslandShortcut")
+                }
+                if !shortcutMessage.isEmpty { Text(shortcutMessage).font(.caption).foregroundStyle(.secondary) }
             }
             SettingsCard(title: "Shortcut") {
                 HStack {
@@ -159,6 +171,20 @@ struct DictationSettings: View {
     private var availableLanguages: [String] {
         let languages = models.selected?.languages ?? ["en", "hi", "es", "fr", "de", "ja", "zh", "ko", "pt", "it", "ru"]
         return Array(Set(languages + (language.isEmpty ? [] : [language]))).sorted()
+    }
+
+    private func addHistoryShortcut() {
+        var configuration = NotchQuickAccessConfiguration.stored()
+        guard configuration.addSpeechHistory(label: text.history) else {
+            shortcutMessage = "All quick-button positions are occupied. Choose a position in Dynamic Island settings."
+            return
+        }
+        let defaults = UserDefaults.standard
+        let hidden = (defaults.string(forKey: DefaultsKey.notchHiddenModules) ?? "").split(separator: ",").filter { $0 != "dictation" }
+        defaults.set(hidden.joined(separator: ","), forKey: DefaultsKey.notchHiddenModules)
+        defaults.set(configuration.encoded, forKey: DefaultsKey.notchQuickAccessLayout)
+        NotchService.shared.syncWithPreferences()
+        shortcutMessage = "Speech history is now available from the island’s quick buttons."
     }
 
     private var modelSettings: some View {

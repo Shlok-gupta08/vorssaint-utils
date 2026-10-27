@@ -262,6 +262,8 @@ if (( TEST )); then
         Sources/Vorssaint/Core/QuitProtectionStrings.swift
         Sources/Vorssaint/Core/DictationSupport.swift
         Sources/Vorssaint/Core/DictationStrings.swift
+        Sources/Vorssaint/Services/Dictation/DictationEngine.swift
+        Sources/Vorssaint/Services/Dictation/DictationRecorder.swift
         Sources/Vorssaint/Core/Defaults.swift
         Sources/Vorssaint/Core/NotchStrings.swift
         Sources/Vorssaint/Core/NotchTourStrings.swift
