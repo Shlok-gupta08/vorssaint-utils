@@ -305,7 +305,7 @@ enum AgentUsageArchiveTests {
              ["path", "provider", "offset", "identity", "discarding", "modified", "state", "fingerprint"]),
             ("AgentLogState", labels(cursor.state),
              ["session", "project", "model", "turnOpen", "sawUsageRecords", "lastTotal", "fast", "parentSession",
-              "openCodeSessions"])
+              "openCodeSessions", "antigravityStep", "antigravityStatus"])
         ]
         for layout in layouts {
             suite.expect(layout.stored == layout.written,

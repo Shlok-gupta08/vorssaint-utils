@@ -36,18 +36,27 @@ struct NotchMusicView: View {
     var body: some View {
         let controlsRow = hasControlsRow ? NotchLayout.musicControlsRowHeight + NotchLayout.rowSpacing : 0
         let extraHeight = openExtra == nil ? 0 : min(extrasHeight, max(0, size.height - controlsRow))
+        let showsSourcePager = service.playback != nil && service.sources.count > 1
+        let sourcePagerHeight: CGFloat = showsSourcePager ? NotchLayout.musicSourcePagerExtent : 0
         // The player yields to lyrics or the queue only where the island is
         // too short to hold both.
-        let showsPlayer = openExtra == nil || size.height - controlsRow - extraHeight - NotchLayout.rowSpacing >= 88
+        let showsPlayer = openExtra == nil || size.height - controlsRow - extraHeight - NotchLayout.rowSpacing
+            >= NotchLayout.musicMinimumPlayerHeight + sourcePagerHeight
         let playerHeight = max(0, size.height - controlsRow - (openExtra == nil ? 0 : extraHeight + NotchLayout.rowSpacing))
+        // Tabs have their own reserved row; they must never take the space
+        // needed by the elapsed/remaining timeline beneath the track title.
+        let visiblePlayerHeight = max(0, playerHeight - sourcePagerHeight)
         VStack(spacing: NotchLayout.rowSpacing) {
             if showsPlayer {
+                if showsSourcePager {
+                    NotchMediaSourcePager(compact: false).frame(height: NotchLayout.musicSourcePagerHeight)
+                }
                 if let playback = service.playback {
-                    player(playback, height: playerHeight)
+                    player(playback, height: visiblePlayerHeight)
                 } else if !service.awaitingPlayback {
-                    idle(height: playerHeight)
+                    idle(height: visiblePlayerHeight)
                 } else {
-                    Color.clear.frame(height: playerHeight)
+                    Color.clear.frame(height: visiblePlayerHeight)
                 }
             }
             if let openExtra, let playback = service.playback {
@@ -93,6 +102,7 @@ struct NotchMusicView: View {
             NotchService.shared.setPageLayer(.music, close: nil)
             NotchLyricsService.shared.hide()
             service.setQueueVisible(false)
+            service.endSourceBrowsing()
         }
     }
 
@@ -113,11 +123,7 @@ struct NotchMusicView: View {
                 .frame(width: 76, height: 76)
                 .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             VStack(alignment: .leading, spacing: 6) {
-                if !service.sources.isEmpty || !service.sourceIsAutomatic {
-                    sourcePicker(nil)
-                } else {
-                    Text(text.mediaNothingPlaying).font(.system(size: 17, weight: .semibold))
-                }
+                Text(text.mediaNothingPlaying).font(.system(size: 17, weight: .semibold))
                 Text(FeatureStrings.notch(l10n.language).musicHint)
                     .font(.system(size: 12)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -137,8 +143,8 @@ struct NotchMusicView: View {
         .accessibilityAddTraits(extra == target ? [.isSelected] : [])
     }
 
-    /// The artwork fills the row; the details beside it drop their artist
-    /// line, then the timeline, before they would overflow a short island.
+    /// Short players can drop their artist line. The timeline stays visible;
+    /// the containing page scrolls if the display cannot hold the full player.
     private func player(_ playback: NotchPlayback, height: CGFloat) -> some View {
         let roomy = height >= 140
         return HStack(spacing: roomy ? 20 : 16) {
@@ -154,10 +160,9 @@ struct NotchMusicView: View {
             .help(text.mediaNowPlaying)
             .accessibilityLabel(text.mediaNowPlaying)
             ViewThatFits(in: .vertical) {
-                if roomy { details(playback, titleLines: 2, artist: true, timeline: true, roomy: roomy) }
-                details(playback, titleLines: 1, artist: true, timeline: true, roomy: roomy)
-                details(playback, titleLines: 1, artist: false, timeline: true, roomy: roomy)
-                details(playback, titleLines: 1, artist: false, timeline: false, roomy: roomy)
+                if roomy { details(playback, titleLines: 2, artist: true, roomy: roomy) }
+                details(playback, titleLines: 1, artist: true, roomy: roomy)
+                details(playback, titleLines: 1, artist: false, roomy: roomy)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
@@ -165,7 +170,7 @@ struct NotchMusicView: View {
         .modifier(NotchMusicSwipeFeedback())
     }
 
-    private func details(_ playback: NotchPlayback, titleLines: Int, artist: Bool, timeline: Bool, roomy: Bool) -> some View {
+    private func details(_ playback: NotchPlayback, titleLines: Int, artist: Bool, roomy: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -173,9 +178,6 @@ struct NotchMusicView: View {
                         .font(.system(size: roomy ? 20 : 16, weight: .semibold))
                         .lineLimit(titleLines).help(playback.track.title ?? text.mediaNowPlaying)
                     Spacer(minLength: 0)
-                    if service.sources.count > 1 || !service.sourceIsAutomatic {
-                        sourcePicker(playback)
-                    }
                     if playback.isPlaying {
                         NotchLiveEqualizerBars(bars: 3, barWidth: 2.5, height: 12, tint: accent)
                             .transition(.opacity)
@@ -189,45 +191,92 @@ struct NotchMusicView: View {
                         .lineLimit(1)
                 }
             }
-            if timeline { NotchMusicTimeline(playback: playback, service: service, tint: accent) }
+            NotchMusicTimeline(playback: playback, service: service, tint: accent)
             NotchMusicTransport(playback: playback, compact: !roomy).frame(maxWidth: .infinity)
         }
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func sourcePicker(_ playback: NotchPlayback?) -> some View {
-        let extras = FeatureStrings.notchMusicExtras(l10n.language)
-        let pid = playback?.track.appPID
-        let name = service.sources.first(where: { $0.pid == pid })?.displayName
-            ?? pid.flatMap { NSRunningApplication(processIdentifier: $0)?.localizedName }
-            ?? playback?.track.appBundleIdentifier ?? extras.playbackSource
-        return Menu {
-            Button { service.selectSource(nil) } label: {
-                if service.sourceIsAutomatic { Label(extras.automaticSource, systemImage: "checkmark") }
-                else { Text(extras.automaticSource) }
-            }
-            Divider()
-            ForEach(service.sources, id: \.pid) { source in
-                let title = source.displayName ?? NSRunningApplication(processIdentifier: source.pid)?.localizedName ?? source.bundleIdentifier
-                Button { service.selectSource(source.selection) } label: {
-                    // The chosen row, even while the automatic player fills its gap.
-                    if source.pid == service.selectedSourcePID {
-                        Label(title, systemImage: "checkmark")
-                    } else { Text(title) }
+}
+
+/// A compact, horizontally scrollable session switcher. It uses the same
+/// session-only choice as macOS Now Playing, so swiping through media never
+/// changes a saved preference.
+private struct NotchMediaSourcePager: View {
+    var compact: Bool
+    @ObservedObject private var service = NotchMusicService.shared
+    @ObservedObject private var l10n = L10n.shared
+    @State private var focusedPID: Int32?
+
+    private var sources: [NotchPlaybackSource] { service.orderedSources }
+    private var label: String { FeatureStrings.notchMusicExtras(l10n.language).playbackSource }
+    private var height: CGFloat { compact ? 24 : 32 }
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: compact ? 6 : 8) {
+                ForEach(sources, id: \.pid) { source in
+                    sourceTab(source)
                 }
             }
-        } label: {
-            Text(name).lineLimit(1).truncationMode(.tail)
+            .padding(.horizontal, 1)
         }
-        .menuStyle(.borderlessButton)
-        .frame(maxWidth: 110)
-        .fixedSize()
-        .font(.system(size: 10, weight: .medium))
-        .foregroundStyle(.secondary)
-        .accessibilityLabel(extras.playbackSource)
-        .accessibilityValue([service.sourceIsAutomatic ? extras.automaticSource : nil,
-                             playback == nil ? nil : name].compactMap { $0 }.joined(separator: ", "))
-        .help(extras.playbackSource)
+        .scrollIndicators(.never)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(height: height)
+        .clipped()
+        .onAppear { reconcileSelection() }
+        .onChange(of: service.sources) { reconcileSelection() }
+        .onChange(of: service.playback?.track.appPID) { _, _ in
+            if !service.isBrowsingSources { reconcileSelection() }
+        }
+        .onDisappear { service.endSourceBrowsing() }
+        .accessibilityLabel(label)
+    }
+
+    private func sourceTab(_ source: NotchPlaybackSource) -> some View {
+        let active = focusedPID == source.pid
+        let title = source.displayName
+            ?? NSRunningApplication(processIdentifier: source.pid)?.localizedName
+            ?? source.bundleIdentifier
+        return Button {
+            focusedPID = source.pid
+            service.browseSource(source.selection)
+        } label: {
+            HStack(spacing: compact ? 5 : 7) {
+                if let icon = NSRunningApplication(processIdentifier: source.pid)?.icon {
+                    Image(nsImage: icon).resizable().interpolation(.high).frame(width: height - 8, height: height - 8)
+                } else {
+                    Image(systemName: "play.square.fill").font(.system(size: compact ? 10 : 12, weight: .medium))
+                }
+                if !compact || active {
+                    Text(title).lineLimit(1).truncationMode(.tail)
+                }
+                if source.isPlaying {
+                    Circle().fill(active ? .black.opacity(0.5) : .white.opacity(0.9)).frame(width: 4, height: 4)
+                }
+            }
+            .font(.system(size: compact ? 10 : 11, weight: active ? .semibold : .medium))
+            .foregroundStyle(active ? .black : .white.opacity(0.78))
+            .padding(.horizontal, compact ? 7 : 9)
+            .frame(height: height)
+            .background(active ? .white : .white.opacity(0.08), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(NotchButtonStyle(cornerRadius: height / 2, lifts: false))
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(active ? [.isSelected] : [])
+        .help(title)
+    }
+
+    private func reconcileSelection() {
+        guard sources.contains(where: { $0.pid == focusedPID }) else {
+            focusedPID = service.playback?.track.appPID ?? service.selectedSourcePID ?? sources.first?.pid
+            return
+        }
+        if !service.isBrowsingSources {
+            focusedPID = service.playback?.track.appPID ?? service.selectedSourcePID ?? focusedPID
+        }
     }
 }
 
@@ -387,7 +436,8 @@ struct NotchMusicTimeline: View {
                     .foregroundStyle(.secondary)
                 }
             }
-            .frame(height: 30)
+            .frame(height: NotchLayout.musicTimelineHeight)
+            .accessibilityIdentifier("notch.music.timeline")
             .onChange(of: playback.track) { clearScrub() }
             .onChange(of: playback.commandContext) { clearScrub() }
             .onChange(of: playback.sampledAt) {
@@ -430,42 +480,55 @@ struct NotchMusicControlsView: View {
     private var text: RadialMenuFeatureStrings { FeatureStrings.radialMenu(l10n.language) }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Button { notch.select(.music) } label: {
-                NotchArtwork(image: music.artwork, size: max(40, height - 24))
-            }
-            .buttonStyle(NotchButtonStyle(cornerRadius: 16))
-            .accessibilityLabel(text.mediaNowPlaying)
-            .help(text.mediaNowPlaying)
-            VStack(alignment: .leading, spacing: 4) {
+        let layout = NotchMusicCardLayout(height: height, hasTabs: music.sources.count > 1,
+                                          hasTimeline: music.hasPlaybackTimeline)
+        VStack(spacing: NotchMusicCardLayout.tabsSpacing) {
+            HStack(spacing: 12) {
                 Button { notch.select(.music) } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(music.playback?.track.title ?? (music.awaitingPlayback ? text.mediaNowPlaying : text.mediaNothingPlaying))
-                            .font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                        // A shortened card keeps the title and the transport.
-                        if height >= 84 {
-                            Text(music.commandFailed ? FeatureStrings.notchMusicExtras(l10n.language).playbackFailed
-                                 : music.playback?.track.artist ?? music.playback?.track.album
-                                    ?? (music.awaitingPlayback ? "" : FeatureStrings.notch(l10n.language).musicHint))
-                                .font(.system(size: 11))
-                                .foregroundStyle(music.commandFailed ? .orange : .secondary)
-                                .lineLimit(1)
+                    NotchArtwork(image: music.artwork, size: layout.artworkSide)
+                }
+                .buttonStyle(NotchButtonStyle(cornerRadius: 16))
+                .accessibilityLabel(text.mediaNowPlaying)
+                .help(text.mediaNowPlaying)
+                VStack(alignment: .leading, spacing: 4) {
+                    Button { notch.select(.music) } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(music.playback?.track.title ?? (music.awaitingPlayback ? text.mediaNowPlaying : text.mediaNothingPlaying))
+                                .font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                            if layout.showsArtist {
+                                Text(music.commandFailed ? FeatureStrings.notchMusicExtras(l10n.language).playbackFailed
+                                     : music.playback?.track.artist ?? music.playback?.track.album
+                                        ?? (music.awaitingPlayback ? "" : FeatureStrings.notch(l10n.language).musicHint))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(music.commandFailed ? .orange : .secondary)
+                                    .lineLimit(1)
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    if let playback = music.playback {
+                        NotchMusicTransport(playback: playback, compact: true).frame(maxWidth: .infinity)
+                    }
                 }
-                .buttonStyle(.plain)
-                if let playback = music.playback {
-                    NotchMusicTransport(playback: playback, compact: true).frame(maxWidth: .infinity)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: layout.mainHeight)
+            if layout.showsTimeline, let playback = music.playback {
+                NotchMusicTimeline(playback: playback, service: music, tint: music.artworkTint?.color ?? .white)
+                    .frame(height: NotchLayout.musicTimelineHeight)
+            }
+            if layout.showsTabs {
+                NotchMediaSourcePager(compact: true).frame(height: NotchMusicCardLayout.tabsHeight)
+            }
         }
         .padding(.horizontal, 12)
+        .padding(.vertical, layout.verticalInset)
         .frame(maxWidth: .infinity)
         .frame(height: height)
         .modifier(NotchControlSurface(cornerRadius: 18))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onAppear { if !preview { music.refreshAutomation() } }
     }
 }

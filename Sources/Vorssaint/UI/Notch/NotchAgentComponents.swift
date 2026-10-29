@@ -11,6 +11,7 @@ extension AgentProvider {
         case .claude: return Color(red: 0.85, green: 0.47, blue: 0.34)
         case .codex: return Color(red: 0.49, green: 0.60, blue: 1.0)
         case .opencode: return Color(red: 0.06, green: 0.73, blue: 0.51)
+        case .antigravity: return Color(red: 0.50, green: 0.68, blue: 1.0)
         }
     }
 }
@@ -350,6 +351,14 @@ enum AgentMarks {
     }
 
     private static func lookUp(_ provider: AgentProvider) -> Mark? {
+        if provider == .antigravity,
+           let url = Bundle.main.url(forResource: "AntigravityDarkMark", withExtension: "png", subdirectory: "Images"),
+           let image = NSImage(contentsOf: url) {
+            // Preserve the maker's Google-color gradient against the island's
+            // dark background. CoreSVG drops the original SVG's color filters,
+            // so this ships as a correctly rasterized, transparent image.
+            return .icon(image)
+        }
         for identifier in provider.appIdentifiers {
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier) else { continue }
             if let bundle = Bundle(url: url) {
@@ -373,6 +382,7 @@ private extension AgentProvider {
         case .claude: return [AgentClaudeAppUsage.bundleIdentifier]
         case .codex: return AgentCodexServer.appIdentifiers
         case .opencode: return ["ai.opencode.desktop", "ai.opencode.desktop.beta", "ai.opencode.desktop.dev"]
+        case .antigravity: return ["com.google.antigravity", "com.google.antigravity-ide"]
         }
     }
 
@@ -386,7 +396,7 @@ private extension AgentProvider {
         case .claude: return ["TrayIconTemplate"]
         case .codex: return ["chatgptTemplate"]
         // The OpenCode app shows nothing in the menu bar; its icon stands in.
-        case .opencode: return []
+        case .opencode, .antigravity: return []
         }
     }
 }

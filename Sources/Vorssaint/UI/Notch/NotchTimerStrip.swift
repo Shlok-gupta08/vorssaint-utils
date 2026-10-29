@@ -119,7 +119,7 @@ struct NotchCompanionMark: View {
             downloadIndicator
         case .agents:
             let working = Self.working
-            HStack(spacing: 1) {
+            HStack(spacing: NotchAgentSupport.stripMarkSpacing) {
                 ForEach(working) { NotchAgentGlyph(provider: $0, size: Self.agentMarkSize(working.count, geometry)) }
             }
         case .calendar:

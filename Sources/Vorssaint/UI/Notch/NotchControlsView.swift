@@ -15,13 +15,25 @@ struct NotchControlsView: View {
     let size: CGSize
     @ObservedObject private var l10n = L10n.shared
     @AppStorage(DefaultsKey.brightnessControlEnabled) private var brightnessEnabled = false
+    @ObservedObject private var music = NotchMusicService.shared
+    private var scale: CGFloat { service.geometry.expandedScale }
+    private var canvasSize: CGSize { CGSize(width: size.width / scale, height: size.height / scale) }
 
     var body: some View {
+        controls
+            .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
+            .scaleEffect(scale, anchor: .topLeading)
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    @ViewBuilder private var controls: some View {
         let items = NotchSupport.controls()
         let levels = items.filter { $0 == .volume || $0 == .brightness }
         let shortcuts = items.filter { $0 != .volume && $0 != .brightness && $0 != .music }
         let layout = NotchLayout.controls(hasCards: items.contains(.music) || !levels.isEmpty,
-                                          shortcutCount: shortcuts.count, width: size.width, height: size.height)
+                                          shortcutCount: shortcuts.count, width: canvasSize.width, height: canvasSize.height,
+                                          hasMediaTabs: items.contains(.music) && music.sources.count > 1,
+                                          hasPlaybackTimeline: items.contains(.music) && music.hasPlaybackTimeline)
         if items.isEmpty {
             NotchEmptyView(symbol: "slider.horizontal.3", message: FeatureStrings.notch(l10n.language).empty)
         } else {
@@ -31,7 +43,7 @@ struct NotchControlsView: View {
                 }
                 if layout.shortcutRows > 0 {
                     NotchRail(items: shortcuts, rows: layout.shortcutRows, itemWidth: NotchLayout.shortcutWidth,
-                              width: size.width, spacing: NotchLayout.shortcutSpacing, rowSpacing: NotchLayout.shortcutSpacing) { item in
+                              width: canvasSize.width, spacing: NotchLayout.shortcutSpacing, rowSpacing: NotchLayout.shortcutSpacing) { item in
                         shortcut(item)
                     }
                 }
@@ -45,7 +57,7 @@ struct NotchControlsView: View {
     @ViewBuilder private func cards(levels: [NotchControlItem], music: Bool, height: CGFloat) -> some View {
         let musicWidth = NotchLayout.musicCardMinimumWidth(height: height)
         let required = music ? musicWidth + (levels.isEmpty ? 0 : 160 + NotchLayout.rowSpacing) : 0
-        if required > size.width {
+        if required > canvasSize.width {
             ScrollView(.horizontal) {
                 cardRow(levels: levels, music: music, height: height).frame(width: required)
             }
@@ -139,6 +151,8 @@ struct NotchControlsView: View {
             NotchActionTile(symbol: item.symbol, title: item.title(l10n), action: service.openScratchpad)
         case .timer: NotchTimerTile(service: service)
         case .calendar: NotchCalendarTile(service: service)
+        case .agents:
+            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.select(.agents) }
         case .volume, .brightness, .music: EmptyView()
         }
     }
@@ -161,6 +175,7 @@ extension NotchControlItem {
         case .music: return NotchModule.music.title(l10n.language)
         case .timer: return NotchModule.timer.title(l10n.language)
         case .calendar: return NotchModule.calendar.title(l10n.language)
+        case .agents: return NotchModule.agents.title(l10n.language)
         }
     }
 }

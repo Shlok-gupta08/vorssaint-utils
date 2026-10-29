@@ -129,6 +129,12 @@ enum NotchSize: String, CaseIterable {
     static let heightRange = 260.0...640.0
     static let defaultWidth = 440.0
     static let defaultHeight = 480.0
+    static let expandedScaleRange = 0.8...1.6
+    static let defaultExpandedScale = 1.0
+
+    static func expandedScale(_ value: Double) -> Double {
+        clamped(value, to: expandedScaleRange, fallback: defaultExpandedScale)
+    }
 
     static func clamped(_ value: Double, to range: ClosedRange<Double>, fallback: Double) -> Double {
         value.isFinite ? min(range.upperBound, max(range.lowerBound, value)) : fallback
@@ -222,6 +228,8 @@ enum NotchLayout {
     static let rowSpacing: CGFloat = 10
     static let cardHeight: CGFloat = 96
     static let minimumCardHeight: CGFloat = 68
+    static let mediaTabsCardHeight: CGFloat = 128
+    static let minimumMediaTabsCardHeight: CGFloat = 112
     static let shortcutHeight: CGFloat = 74
     static let shortcutWidth: CGFloat = 76
     static let shortcutSpacing: CGFloat = 8
@@ -243,6 +251,10 @@ enum NotchLayout {
     static let emptyHeight: CGFloat = 140
     static let musicControlsRowHeight: CGFloat = 32
     static let musicIdleHeight: CGFloat = 84
+    static let musicTimelineHeight: CGFloat = 30
+    static let musicMinimumPlayerHeight: CGFloat = 112
+    static let musicSourcePagerHeight: CGFloat = 36
+    static var musicSourcePagerExtent: CGFloat { musicSourcePagerHeight + rowSpacing }
     static let timerTopRowHeight: CGFloat = 36
     static let timerRowSpacing: CGFloat = 8
     /// The Pomodoro's breaks and sessions as one line of readouts under the ruler.
@@ -428,22 +440,26 @@ enum NotchLayout {
     /// Square artwork, its gap, the three compact transport buttons, and
     /// horizontal padding. Track titles truncate within the remaining space.
     static func musicCardMinimumWidth(height: CGFloat) -> CGFloat {
-        max(40, height - 24) + 12 + 120 + 24
+        min(72, max(40, height - 24)) + 12 + 120 + 24
     }
 
     /// The home page: one row of cards (playback and levels) over a rail of
     /// shortcuts. A tight budget shortens the cards before it drops a row.
-    static func controls(hasCards: Bool, shortcutCount: Int, width: CGFloat, height: CGFloat) -> NotchControlsLayout {
+    static func controls(hasCards: Bool, shortcutCount: Int, width: CGFloat, height: CGFloat,
+                         hasMediaTabs: Bool = false, hasPlaybackTimeline: Bool = false) -> NotchControlsLayout {
         guard hasCards || shortcutCount > 0 else { return NotchControlsLayout(cardRow: 0, shortcutRows: 0) }
+        let timeline = hasPlaybackTimeline ? musicTimelineHeight + NotchMusicCardLayout.tabsSpacing : 0
+        let preferredCard = (hasMediaTabs ? mediaTabsCardHeight : cardHeight) + timeline
+        let minimumCard = (hasMediaTabs ? minimumMediaTabsCardHeight : minimumCardHeight) + timeline
         var rows = 0
         if shortcutCount > 0 {
-            let remaining = hasCards ? height - minimumCardHeight - rowSpacing : height
+            let remaining = hasCards ? height - minimumCard - rowSpacing : height
             rows = railRows(count: shortcutCount,
                             perRow: railCapacity(width: width, itemWidth: shortcutWidth, spacing: shortcutSpacing),
                             rowHeight: shortcutHeight, spacing: shortcutSpacing, height: remaining)
         }
         let rail = rows > 0 ? railHeight(rows: rows, rowHeight: shortcutHeight, spacing: shortcutSpacing) + rowSpacing : 0
-        let cardRow = hasCards ? min(cardHeight, max(minimumCardHeight, height - rail)) : 0
+        let cardRow = hasCards ? min(preferredCard, max(minimumCard, height - rail)) : 0
         return NotchControlsLayout(cardRow: cardRow, shortcutRows: rows)
     }
 
@@ -477,6 +493,28 @@ enum NotchLayout {
     /// volume and the lyrics or queue toggles.
     static func musicPlayerHeight(layout: NotchSize, height: CGFloat) -> CGFloat {
         min(layout == .spacious ? 148 : 120, max(88, height - musicControlsRowHeight - rowSpacing))
+    }
+}
+
+/// The artwork/transport row and the session tabs share one card's measured
+/// height. Insets belong inside the surface, including on shortened cards.
+struct NotchMusicCardLayout {
+    static let tabsHeight: CGFloat = 24
+    static let tabsSpacing: CGFloat = 8
+    let showsTabs: Bool
+    let showsTimeline: Bool
+    let verticalInset: CGFloat
+    let mainHeight: CGFloat
+    var artworkSide: CGFloat { min(72, mainHeight) }
+    var showsArtist: Bool { mainHeight >= 64 }
+
+    init(height: CGFloat, hasTabs: Bool, hasTimeline: Bool = false) {
+        showsTimeline = hasTimeline
+        let timeline = hasTimeline ? NotchLayout.musicTimelineHeight + Self.tabsSpacing : 0
+        showsTabs = hasTabs && height >= NotchLayout.minimumMediaTabsCardHeight + timeline
+        let tabs = showsTabs ? Self.tabsHeight + Self.tabsSpacing : 0
+        verticalInset = min(12, max(0, (height - tabs - timeline - 56) / 2))
+        mainHeight = max(0, height - tabs - timeline - verticalInset * 2)
     }
 }
 
@@ -751,11 +789,12 @@ enum NotchCapsuleLayout {
 
     static func barsHeight(_ geometry: NotchGeometry) -> CGFloat { min(16, max(6, geometry.stripBodyHeight - 8)) }
 
-    /// Two working agents share a smaller mark, each in a frame wider than it.
-    static func agentMarkSize(working: Int) -> CGFloat { working > 1 ? 10 : 12 }
+    /// Each additional agent widens the capsule instead of shrinking its marks.
+    static func agentMarkSize(working: Int) -> CGFloat { 12 }
     static func agentMarksWidth(working: Int) -> CGFloat {
         let count = max(1, working)
-        return CGFloat(count) * (agentMarkSize(working: count) * 1.45 + 1) + CGFloat(count - 1)
+        return CGFloat(count) * (agentMarkSize(working: count) * 1.45 + 1)
+            + CGFloat(count - 1) * NotchAgentSupport.stripMarkSpacing
     }
 
     /// A level's reading keeps the room of its widest value, so its meter
@@ -972,8 +1011,8 @@ enum NotchControlSetupRequirement: Equatable {
 }
 
 enum NotchControlItem: String, CaseIterable, Identifiable {
-    case volume, brightness, music, mixer, keepAwake, timer, calendar, microphone, screenshot, recording, speedTest, panel, commandBar, scratchpad
-    static let defaultHidden = "microphone,screenshot,recording,speedTest,panel,commandBar,scratchpad"
+    case volume, brightness, music, mixer, keepAwake, timer, calendar, microphone, screenshot, recording, speedTest, panel, commandBar, scratchpad, agents
+    static let defaultHidden = "microphone,screenshot,recording,speedTest,panel,commandBar,scratchpad,agents"
     var id: String { rawValue }
 
     var symbol: String {
@@ -993,6 +1032,7 @@ enum NotchControlItem: String, CaseIterable, Identifiable {
         case .music: return NotchModule.music.symbol
         case .timer: return NotchModule.timer.symbol
         case .calendar: return NotchModule.calendar.symbol
+        case .agents: return NotchModule.agents.symbol
         }
     }
 
@@ -1012,6 +1052,7 @@ enum NotchControlItem: String, CaseIterable, Identifiable {
         case .music: return .page(.music, feature: nil)
         case .timer: return .page(.timer, feature: .notchTimer)
         case .calendar: return .page(.calendar, feature: .notchCalendar)
+        case .agents: return .page(.agents, feature: .notchAgents)
         }
     }
 
@@ -1031,6 +1072,7 @@ enum NotchControlItem: String, CaseIterable, Identifiable {
         case .music: return NotchSupport.modules(in: defaults).contains(.music)
         case .timer: return NotchSupport.modules(in: defaults).contains(.timer)
         case .calendar: return NotchSupport.modules(in: defaults).contains(.calendar)
+        case .agents: return NotchAgentSupport.isEnabled(in: defaults)
         }
     }
 }
@@ -1690,11 +1732,15 @@ struct NotchMenuBarMeasurements {
 struct NotchGeometry: Equatable {
     let screen: CGRect
     let cameraWidth: CGFloat
+    /// The real cutout, before optional visual fitting. Motion must never
+    /// narrow through this width, even when the fitted resting strip is smaller.
+    let physicalCameraWidth: CGFloat
     let cameraHeight: CGFloat
     let isNotched: Bool
     let layout: NotchSize
     let customWidth: CGFloat
     let customHeight: CGFloat
+    private(set) var expandedScale: CGFloat
     let menuBarHeight: CGFloat
     /// Nil hangs the island from the top edge. A capsule floats this far
     /// inside the menu bar, above and below its strips.
@@ -1720,13 +1766,15 @@ struct NotchGeometry: Equatable {
          menuBarHeight: CGFloat = 24, compactSideRoom: CGFloat? = nil,
          customWidth: Double = NotchSize.defaultWidth, customHeight: Double = NotchSize.defaultHeight,
          cameraFit: NotchCameraFit = .zero, silhouette: NotchSilhouette = .notch, capsuleFit: NotchCapsuleFit = .zero,
-         outline: Bool = false) {
+         outline: Bool = false, expandedScale: Double = NotchSize.defaultExpandedScale) {
         self.screen = screen
         self.layout = layout
         self.customWidth = NotchSize.clamped(customWidth, to: NotchSize.widthRange, fallback: NotchSize.defaultWidth)
         self.customHeight = NotchSize.clamped(customHeight, to: NotchSize.heightRange, fallback: NotchSize.defaultHeight)
+        self.expandedScale = NotchSize.expandedScale(expandedScale)
         let barHeight = menuBarHeight.isFinite ? min(64, max(16, menuBarHeight)) : 24
         isNotched = safeAreaTop.isFinite && safeAreaTop > 0 && cameraWidth.isFinite && cameraWidth > 0
+        physicalCameraWidth = isNotched ? cameraWidth : 0
         // Only a physical camera has an outline to match; a simulated one follows the bar.
         let fit = isNotched ? cameraFit : .zero
         // A capsule replaces only a simulated cutout. It is as wide as the
@@ -1755,6 +1803,10 @@ struct NotchGeometry: Equatable {
 
     /// The island floats in the menu bar instead of hanging from the top edge.
     var floats: Bool { floatingGap != nil }
+
+    func coveringPhysicalCamera(_ size: CGSize) -> CGSize {
+        CGSize(width: max(size.width, physicalCameraWidth), height: size.height)
+    }
 
     func hasSameMenuBar(as other: NotchGeometry) -> Bool {
         screen == other.screen && cameraWidth == other.cameraWidth
@@ -2007,6 +2059,17 @@ struct NotchGeometry: Equatable {
     }
     var noticeCameraGap: CGFloat { cameraWidth }
 
+    /// A short, single-row meter below the physical cutout. Its footprint is
+    /// fixed across percentages, key repeats and the expanded-page size setting.
+    var underNotchLevelTop: CGFloat { stripHeight + 8 }
+    var underNotchLevelSize: CGSize {
+        // At full size the camera fits inside the flat bottom edge, not merely
+        // the bounding box: shoulders and lower corners consume width.
+        let corners = NotchLayout.shoulder(height: cameraHeight) + NotchLayout.surfaceRadius(height: cameraHeight)
+        return CGSize(width: min(screen.width - 24, ceil(max(264, max(cameraWidth, physicalCameraWidth) + max(32, corners * 2)))),
+               height: min(screen.height - 48, underNotchLevelTop + 22 + 12))
+    }
+
     func noticeSize(wingWidth: CGFloat) -> CGSize {
         CGSize(width: min(screen.width - 24, noticeCameraGap + wingWidth * 2), height: stripHeight)
     }
@@ -2029,7 +2092,8 @@ struct NotchGeometry: Equatable {
     }
     var expanded: CGSize { expandedSize(module: .controls) }
     var expandedWidth: CGFloat {
-        let preferred = NotchLayout.preferredWidth(layout, custom: customWidth)
+        let insets = NotchLayout.horizontalInset * 2
+        let preferred = insets + (NotchLayout.preferredWidth(layout, custom: customWidth) - insets) * expandedScale
         return min(max(preferred, cameraWidth + 36), screen.width - 24 - NotchQuickAccessLayout.gutter * 2)
     }
     var contentWidth: CGFloat { max(0, expandedWidth - NotchLayout.horizontalInset * 2) }
@@ -2073,12 +2137,29 @@ struct NotchGeometry: Equatable {
     /// detail's measured content, which it fits instead of the whole page.
     func expandedSize(module: NotchModule, detail: Bool = false, panel: Bool = false,
                       detailHeight: CGFloat? = nil, shortcutCount: Int = 4,
-                      sliderCount: Int = 2, controlsHaveMusic: Bool = false, musicHasContent: Bool = true,
+                      sliderCount: Int = 2, controlsHaveMusic: Bool = false, controlsHaveSourceTabs: Bool = false,
+                      musicHasContent: Bool = true, musicHasSourceTabs: Bool = false, musicHasTimeline: Bool = false,
                       musicHasControlsRow: Bool = true, musicExtraHeight: CGFloat = 0,
                       fileMediaHeight: CGFloat? = nil, systemCards: Int = 6, toolCount: Int? = 8,
                       capturePreviewHeight: CGFloat? = nil,
                       timerHasSession: Bool = false, timerMode: NotchTimerMode = .timer,
                       agentsHeight: CGFloat? = nil) -> CGSize {
+        if expandedScale != 1 {
+            // Size from the preset's reference layout before scaling. A wider
+            // panel may reflow its contents into fewer rows, but that must not
+            // make the island shrink as its size slider increases.
+            var reference = self
+            reference.expandedScale = 1
+            let size = reference.expandedSize(module: module, detail: detail, panel: panel,
+                detailHeight: detailHeight, shortcutCount: shortcutCount, sliderCount: sliderCount,
+                controlsHaveMusic: controlsHaveMusic, controlsHaveSourceTabs: controlsHaveSourceTabs,
+                musicHasContent: musicHasContent, musicHasSourceTabs: musicHasSourceTabs, musicHasTimeline: musicHasTimeline,
+                musicHasControlsRow: musicHasControlsRow, musicExtraHeight: musicExtraHeight,
+                fileMediaHeight: fileMediaHeight, systemCards: systemCards, toolCount: toolCount,
+                capturePreviewHeight: capturePreviewHeight, timerHasSession: timerHasSession,
+                timerMode: timerMode, agentsHeight: agentsHeight)
+            return scaledExpandedSize(size, from: reference)
+        }
         let budget = contentBudget
         let showsCapturePreview = module == .captures && !detail && capturePreviewHeight != nil
         let showsFileMedia = module == .files && !detail && fileMediaHeight != nil
@@ -2098,12 +2179,15 @@ struct NotchGeometry: Equatable {
             case .controls:
                 let sliders = min(2, max(0, sliderCount))
                 let home = NotchLayout.controls(hasCards: controlsHaveMusic || sliders > 0, shortcutCount: max(0, shortcutCount),
-                                                width: contentWidth, height: budget)
+                                                width: contentWidth, height: budget,
+                                                hasMediaTabs: controlsHaveMusic && controlsHaveSourceTabs,
+                                                hasPlaybackTimeline: controlsHaveMusic && musicHasTimeline)
                 contentHeight = min(budget, home.height == 0 ? NotchLayout.emptyHeight : home.height)
             case .music:
                 let controlsRow = musicHasControlsRow ? NotchLayout.musicControlsRowHeight + NotchLayout.rowSpacing : 0
                 let player = musicHasContent ? NotchLayout.musicPlayerHeight(layout: layout, height: budget) : NotchLayout.musicIdleHeight
-                contentHeight = min(budget, player + controlsRow) + max(0, musicExtraHeight)
+                let sourceTabs = musicHasContent && musicHasSourceTabs ? NotchLayout.musicSourcePagerExtent : 0
+                contentHeight = min(budget, player + controlsRow + sourceTabs) + max(0, musicExtraHeight)
             case .system:
                 let cards = max(0, systemCards)
                 contentHeight = min(budget, cards == 0 ? NotchLayout.emptyHeight
@@ -2126,7 +2210,7 @@ struct NotchGeometry: Equatable {
         var preferredHeight = headerTopInset + headerChromeHeight + contentHeight
         if layout == .custom { preferredHeight = min(preferredHeight, customHeight) }
         return CGSize(width: expandedWidth,
-                      height: min(preferredHeight, screen.height - 48 - quickAccessBottomInset))
+                      height: boundedExpandedHeight(preferredHeight))
     }
 
     /// Leave room for the row indicator without narrowing the tiles below
@@ -2145,10 +2229,27 @@ struct NotchGeometry: Equatable {
     }
 
     func sectionPickerSize(count: Int) -> CGSize {
+        if expandedScale != 1 {
+            var reference = self
+            reference.expandedScale = 1
+            return scaledExpandedSize(reference.sectionPickerSize(count: count), from: reference)
+        }
         let content = min(pageBudget, count == 0 ? NotchLayout.emptyHeight
             : NotchLayout.railHeight(rows: sectionRows(count: count), rowHeight: NotchLayout.sectionTileHeight, spacing: NotchLayout.sectionSpacing))
         let desiredHeight = headerTopInset + headerChromeHeight + content
-        return CGSize(width: expandedWidth, height: min(desiredHeight, screen.height - 48 - quickAccessBottomInset))
+        return CGSize(width: expandedWidth, height: boundedExpandedHeight(desiredHeight))
+    }
+
+    /// Header and edge padding are native-sized. Scale only the page's canvas,
+    /// so an enlarged shell never reserves an unused strip below its content.
+    private func scaledExpandedSize(_ size: CGSize, from reference: NotchGeometry) -> CGSize {
+        let content = reference.contentSize(for: size)
+        return CGSize(width: expandedWidth,
+                      height: boundedExpandedHeight(headerTopInset + headerChromeHeight + content.height * expandedScale))
+    }
+
+    private func boundedExpandedHeight(_ height: CGFloat) -> CGFloat {
+        min(height, max(0, screen.height - 48 - quickAccessBottomInset - floatingDrop))
     }
 
     func contentSize(for size: CGSize) -> CGSize {
@@ -2321,6 +2422,30 @@ enum NotchMotion {
             return (end + (end - start) * CGFloat(swing)).rounded(.up)
         }
         return CGSize(width: side(from.width, to.width, width: true), height: side(from.height, to.height, width: false))
+    }
+}
+
+/// Both dimensions follow one curve, so a camera-level meter glides directly
+/// between its closed and open shapes without separate motion phases.
+enum NotchLevelMotion {
+    static func duration(from: CGSize, to: CGSize) -> TimeInterval {
+        from == to ? 0 : 0.32
+    }
+
+    static func size(at time: TimeInterval, from: CGSize, to: CGSize) -> CGSize {
+        let duration = duration(from: from, to: to)
+        guard duration > 0 else { return to }
+        let t = min(1, max(0, time / duration))
+        let progress = t * t * t * (t * (t * 6 - 15) + 10)
+        return CGSize(width: from.width + (to.width - from.width) * progress,
+                      height: from.height + (to.height - from.height) * progress)
+    }
+
+    static func frames(from: CGSize, to: CGSize) -> (sizes: [CGSize], keyTimes: [Double], duration: TimeInterval) {
+        let duration = duration(from: from, to: to)
+        let count = max(1, Int((duration * 120).rounded(.up)))
+        let times = (0...count).map { Double($0) / Double(count) }
+        return (times.map { size(at: duration * $0, from: from, to: to) }, times, duration)
     }
 }
 

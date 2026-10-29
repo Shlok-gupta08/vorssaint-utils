@@ -38,6 +38,10 @@ struct AgentLogState: Equatable {
     var parentSession = ""
     /// OpenCode stores all sessions in one database, tracking per-session state.
     var openCodeSessions: [String: OpenCodeSessionState] = [:]
+    /// Antigravity rewrites step statuses in its transcript. Keep only the
+    /// high-water mark, never message content, across those rewrites.
+    var antigravityStep = -1
+    var antigravityStatus = ""
 }
 
 /// Per-session turn and model tracking for OpenCode databases.
@@ -61,6 +65,48 @@ struct OpenCodeSessionState: Equatable {
 }
 
 enum AgentLogParser {
+    // MARK: Antigravity App, IDE and CLI
+
+    static func parseAntigravity(_ line: Data, state: inout AgentLogState, now: Date) -> [AgentLogEntry] {
+        guard let json = object(line), let index = json["step_index"] as? Int, index >= 0,
+              let type = json["type"] as? String, let status = json["status"] as? String,
+              let date = timestamp(json["created_at"]), date <= now.addingTimeInterval(60),
+              index >= state.antigravityStep else { return [] }
+        if index == state.antigravityStep && state.antigravityStatus == "DONE" { return [] }
+        state.antigravityStep = index
+        state.antigravityStatus = status
+        var entries: [AgentLogEntry] = []
+        if type == "USER_INPUT", json["source"] as? String == "USER_EXPLICIT" {
+            state.turnOpen = true
+            entries.append(.turnBegan(date))
+        } else if json["source"] as? String == "MODEL" {
+            // Display transcripts can omit the older user step. A model
+            // step still proves activity; its final response closes it below.
+            state.turnOpen = true
+            entries.append(.turnActive(date))
+        }
+        if type == "PLANNER_RESPONSE", status == "DONE" {
+            // Some versions expose counters; others omit them. Missing
+            // counters and model identity never become an estimated bill.
+            let tokens = AgentTokens(input: int(json["input_tokens"]),
+                                     cacheRead: int(json["cache_read_tokens"]),
+                                     output: int(json["output_tokens"]))
+            var billable = AgentBillable()
+            billable.tokens = tokens
+            entries.append(.usage(key: "antigravity:\(state.session):\(index)", record: AgentUsageRecord(
+                provider: .antigravity, date: date, model: "", project: state.project,
+                session: state.session, tokens: tokens, cost: nil, savings: 0), billable: billable))
+            if (json["tool_calls"] as? [Any] ?? []).isEmpty {
+                state.turnOpen = false
+                entries.append(.turnEnded(date, completed: true, duration: nil))
+            }
+        } else if type == "ERROR_MESSAGE" || status == "ERROR" || status == "CANCELLED" {
+            state.turnOpen = false
+            entries.append(.turnEnded(date, completed: false, duration: nil))
+        }
+        return entries
+    }
+
     // MARK: Byte tests
 
     /// Structural keys are written without spaces and never appear unescaped

@@ -12,6 +12,7 @@ struct NotchLayoutEditor: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var notch = NotchService.shared
     @AppStorage(DefaultsKey.notchOutlineEnabled) private var outlineEnabled = false
+    @AppStorage(DefaultsKey.notchExpandedScale) private var expandedScale = NotchSize.defaultExpandedScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var addingSide: NotchQuickAccessSide?
     @State private var editingID: UUID?
@@ -111,8 +112,11 @@ struct NotchLayoutEditor: View {
                             if resizeStart == nil { resizeStart = CGSize(width: actualWidth, height: actualHeight) }
                             guard let start = resizeStart else { return }
                             size = NotchSize.custom.rawValue
-                            width = NotchSize.clamped(Double(start.width + value.translation.width / scale), to: NotchSize.widthRange, fallback: NotchSize.defaultWidth)
-                            height = NotchSize.clamped(Double(start.height + value.translation.height / scale), to: NotchSize.heightRange, fallback: NotchSize.defaultHeight)
+                            let factor = previewGeometry.expandedScale
+                            let inset = NotchLayout.horizontalInset * 2
+                            width = NotchSize.clamped(Double(inset + (start.width + value.translation.width / scale - inset) / factor), to: NotchSize.widthRange, fallback: NotchSize.defaultWidth)
+                            let top = previewGeometry.headerTopInset + previewGeometry.headerChromeHeight
+                            height = NotchSize.clamped(Double(top + (start.height + value.translation.height / scale - top) / factor), to: NotchSize.heightRange, fallback: NotchSize.defaultHeight)
                         }.onEnded { _ in resizeStart = nil })
                         // A short island slides the grip below the third right slot.
                         .position(x: frame.maxX - 3, y: max(frame.maxY - 3, frame.minY + 139))
@@ -133,7 +137,7 @@ struct NotchLayoutEditor: View {
     private static let canvasHeight: CGFloat = NotchSize.heightRange.upperBound * previewScale + 20 + 58 + 2
     private var layout: NotchSize { NotchSize(rawValue: size) ?? .spacious }
     private var actualWidth: CGFloat {
-        NotchLayout.preferredWidth(layout, custom: NotchSize.clamped(width, to: NotchSize.widthRange, fallback: NotchSize.defaultWidth))
+        previewGeometry.expandedWidth
     }
     /// The island around a camera, or as a capsule while it floats in its
     /// display's menu bar.
@@ -142,23 +146,26 @@ struct NotchLayoutEditor: View {
         var result = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1920, height: 1080), safeAreaTop: floats ? 0 : 32,
                                    cameraWidth: floats ? 0 : 210, layout: layout,
                                    menuBarHeight: floats ? notch.geometry.menuBarHeight : 24,
-                                   customWidth: width, customHeight: height, silhouette: floats ? .capsule : .notch)
+                                   customWidth: width, customHeight: height, silhouette: floats ? .capsule : .notch,
+                                   expandedScale: expandedScale)
         // The preview's header shows the title alone, with no sections button.
         result.headerTitleWidth = NotchLayout.headerTitleWidth(text.controls, button: false)
         return result
     }
     private var actualHeight: CGFloat {
-        if layout == .custom { return previewGeometry.customHeight }
+        if layout == .custom { return previewGeometry.expandedSize(module: .clipboard).height }
         let items = NotchSupport.controls()
         return previewGeometry.expandedSize(module: .controls,
             shortcutCount: items.filter { $0 != .volume && $0 != .brightness && $0 != .music }.count,
             sliderCount: items.filter { $0 == .volume || $0 == .brightness }.count,
-            controlsHaveMusic: items.contains(.music)).height
+            controlsHaveMusic: items.contains(.music), controlsHaveSourceTabs: NotchMusicService.shared.sources.count > 1,
+            musicHasTimeline: NotchMusicService.shared.hasPlaybackTimeline).height
     }
 
     /// A narrow window shrinks the whole island rather than only its width.
     private func scale(in canvas: CGSize) -> CGFloat {
-        min(Self.previewScale, max(0.2, (canvas.width - 112) / actualWidth))
+        min(Self.previewScale, max(0.1, (canvas.width - 112) / actualWidth),
+            max(0.1, (canvas.height - 80) / actualHeight))
     }
 
     private func islandFrame(in canvas: CGSize) -> CGRect {
@@ -256,8 +263,12 @@ struct NotchLayoutEditor: View {
         let shortcuts = items.filter { $0 != .volume && $0 != .brightness && $0 != .music }
         let contentWidth = max(0, actualWidth - NotchLayout.horizontalInset * 2)
         let contentHeight = max(0, actualHeight - previewGeometry.headerTopInset - previewGeometry.headerChromeHeight)
+        let factor = previewGeometry.expandedScale
+        let canvas = CGSize(width: contentWidth / factor, height: contentHeight / factor)
         let controls = NotchLayout.controls(hasCards: items.contains(.music) || !levels.isEmpty,
-                                            shortcutCount: shortcuts.count, width: contentWidth, height: contentHeight)
+                                            shortcutCount: shortcuts.count, width: canvas.width, height: canvas.height,
+                                            hasMediaTabs: items.contains(.music) && NotchMusicService.shared.sources.count > 1,
+                                            hasPlaybackTimeline: items.contains(.music) && NotchMusicService.shared.hasPlaybackTimeline)
         return Button(action: editContents) {
             Color.clear.contentShape(NotchShape.island(height: actualHeight, geometry: previewGeometry))
         }
@@ -284,14 +295,16 @@ struct NotchLayoutEditor: View {
                         if controls.cardRow > 0 { cards(levels, music: items.contains(.music), height: controls.cardRow) }
                         if controls.shortcutRows > 0 {
                             NotchRail(items: shortcuts, rows: controls.shortcutRows, itemWidth: NotchLayout.shortcutWidth,
-                                      width: contentWidth, spacing: NotchLayout.shortcutSpacing,
+                                      width: canvas.width, spacing: NotchLayout.shortcutSpacing,
                                       rowSpacing: NotchLayout.shortcutSpacing) { item in
                                 NotchActionTile(symbol: item.symbol, title: item.title(l10n)) {}
                             }
                         }
                     }
                 }
-                .frame(width: contentWidth, height: contentHeight, alignment: .top)
+                .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
+                .scaleEffect(factor, anchor: .topLeading)
+                .frame(width: contentWidth, height: contentHeight, alignment: .topLeading)
                 .clipped()
             }
             .padding(.horizontal, NotchLayout.horizontalInset)
@@ -328,21 +341,8 @@ struct NotchLayoutEditor: View {
     }
 
     private func musicCard(height: CGFloat) -> some View {
-        HStack(spacing: 12) {
-            NotchArtwork(image: nil, size: max(40, height - 24))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(FeatureStrings.radialMenu(l10n.language).mediaNothingPlaying)
-                    .font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                if height >= 84 {
-                    Text(text.musicHint).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity)
-        .frame(height: height)
-        .modifier(NotchControlSurface(cornerRadius: 18, interactive: false))
+        NotchMusicControlsView(notch: notch, height: height)
+            .environment(\.notchSettingsPreview, true)
     }
 
     private func levelCard(_ item: NotchControlItem, height: CGFloat) -> some View {

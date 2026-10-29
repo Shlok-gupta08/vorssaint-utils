@@ -94,6 +94,8 @@ final class AgentUsageService: ObservableObject {
     /// always replaces what is on disk, which may hold agents now off.
     private var savedMark: Int?
     private var lastSave = Date.distantPast
+    private var antigravityActivity: AgentAntigravityActivity?
+    private var antigravityLive: [AgentLiveSession] = []
 
     private init() {}
 
@@ -127,6 +129,8 @@ final class AgentUsageService: ObservableObject {
         queue.async { [self] in
             poller?.cancel()
             poller = nil
+            antigravityActivity?.stop()
+            antigravityActivity = nil
             watcher?.stop()
             saveProgress()
         }
@@ -164,6 +168,9 @@ final class AgentUsageService: ObservableObject {
         claudeAppChecked = nil
         queue.async { [self] in
             readerSession = -1
+            antigravityActivity?.stop()
+            antigravityActivity = nil
+            antigravityLive = []
             readerCancellation = nil
             poller?.cancel()
             poller = nil
@@ -285,9 +292,9 @@ final class AgentUsageService: ObservableObject {
         guard mark != savedMark else { return }
         // A log that started over while running still counts what its old
         // contents gave. Left out, the next launch reads it as rewritten.
-        // Nothing from OpenCode's database is saved. Its open replies and
-        // sessions live only in memory, so each launch reads it again.
-        let kept = cursors.values.filter { !$0.restarted && $0.provider != .opencode }
+        // OpenCode's database and Antigravity's rewritten transcripts keep
+        // their per-session progress in memory and are read each launch.
+        let kept = cursors.values.filter { !$0.restarted && $0.provider != .opencode && $0.provider != .antigravity }
         let contents = AgentUsageArchive.Contents(providers: enabled, store: store.saved, cursors: kept.map(\.saved))
         if AgentUsageArchive.save(contents) { savedMark = mark }
     }
@@ -308,6 +315,17 @@ final class AgentUsageService: ObservableObject {
 
     /// Runs on `queue`.
     private func startPolling() {
+        antigravityActivity?.stop()
+        antigravityActivity = nil
+        if enabled.contains(.antigravity) {
+            let reader = AgentAntigravityActivity(queue: queue) { [weak self] live in
+                guard let self, self.readerSession >= 0 else { return }
+                self.antigravityLive = live
+                self.schedulePublish()
+            }
+            antigravityActivity = reader
+            reader.start()
+        }
         poller?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + Self.poll, repeating: Self.poll, leeway: .milliseconds(500))
@@ -348,8 +366,11 @@ final class AgentUsageService: ObservableObject {
             }
             var info = stat()
             let exists = stat(path, &info) == 0
+            let modified = Date(timeIntervalSince1970: Double(info.st_mtimespec.tv_sec)
+                                + Double(info.st_mtimespec.tv_nsec) / 1_000_000_000)
             guard !exists || UInt64(max(0, info.st_size)) != cursor.offset
-                    || UInt64(info.st_ino) != cursor.identity else { continue }
+                    || UInt64(info.st_ino) != cursor.identity
+                    || (cursor.provider == .antigravity && modified != cursor.modified) else { continue }
             if read(path, provider: cursor.provider) { changed = true }
         }
         return changed
@@ -375,6 +396,13 @@ final class AgentUsageService: ObservableObject {
         }
         let cursor = cursors[path] ?? AgentLogCursor(path: path, provider: provider)
         cursors[path] = cursor
+        if provider == .antigravity {
+            // Include the product directory: App/IDE/CLI can share a UUID.
+            let url = URL(fileURLWithPath: path)
+            let session = url.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            cursor.state.session = session.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent
+                + ":" + session.lastPathComponent
+        }
         var changed = false
         let now = Date()
         AgentLogReader.readAppended(cursor, since: now.addingTimeInterval(-Self.horizon),
@@ -386,6 +414,7 @@ final class AgentUsageService: ObservableObject {
             case .claude: entries = AgentLogParser.parseClaude(line, state: &cursor.state, now: now)
             case .codex: entries = AgentLogParser.parseCodex(line, state: &cursor.state, now: now)
             case .opencode: entries = AgentLogParser.parseOpenCode(line, state: &cursor.state, now: now)
+            case .antigravity: entries = AgentLogParser.parseAntigravity(line, state: &cursor.state, now: now)
             }
             guard !entries.isEmpty else { return }
             changed = true
@@ -425,6 +454,8 @@ final class AgentUsageService: ObservableObject {
                 guard let root = watchedRoots.first(where: { actualPath.hasPrefix($0.url.path + "/") }),
                       root.provider != .opencode
                         || actualPath == root.url.appending(path: AgentOpenCodeReader.database).path else { continue }
+                if root.provider == .antigravity,
+                   !actualPath.hasSuffix("/.system_generated/logs/transcript.jsonl") { continue }
                 if read(actualPath, provider: root.provider) { changed = true }
             }
         }
@@ -505,7 +536,13 @@ final class AgentUsageService: ObservableObject {
         var plans: [AgentProvider: AgentPlan] = [:]
         if let claudePlan { plans[.claude] = claudePlan }
         if let codex = AgentPlans.codex(planType: store.codexPlan) { plans[.codex] = codex }
-        let next = store.snapshot(plans: plans, providers: enabled, now: Date())
+        var next = store.snapshot(plans: plans, providers: enabled, now: Date())
+        // Transcripts remain a source of historical counters, never a live
+        // signal. Their last step can stay RUNNING long after the server stops.
+        next.live.removeAll { $0.provider == .antigravity }
+        next.live.append(contentsOf: antigravityLive)
+        next.live.sort { $0.started < $1.started }
+        if !antigravityLive.isEmpty { next.seen.insert(.antigravity) }
         published = next
         checkBudget(next)
         let checked = enabled.contains(.claude) ? claudeAppSamples.last(where: {

@@ -9,6 +9,7 @@ import Foundation
 /// display. Nothing here locks the Mac or opens a window.
 enum NotchLockScreenTests {
     static func run(_ suite: TestSuite) {
+        NotchLockLifecycleTests.run(suite)
         sessionContracts(suite)
         preferenceContracts(suite)
         layoutContracts(suite)

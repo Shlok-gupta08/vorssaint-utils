@@ -565,6 +565,13 @@ def main():
               .replace("private struct UpdateHighlightsGIF", "struct UpdateHighlightsGIF")
           + "}\n")
     canvas = "Sources/Vorssaint/Services/Notch/NotchWindowHost.swift"
+    lock = "Sources/Vorssaint/Services/Notch/NotchLockScreenService.swift"
+    write("NotchLockLifecycle.swift", "import Foundation\nimport SwiftUI\n"
+          + "extension NotchLockLifecycleTests { final class Service: State {\n"
+          + "".join(declaration(lock, prefix).replace("    private ", "    ", 1) for prefix in [
+              "    func prepare()", "    func close()", "    private func scheduleScene(",
+              "    private func hide(", "    private func recycle("])
+          + "}\n}\n")
     write("NotchMissionControlPolling.swift", "import Foundation\n"
           + "extension NotchMissionControlPollingTests {\nfinal class Host: State {\n"
           + "".join(declaration(canvas, prefix).replace("    private ", "    ", 1) for prefix in [
@@ -622,11 +629,15 @@ def main():
               "    private func handleScreenEdgeEvent(", "    private func handleScreenEdgeClick(",
               "    private func removeScreenEdgeClickMonitors("])
           + "}\n}\n")
+    write("NotchMenuRoom.swift", "import Foundation\nextension NotchScreenRefreshContract { final class MenuRoomService: MenuRoomState {\n"
+          + declaration(notch, "    private func applyMenuSpace(").replace("private func", "func", 1)
+          + "}\n}\n")
     write("NotchScreenRefresh.swift", "import Foundation\n\nextension NotchScreenRefreshContract {\nfinal class Service: State {\n"
           + declaration(notch, "    private func schedulePreferenceSync()").replace("private func", "func", 1)
           + declaration(notch, "    private func screenParametersDidChange()").replace("private func", "func", 1)
           + declaration(notch, "    private func invalidateMenuSpace(").replace("private func", "func", 1)
           + declaration(notch, "    private func applicationDidActivate()").replace("private func", "func", 1)
+              .replace("NotchSupport.hidesMusicWhenPlayerActive()", "hidesMusicWhenPlayerActive")
           + declaration(notch, "    private func stopMenuSpaceMonitoring()")
           + declaration(notch, "    private func syncMenuSpaceMonitoring()").replace("private func", "func", 1)
               .replace("AXIsProcessTrusted()", "accessibilityGranted")
@@ -1050,7 +1061,7 @@ def main():
           + "final class Preferences { var includeOtherPlayers = false\n"
           + "func bool(forKey key: String) -> Bool { includeOtherPlayers } } }\n"
           + "var wantsPlayback = false\nvar includeOtherPlayers = false\nvar awaitingPlayback = false\nvar restartCount = 0\nvar restartWork: DispatchWorkItem?\nvar launches = 0\n"
-          + "var selectedSourcePID: Int32?\nvar chosenSource: NotchPlaybackSource.Selection?\nvar restoringSource = false\n"
+          + "var selectedSourcePID: Int32?\nvar chosenSource: NotchPlaybackSource.Selection?\nvar browsingSource: NotchPlaybackSource.Selection?\nvar restoringSource = false\n"
           + "var launchedAt: TimeInterval?\nvar uptime: TimeInterval = 0\nvar trackChange = NotchTrackChange()\n"
           + "func launch() { guard wantsPlayback, process == nil else { return }; launches += 1; process = Process(); input = Pipe(); commandWriter.start(); launchedAt = uptime; restoreSource() }\n"
           + "func disconnect() { endPlaybackGap(); generation = UUID(); commandWriter.stop(); process = nil; input = nil; playback = nil }\n"
@@ -1066,6 +1077,9 @@ def main():
           + declaration(music, "    private func apply(").replace("private func", "func", 1)
           + declaration(music, "    func seek(")
           + declaration(music, "    func selectSource(")
+          + declaration(music, "    func browseSource(")
+          + declaration(music, "    func endSourceBrowsing(")
+          + "func beginSourceTransition() { cancelAutomationAction(); setQueueVisible(false); endPlaybackGap(); playback = nil; artwork = nil; artworkTint = nil; awaitingPlayback = true; updateAutomation(for: nil) }\n"
           + declaration(music, "    func send(_ command: Command)").replace("    func", "    @discardableResult\n    func", 1)
           + declaration(music, "    func send(_ command: Command, context:").replace("    func", "    @discardableResult\n    func", 1)
           + "}\n}\n")

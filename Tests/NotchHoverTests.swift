@@ -103,6 +103,7 @@ enum NotchHoverTests {
         var surfaceSize: CGSize {
             if fullscreenCompact { return geometry.restingSize(showsContent: false) }
             if let notice {
+                if geometry.isNotched, notice.isLevelFeedback { return geometry.underNotchLevelSize }
                 guard noticeExpanded else { return geometry.noticeSize(wingWidth: notice.preferredWingWidth) }
                 return geometry.notificationPreviewSize(
                     contentHeight: notice.previewContentHeight(width: geometry.notificationPreviewContentWidth))
@@ -160,6 +161,20 @@ enum NotchHoverTests {
             NSEvent.mouseLocation = CGPoint(x: service.geometry.screen.minX, y: service.geometry.screen.minY)
             service.hover(false)
         }
+        let levelTray = fixture(physical: true)
+        let beforeLevel = levelTray.surfaceSize
+        expect(levelTray.show(volume) && levelTray.surfaceSize == levelTray.geometry.underNotchLevelSize,
+               "a hardware level key reveals the tray under the physical camera")
+        DispatchQueue.main.advance(1)
+        expect(levelTray.show(NotchNotice(event: .volume, title: "Volume", detail: "75%",
+                                         symbol: "speaker.wave.3.fill", level: 0.75))
+               && levelTray.surfaceSize == levelTray.geometry.underNotchLevelSize,
+               "repeated level keys update the same tray without changing its footprint")
+        DispatchQueue.main.advance(0.7)
+        expect(levelTray.notice != nil, "a repeated key keeps the level tray visible beyond its original deadline")
+        DispatchQueue.main.advance(1.2)
+        expect(levelTray.notice == nil && levelTray.surfaceSize == beforeLevel,
+               "level feedback automatically folds back into the resting camera")
         for physical in [false, true] {
             for reduced in [false, true] {
                 let picker = fixture(physical: physical)

@@ -70,6 +70,10 @@ final class NotchMusicService: ObservableObject {
     /// on lock, sleep or when the page closes. Tied to a process, so it is
     /// never saved across launches of the app.
     private var chosenSource: NotchPlaybackSource.Selection?
+    /// A source selected from the horizontal media tabs. It is intentionally
+    /// session-only: closing the player returns to Automatic instead of making
+    /// a browsing gesture behave like a persistent source choice.
+    private var browsingSource: NotchPlaybackSource.Selection?
     private var restoringSource = false
     private var artworkCache = NotchArtworkCache<(image: NSImage, tint: NotchArtworkTint?)>()
     private var artworkWork: DispatchWorkItem?
@@ -90,6 +94,25 @@ final class NotchMusicService: ObservableObject {
     private lazy var commandWriter = NotchMusicCommandWriter { [queue = self.queue] action in queue.async(execute: action) }
 
     private init() {}
+
+    /// Sources in the order a media switcher should present them. The item
+    /// playing now is first; after everything pauses, the held current item
+    /// stays first so the user can resume it without hunting for its tab.
+    var orderedSources: [NotchPlaybackSource] {
+        let currentPID = playback?.track.appPID ?? selectedSourcePID
+        return sources.sorted { left, right in
+            func rank(_ source: NotchPlaybackSource) -> Int {
+                if source.isPlaying { return 0 }
+                if source.pid == currentPID { return 1 }
+                return 2
+            }
+            let leftRank = rank(left), rightRank = rank(right)
+            return leftRank == rightRank ? left.pid < right.pid : leftRank < rightRank
+        }
+    }
+
+    var isBrowsingSources: Bool { browsingSource != nil }
+    var hasPlaybackTimeline: Bool { (playback?.duration ?? 0) > 0 }
 
     private static var adapter: [String]? {
         guard let script = Bundle.main.url(forResource: "now-playing", withExtension: "pl"),
@@ -265,6 +288,9 @@ final class NotchMusicService: ObservableObject {
         updateArtwork(reading.artwork, tint: reading.tint, playback: reading.playback)
         playback = reading.playback
         sources = reading.sources
+        if let browsingSource, !reading.sources.contains(where: { $0.selection == browsingSource }) {
+            self.browsingSource = nil
+        }
         sourceIsAutomatic = reading.automatic ?? true
         selectedSourcePID = reading.selectedPID
         awaitingPlayback = false
@@ -378,6 +404,7 @@ final class NotchMusicService: ObservableObject {
         sources = []
         sourceIsAutomatic = true
         selectedSourcePID = nil
+        browsingSource = nil
         artwork = nil
         artworkTint = nil
         commandFailed = false
@@ -389,11 +416,37 @@ final class NotchMusicService: ObservableObject {
         // Choosing what is already in effect changes nothing in the adapter,
         // so the page, its lyrics and the island's size stay as they are. A
         // choice stays in effect while the automatic player fills its gap.
-        if selection == nil ? sourceIsAutomatic
-            : !sourceIsAutomatic && selectedSourcePID == selection?.pid { return }
-        guard selection == nil || sources.contains(where: { $0.selection == selection }),
-              send(.source(selection)) else { return }
+        if selection == nil ? sourceIsAutomatic : !sourceIsAutomatic && selectedSourcePID == selection?.pid {
+            browsingSource = nil
+            return
+        }
+        guard selection == nil || sources.contains(where: { $0.selection == selection }), send(.source(selection)) else { return }
         chosenSource = selection
+        browsingSource = nil
+        beginSourceTransition()
+    }
+
+    /// Changes the source from the transient horizontal media tabs. This does
+    /// not survive leaving the player, unlike the explicit source menu.
+    func browseSource(_ selection: NotchPlaybackSource.Selection) {
+        guard sources.contains(where: { $0.selection == selection }),
+              !(browsingSource == selection && selectedSourcePID == selection.pid),
+              send(.source(selection)) else { return }
+        chosenSource = nil
+        browsingSource = selection
+        beginSourceTransition()
+    }
+
+    /// The media pager is a momentary view of other sessions, not a setting.
+    /// Returning to automatic lets a new active player become the front tab.
+    func endSourceBrowsing() {
+        guard browsingSource != nil else { return }
+        browsingSource = nil
+        guard !sourceIsAutomatic else { return }
+        selectSource(nil)
+    }
+
+    private func beginSourceTransition() {
         cancelAutomationAction()
         setQueueVisible(false)
         // Remove the old controls while the adapter validates and reads the

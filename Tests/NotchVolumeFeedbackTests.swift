@@ -9,6 +9,12 @@ import Foundation
 enum NotchVolumeFeedbackTests {
     final class AppVolumeMixer {
         static var shared = AppVolumeMixer()
+        struct OutputDevice {
+            let uid: String
+            let name: String
+            let isHeadphones: Bool
+        }
+        var outputDevices: [OutputDevice] = []
         @Published var currentOutputDeviceUID: String? = "speakers"
         @Published var systemOutputVolume: Double? = 0.3
         @Published var systemOutputMuted: Bool? = false
@@ -52,6 +58,26 @@ enum NotchVolumeFeedbackTests {
             suite.expect(delivered, "queued volume publications settle within the test deadline")
         }
         defer { AppVolumeMixer.shared = AppVolumeMixer() }
+        let iconMixer = AppVolumeMixer()
+        AppVolumeMixer.shared = iconMixer
+        let icons = Service()
+        for (name, headphones, symbol) in [("MacBook Air Speakers", false, "speaker.wave.2.fill"),
+            ("Wired Headphones", true, "headphones"), ("AirPods Pro", true, "airpodspro"),
+            ("AirPods Max", true, "airpodsmax"), ("AirPods", true, "airpods"),
+            ("Apple EarPods (USB-C)", true, "earpods"), ("EARPODS", true, "earpods"),
+            ("Bluetooth Headphones", true, "headphones")] {
+            iconMixer.outputDevices = [.init(uid: "active", name: name, isHeadphones: headphones),
+                                       .init(uid: "inactive", name: "Other Headphones", isHeadphones: true)]
+            iconMixer.currentOutputDeviceUID = "active"
+            icons.showVolume(0.5)
+            suite.expect(icons.notice?.symbol == symbol, "volume feedback uses the active output's icon: \(name)")
+            icons.showVolume(0.5, muted: true)
+            suite.expect(icons.notice?.symbol == (headphones ? symbol : "speaker.slash.fill") && icons.notice?.level == 0,
+                         "muted feedback preserves headphone identity and shows a zero level")
+        }
+        iconMixer.currentOutputDeviceUID = "missing"
+        icons.showVolume(0.5)
+        suite.expect(icons.notice?.symbol == "speaker.wave.2.fill", "an unknown output falls back to the speaker icon")
         let connection = NotchNotice(event: .accessory, title: "Wireless Headphones",
                                      detail: "Connected", symbol: "headphones")
         for identityFirst in [false, true] {

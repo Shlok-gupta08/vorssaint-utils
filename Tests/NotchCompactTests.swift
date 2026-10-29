@@ -109,7 +109,11 @@ enum NotchCompactTests {
         var baseSize: CGFloat = 13
         var body: some View { Color.clear }
     }
-    struct Music { var playback: Bool? = true }
+    struct Music {
+        var playback: Bool? = true
+        var sources: [NotchPlaybackSource] = []
+        var hasPlaybackTimeline = false
+    }
     struct Page {
         var music = Music()
         var showsDetail = false

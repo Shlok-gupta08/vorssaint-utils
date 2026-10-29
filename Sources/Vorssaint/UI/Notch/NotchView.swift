@@ -251,9 +251,12 @@ struct NotchView: View {
         case .controls:
             let items = NotchSupport.controls()
             let shortcuts = items.filter { $0 != .music && $0 != .volume && $0 != .brightness }
+            let scale = service.geometry.expandedScale
             size.height = max(size.height, NotchLayout.controls(
                 hasCards: items.contains(.music) || items.contains(.volume) || items.contains(.brightness),
-                shortcutCount: shortcuts.count, width: size.width, height: size.height).height)
+                shortcutCount: shortcuts.count, width: size.width / scale, height: size.height / scale,
+                hasMediaTabs: items.contains(.music) && music.sources.count > 1,
+                hasPlaybackTimeline: items.contains(.music) && music.hasPlaybackTimeline).height * scale)
         case .timer:
             let session = NotchTimerService.shared.session
             size.height = max(size.height, NotchLayout.timer(
@@ -275,8 +278,10 @@ struct NotchView: View {
             let controlsRow = AppFeature.mixer.isAvailable || NotchLyricsSupport.isEnabled() || NotchQueueSupport.isEnabled()
                 ? NotchLayout.musicControlsRowHeight + NotchLayout.rowSpacing : 0
             let player = music.playback == nil ? NotchLayout.musicIdleHeight
-                : NotchLayout.musicPlayerHeight(layout: service.geometry.layout, height: size.height)
-            size.height = max(size.height, player + controlsRow)
+                : max(NotchLayout.musicMinimumPlayerHeight,
+                      NotchLayout.musicPlayerHeight(layout: service.geometry.layout, height: size.height))
+            let sourceTabs = music.playback != nil && music.sources.count > 1 ? NotchLayout.musicSourcePagerExtent : 0
+            size.height = max(size.height, player + controlsRow + sourceTabs)
         case .files:
             // One shelf tile, its vertical insets, the footer and their gap.
             size.height = max(size.height, 88 + 8 + 28 + NotchLayout.rowSpacing)
@@ -661,6 +666,10 @@ struct NotchShape: Shape {
     /// A capsule floating this far inside the top and bottom of the rect,
     /// with its own corners, instead of the outline hanging from the edge.
     var floatingGap: CGFloat? = nil
+    /// A camera-level meter stretches the existing cutout's edge profile;
+    /// growing its shoulders with height would pinch its visible side walls.
+    var profileHeight: CGFloat? = nil
+    var minimumBodyWidth: CGFloat = 0
     var animatableData: CGFloat {
         get { radius }
         set { radius = newValue }
@@ -674,7 +683,13 @@ struct NotchShape: Shape {
     func path(in rect: CGRect) -> Path {
         guard attached else { return Path(roundedRect: rect, cornerRadius: radius) }
         if let floatingGap { return Path(NotchLayout.capsulePath(in: rect, gap: floatingGap)) }
-        let shoulder = NotchLayout.shoulder(height: rect.height)
+        var shoulder = NotchLayout.shoulder(height: profileHeight ?? rect.height)
+        if minimumBodyWidth > 0 {
+            let room = max(0, (rect.width - minimumBodyWidth) / 2)
+            // A soft limit keeps the body clear of the camera without a kink
+            // where a hard clamp would suddenly start moving the side walls.
+            shoulder = room + shoulder > 0 ? room * shoulder / (room + shoulder) : 0
+        }
         let bottom = min(radius, rect.height / 2, (rect.width - shoulder * 2) / 2)
         let tangent: CGFloat = 0.55228475
         var path = Path()

@@ -30,8 +30,13 @@ The installer contains the standard Vorssaint app; the separately installed
 Developer app uses its own bundle ID and preferences. Enable Dictation in Features
 and download/select a model when using a fresh installation.
 
-The October 27 installer was built from the complete personal tree whose source
-is preserved by `bde80cb6` (subsequent backup documentation does not change it).
+The October 30 snapshot (`personal-backup-2026-10-30`) includes the current
+personal tree: Antigravity activity from T3 Code and the local hub, the AI Agents
+Controls shortcut, the updated agent layout and icons, media paging and timelines,
+expanded island sizing, and the volume/brightness and lock-screen refinements.
+Its release keeps the DMG, this recovery guide and `SHA256SUMS` together.
+The older October 27 installer remains available in its original release, with
+source preserved by `bde80cb6`.
 Transcripts, recordings, API keys, signing keys, downloaded models and application
 preferences are intentionally excluded. Models can be downloaded again using the
 pinned catalog. Runtime credentials remain in Keychain.

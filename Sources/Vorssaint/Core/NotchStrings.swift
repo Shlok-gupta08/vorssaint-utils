@@ -93,6 +93,26 @@ struct NotchStrings {
 }
 
 extension FeatureStrings {
+    static func notchExpandedSize(_ language: AppLanguage) -> (title: String, hint: String) {
+        switch language {
+        case .enUS: return ("Expanded size", "Adjust the width and height of every expanded section. Updates live and stays within your display. The closed island keeps its size.")
+        case .ptBR: return ("Tamanho expandido", "Ajuste a largura e a altura de todas as seções expandidas. Atualiza em tempo real e cabe na tela. O tamanho da ilha fechada não muda.")
+        case .es: return ("Tamaño expandido", "Ajusta el ancho y la altura de todas las secciones expandidas. Se actualiza al instante y se adapta a la pantalla. La isla cerrada conserva su tamaño.")
+        case .sk: return ("Veľkosť po rozbalení", "Upravte šírku a výšku všetkých rozbalených sekcií. Zmeny sa prejavia ihneď a zmestia sa na displej. Zatvorený ostrov si ponechá svoju veľkosť.")
+        case .de: return ("Größe im geöffneten Zustand", "Breite und Höhe aller geöffneten Bereiche anpassen. Änderungen sind sofort sichtbar und bleiben innerhalb des Displays. Die geschlossene Insel behält ihre Größe.")
+        case .fr: return ("Taille déployée", "Réglez la largeur et la hauteur de toutes les sections déployées. Les changements sont immédiats et restent dans les limites de l’écran. L’îlot fermé garde sa taille.")
+        case .it: return ("Dimensione espansa", "Regola larghezza e altezza di tutte le sezioni espanse. Le modifiche sono immediate e restano entro lo schermo. L’isola chiusa mantiene le sue dimensioni.")
+        case .ru: return ("Размер в раскрытом виде", "Настройте ширину и высоту всех раскрытых разделов. Изменения видны сразу и ограничены размером экрана. Размер закрытого острова не меняется.")
+        case .tr: return ("Genişletilmiş boyut", "Tüm genişletilmiş bölümlerin genişlik ve yüksekliğini ayarlayın. Değişiklikler anında uygulanır ve ekran sınırlarında kalır. Kapalı adanın boyutu değişmez.")
+        case .ja: return ("展開時のサイズ", "展開したすべてのセクションの幅と高さを調整します。変更はすぐに反映され、画面内に収まります。閉じたアイランドのサイズは変わりません。")
+        case .ko: return ("확장 크기", "모든 확장된 섹션의 너비와 높이를 조절합니다. 변경 사항은 즉시 반영되며 화면 안에 표시됩니다. 닫힌 아일랜드의 크기는 유지됩니다.")
+        case .zhHans: return ("展开大小", "调整所有展开分区的宽度和高度。实时生效，并保持在屏幕范围内。收起时的大小不变。")
+        case .zhTW: return ("展開大小", "調整所有展開區段的寬度與高度。即時生效，並保持在螢幕範圍內。收合時的大小不變。")
+        case .zhHK: return ("展開大小", "調整所有展開區段的闊度與高度。即時生效，並保持在螢幕範圍內。收起時的大小不變。")
+        case .uk: return ("Розмір у розгорнутому вигляді", "Налаштуйте ширину й висоту всіх розгорнутих розділів. Зміни видно відразу, і вони залишаються в межах екрана. Розмір згорнутого острова не змінюється.")
+        }
+    }
+
     static func notch(_ language: AppLanguage) -> NotchStrings {
         switch language {
         case .enUS: return .enUS

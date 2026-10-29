@@ -10,8 +10,8 @@ import SwiftUI
 /// the clock and the login controls, the activities as a line under the
 /// clock, the padlock at the camera, and the padlock sounds. The
 /// island drives it from its own session state, after it has handled the
-/// same change: its teardown on locking stops the sources this service then
-/// restarts, and on unlocking it takes them back before the scene leaves.
+/// same change. Music keeps its reader through that handoff, and the overlay
+/// Space is reused so the system transition does not rebuild Space topology.
 final class NotchLockScreenService {
     static let shared = NotchLockScreenService()
 
@@ -26,6 +26,10 @@ final class NotchLockScreenService {
     private var scene: [NotchLockScreenPanel] = []
     private var island: NotchLockScreenPanel?
     private var space: NotchOverlaySpace?
+    private var cachedSpace: NotchOverlaySpace?
+    private var preparationWork: DispatchWorkItem?
+    private var sceneWork: DispatchWorkItem?
+    private var presentationGeneration = 0
     private var playbackSubscription: AnyCancellable?
     private var screenObserver: NSObjectProtocol?
     private var padlockWork: DispatchWorkItem?
@@ -36,6 +40,25 @@ final class NotchLockScreenService {
     private init() {}
 
     var isShowing: Bool { space != nil }
+
+    /// Prepare the empty, hidden Space while the desktop is settled. No lock
+    /// screen windows or background readers are started by this preparation.
+    func prepare() {
+        guard NotchLockScreenSupport.isEnabled() else {
+            preparationWork?.cancel(); preparationWork = nil
+            cachedSpace?.close(); cachedSpace = nil
+            return
+        }
+        guard space == nil, cachedSpace == nil, preparationWork == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.preparationWork = nil
+            guard NotchLockScreenSupport.isEnabled(), self.space == nil, self.cachedSpace == nil else { return }
+            self.cachedSpace = NotchOverlaySpace(absoluteLevel: NotchLockScreenSupport.spaceLevel, initiallyVisible: false)
+        }
+        preparationWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
+    }
 
     func sync(_ session: NotchSessionState) {
         let locking = session.locked && !wasLocked
@@ -71,10 +94,12 @@ final class NotchLockScreenService {
 
     /// The island is off: nothing it started keeps running.
     func close() {
+        preparationWork?.cancel(); preparationWork = nil
         wasLocked = false
         isScreenSaver = false
         model.playedWhileLocked = false
         hide(unlocking: false, stopsSources: true)
+        cachedSpace?.close(); cachedSpace = nil
     }
 
     func playSound(locking: Bool) {
@@ -110,7 +135,11 @@ final class NotchLockScreenService {
 
     private func show(closingPadlock: Bool, screenSaver: Bool = false) {
         guard space == nil,
-              let space = NotchOverlaySpace(absoluteLevel: NotchLockScreenSupport.spaceLevel) else { return }
+              let space = cachedSpace ?? NotchOverlaySpace(absoluteLevel: NotchLockScreenSupport.spaceLevel, initiallyVisible: false) else { return }
+        preparationWork?.cancel(); preparationWork = nil
+        cachedSpace = nil
+        presentationGeneration += 1
+        let generation = presentationGeneration
         let frames = Self.frames()
         // Settled before any view reads it, so a padlock about to close is
         // drawn open from its first frame.
@@ -123,18 +152,6 @@ final class NotchLockScreenService {
             downloads: NotchSupport.routes(.download), countdown: NotchCalendarSupport.showsCountdown(),
             timeLeft: NotchCalendarSupport.showsTimeLeft())
         if model.gates != gates { model.gates = gates }
-        var scene: [NotchLockScreenPanel] = []
-        if !screenSaver {
-            // Without the Music section there is no player to show or to click.
-            if gates.music, let frame = frames.player {
-                // The one part that takes clicks: the player's buttons and timeline.
-                scene.append(Self.makePanel(frame: frame, interactive: true,
-                                            content: NotchLockScreenPlayer(model: model, size: frame.size)))
-            }
-            if let frame = frames.row {
-                scene.append(Self.makePanel(frame: frame, content: NotchLockScreenActivities(model: model, size: frame.size)))
-            }
-        }
         let island = frames.island.map { frame in
             // Extend the panel 8 pts above screen.maxY (islandTopBleed) so the
             // black background covers the NSHostingView safe-area inset that
@@ -145,30 +162,34 @@ final class NotchLockScreenService {
             return Self.makePanel(frame: panelFrame, content: NotchLockScreenIsland(
                 model: model, size: frame.size, cameraWidth: NotchService.shared.geometry.bareCutout.width))
         }
-        let panels = scene + [island].compactMap { $0 }
-        guard !panels.isEmpty else { space.close(); return }
-        if !scene.isEmpty {
-            startSources(gates)
-        } else if screenSaver && gates.music {
+        let panels = [island].compactMap { $0 }
+        guard !panels.isEmpty || (!screenSaver && (frames.row != nil || (gates.music && frames.player != nil))) else {
+            recycle(space); return
+        }
+        if screenSaver && gates.music {
             NotchMusicService.shared.start()
         }
         // Joined before they are first shown, the windows belong to this
         // Space alone and are drawn over the lock screen with it.
         for panel in panels { space.add(panel) }
+        space.setVisible(true)
         self.space = space
-        self.scene = scene
+        self.scene = []
         self.island = island
         self.isScreenSaver = screenSaver
         shownFrames = frames
+        if !screenSaver { scheduleScene(frames: frames, gates: gates) }
         if closingPadlock {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                guard let self, self.presentationGeneration == generation, self.space != nil else { return }
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                    self?.model.islandRetracted = false
+                    self.model.islandRetracted = false
                 }
             }
             let work = DispatchWorkItem { [weak self] in
+                guard let self, self.presentationGeneration == generation, self.space != nil else { return }
                 withAnimation(.smooth(duration: 0.25)) {
-                    self?.model.padlockOpen = false
+                    self.model.padlockOpen = false
                 }
             }
             padlockWork = work
@@ -200,8 +221,10 @@ final class NotchLockScreenService {
     }
 
     private func transitionToScreenSaver() {
+        sceneWork?.cancel(); sceneWork = nil
         guard !scene.isEmpty else { return }
         let retiring = scene
+        let space = space
         scene = []
         retiring.forEach { panel in
             NSAnimationContext.runAnimationGroup({ context in
@@ -209,19 +232,20 @@ final class NotchLockScreenService {
                 panel.animator().alphaValue = 0
             }, completionHandler: {
                 panel.orderOut(nil)
+                space?.remove(panel)
             })
         }
         NotchDownloadService.shared.stop()
         NotchCalendarService.shared.stop()
         AgentUsageService.shared.pause()
         if island == nil {
-            space?.close()
-            space = nil
+            if let space { recycle(space) }
+            self.space = nil
         }
     }
 
     private func transitionToLockScreen() {
-        guard let space else { return }
+        guard space != nil else { return }
         let frames = Self.frames()
         let gates = NotchLockScreenModel.Gates(
             music: NotchLockScreenSupport.showsMusic(), timer: NotchTimerSupport.isEnabled(),
@@ -229,6 +253,26 @@ final class NotchLockScreenService {
             downloads: NotchSupport.routes(.download), countdown: NotchCalendarSupport.showsCountdown(),
             timeLeft: NotchCalendarSupport.showsTimeLeft())
         if model.gates != gates { model.gates = gates }
+        scheduleScene(frames: frames, gates: gates)
+        self.shownFrames = frames
+    }
+
+    /// Keep hosting-view creation, glass layout and source discovery away
+    /// from the first frames of macOS's wallpaper/login transition.
+    private func scheduleScene(frames: Frames, gates: NotchLockScreenModel.Gates) {
+        sceneWork?.cancel()
+        let generation = presentationGeneration
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.presentationGeneration == generation,
+                  let space = self.space, !self.isScreenSaver else { return }
+            self.sceneWork = nil
+            self.showScene(in: space, frames: frames, gates: gates)
+        }
+        sceneWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+    }
+
+    private func showScene(in space: NotchOverlaySpace, frames: Frames, gates: NotchLockScreenModel.Gates) {
         var newScene: [NotchLockScreenPanel] = []
         if gates.music, let frame = frames.player {
             newScene.append(Self.makePanel(frame: frame, interactive: true,
@@ -263,6 +307,7 @@ final class NotchLockScreenService {
     }
 
     private func hide(unlocking: Bool, stopsSources: Bool) {
+        sceneWork?.cancel(); sceneWork = nil
         if stopsSources {
             if !scene.isEmpty {
                 NotchDownloadService.shared.stop()
@@ -278,31 +323,46 @@ final class NotchLockScreenService {
         padlockWork = nil
         isScreenSaver = false
         guard let space else { return }
+        presentationGeneration += 1
+        let generation = presentationGeneration
         let scene = scene, island = island
         self.scene = []
         self.island = nil
         self.space = nil
         guard unlocking else {
-            (scene + [island].compactMap { $0 }).forEach { $0.orderOut(nil) }
-            space.close()
+            (scene + [island].compactMap { $0 }).forEach { $0.orderOut(nil); space.remove($0) }
+            recycle(space)
             return
         }
         // The lock screen is gone as the unlock is announced. The padlock opens
         // smoothly, then the island smoothly retracts its wings into the camera notch.
         var remaining = scene.count + (island == nil ? 0 : 1)
-        let finished = { remaining -= 1; if remaining == 0 { space.close() } }
-        scene.forEach { Self.fadeOut($0, after: 0, completion: finished) }
+        guard remaining > 0 else { recycle(space); return }
+        let finished = { [weak self] in
+            remaining -= 1
+            if remaining == 0 { self?.recycle(space) }
+        }
+        scene.forEach { panel in
+            Self.fadeOut(panel, after: 0) { space.remove(panel); finished() }
+        }
         if let island {
             withAnimation(.smooth(duration: 0.25)) {
                 model.padlockOpen = true
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+                guard let self, self.presentationGeneration == generation, self.space == nil else { return }
                 withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
-                    self?.model.islandRetracted = true
+                    self.model.islandRetracted = true
                 }
             }
-            Self.fadeOut(island, after: 0.40, completion: finished)
+            Self.fadeOut(island, after: 0.40) { space.remove(island); finished() }
         }
+    }
+
+    private func recycle(_ space: NotchOverlaySpace) {
+        space.setVisible(false)
+        guard NotchLockScreenSupport.isEnabled(), cachedSpace == nil else { space.close(); return }
+        cachedSpace = space
     }
 
     private static func fadeOut(_ panel: NSPanel, after delay: TimeInterval, completion: @escaping () -> Void) {

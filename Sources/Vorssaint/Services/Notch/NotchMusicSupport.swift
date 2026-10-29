@@ -232,7 +232,7 @@ enum NotchMusicSupport {
 
     static func isSamePlayer(pid: Int32?, bundle: String?, lastPID: Int32?, lastBundle: String?) -> Bool {
         if let pid, let lastPID {
-            return pid == lastPID
+            if pid == lastPID { return true }
         }
         if let bundle, let lastBundle {
             return bundle == lastBundle

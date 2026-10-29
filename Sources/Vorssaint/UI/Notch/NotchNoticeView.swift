@@ -3,7 +3,8 @@
 
 import SwiftUI
 
-/// Feedback keeps the central camera area clear on physical and simulated notches.
+/// Level keys unfold beneath a physical camera; other notices keep their
+/// compact wings. Floating capsules use their own existing notice view.
 struct NotchNoticeView: View {
     let notice: NotchNotice
     let geometry: NotchGeometry
@@ -20,6 +21,14 @@ struct NotchNoticeView: View {
     }
 
     var body: some View {
+        if geometry.isNotched, notice.isLevelFeedback {
+            NotchUnderCameraLevelView(notice: notice, geometry: geometry)
+        } else {
+            wings
+        }
+    }
+
+    private var wings: some View {
         HStack(spacing: 0) {
             leading
                 .padding(.leading, inset)
@@ -86,8 +95,6 @@ struct NotchNoticeView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else if let level = notice.level {
             NotchMeter(value: level, height: 5, tint: tint)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: level)
-                .transaction { $0.disablesAnimations = false }
         } else {
             Text(notice.detail)
                 .font(.system(size: 11, weight: .medium))
@@ -96,6 +103,45 @@ struct NotchNoticeView: View {
                 .truncationMode(notice.event == .accessory ? .middle : .tail)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
+    }
+}
+
+/// A quiet extension of the black island, rather than a separate HUD. The
+/// native window host morphs the silhouette down from the camera; the row
+/// stays fixed while repeated key presses glide the fill and percentage.
+private struct NotchUnderCameraLevelView: View {
+    let notice: NotchNotice
+    let geometry: NotchGeometry
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: notice.symbol)
+                .font(.system(size: 13, weight: .medium))
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                .foregroundStyle(.white.opacity(0.9))
+                .frame(width: 18)
+                .accessibilityHidden(true)
+            NotchMeter(value: notice.level ?? 0, height: 4, tint: .white.opacity(0.94))
+                .frame(maxWidth: .infinity)
+            Text(notice.detail)
+                .font(.system(size: 11, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.8))
+                .contentTransition(.numericText())
+                .frame(width: 38, alignment: .trailing)
+        }
+        .frame(height: 22)
+        .padding(.horizontal, 22)
+        .padding(.top, geometry.underNotchLevelTop)
+        .padding(.bottom, 12)
+        .frame(width: geometry.underNotchLevelSize.width, height: geometry.underNotchLevelSize.height, alignment: .top)
+        .foregroundStyle(.white)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.18), value: notice.level)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.18), value: notice.symbol)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(notice.accessibilityText)
+        .accessibilityIdentifier("notch.level.belowCamera")
     }
 }
 

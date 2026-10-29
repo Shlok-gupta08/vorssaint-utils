@@ -15,13 +15,15 @@ struct NotchAgentsView: View {
     @AppStorage(DefaultsKey.notchAgentsClaude) private var claude = true
     @AppStorage(DefaultsKey.notchAgentsCodex) private var codex = true
     @AppStorage(DefaultsKey.notchAgentsOpenCode) private var opencode = true
+    @AppStorage(DefaultsKey.notchAgentsAntigravity) private var antigravity = true
 
     private var text: NotchAgentStrings { FeatureStrings.notchAgents(l10n.language) }
     private var chosenPeriod: AgentPeriod { AgentPeriod(rawValue: period) ?? .today }
 
     /// Only agents that left something on this Mac get cards.
     private var providers: [AgentProvider] {
-        [claude ? AgentProvider.claude : nil, codex ? .codex : nil, opencode ? .opencode : nil].compactMap { $0 }
+        [claude ? AgentProvider.claude : nil, codex ? .codex : nil, opencode ? .opencode : nil,
+         antigravity ? .antigravity : nil].compactMap { $0 }
             .filter(usage.snapshot.seen.contains)
     }
 
@@ -63,17 +65,31 @@ struct NotchAgentsView: View {
 
     private func grid(_ rows: [[NotchAgentTile]], now: Date) -> some View {
         VStack(spacing: NotchAgentSupport.spacing) {
-            ForEach(rows, id: \.first?.id) { row in
-                HStack(spacing: NotchAgentSupport.spacing) {
-                    ForEach(row) { tile in card(tile, now: now) }
+            ForEach(rows.indices, id: \.self) { index in
+                if NotchAgentSupport.liveColumn(at: index, rows: rows) {
+                    let height = NotchAgentSupport.cardHeight * 2 + NotchAgentSupport.spacing
+                    HStack(spacing: NotchAgentSupport.spacing) {
+                        VStack(spacing: NotchAgentSupport.spacing) {
+                            ForEach(rows[index]) { tile in
+                                card(tile, now: now).frame(height: NotchAgentSupport.cardHeight)
+                            }
+                        }.frame(maxWidth: .infinity)
+                        card(rows[index + 1][0], now: now, height: height)
+                            .frame(maxWidth: .infinity)
+                    }.frame(height: height)
+                } else if index == 0 || !NotchAgentSupport.liveColumn(at: index - 1, rows: rows) {
+                    HStack(spacing: NotchAgentSupport.spacing) {
+                        ForEach(rows[index]) { tile in card(tile, now: now) }
+                    }
+                    .frame(height: NotchAgentSupport.height(of: rows[index]))
                 }
-                .frame(height: NotchAgentSupport.height(of: row))
             }
         }
         .frame(maxWidth: .infinity, alignment: .top)
     }
 
-    @ViewBuilder private func card(_ tile: NotchAgentTile, now: Date) -> some View {
+    @ViewBuilder private func card(_ tile: NotchAgentTile, now: Date,
+                                   height: CGFloat = NotchAgentSupport.cardHeight) -> some View {
         let snapshot = usage.snapshot
         let shown = chosenPeriod
         switch tile.card {
@@ -85,7 +101,7 @@ struct NotchAgentsView: View {
         case .spend:
             NotchAgentSpendCard(snapshot: snapshot, providers: providers, period: $period, text: text)
         case .live:
-            NotchAgentLiveCard(snapshot: snapshot, providers: providers, text: text)
+            NotchAgentLiveCard(snapshot: snapshot, providers: providers, text: text, height: height)
         case .trend:
             NotchAgentTrendCard(snapshot: snapshot, providers: providers, period: shown, text: text)
         case .models:
@@ -457,6 +473,8 @@ private struct NotchAgentLiveCard: View {
     let snapshot: AgentUsageSnapshot
     let providers: [AgentProvider]
     let text: NotchAgentStrings
+    var height: CGFloat = NotchAgentSupport.cardHeight
+    private var capacity: Int { max(2, Int((height - 44) / 34)) }
     @Environment(\.locale) private var locale
 
     var body: some View {
@@ -466,7 +484,7 @@ private struct NotchAgentLiveCard: View {
                 NotchAgentCardHeader(title: text.liveCard, symbol: NotchAgentCard.live.symbol,
                                      tint: live.first?.provider.tint ?? .secondary) {
                     HStack(spacing: 4) {
-                        if live.count > 2 { NotchAgentChip(text: "+\(live.count - 2)") }
+                        if live.count > capacity { NotchAgentChip(text: "+\(live.count - capacity)") }
                         if let first = live.first { NotchAgentPulse(tint: first.provider.tint, size: 5) }
                     }
                 }
@@ -477,7 +495,7 @@ private struct NotchAgentLiveCard: View {
                 } else {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         VStack(alignment: .leading, spacing: 5) {
-                            ForEach(live.prefix(2)) { row($0, now: context.date) }
+                            ForEach(live.prefix(capacity)) { row($0, now: context.date) }
                         }
                     }
                 }

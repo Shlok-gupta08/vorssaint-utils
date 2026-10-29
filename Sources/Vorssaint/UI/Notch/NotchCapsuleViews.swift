@@ -111,7 +111,6 @@ struct NotchCapsuleNoticeView: View {
             NotchCapsuleSymbol(name: notice.symbol, tint: tint)
             NotchMeter(value: level, height: CapsuleLayout.meterHeight, tint: tint)
                 .frame(width: CapsuleLayout.meterWidth)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: level)
             Text(notice.detail)
                 .font(Font(CapsuleLayout.levelFont as CTFont))
                 .lineLimit(1)
@@ -312,7 +311,7 @@ private struct NotchCapsuleAgentMarks: View {
     let providers: [AgentProvider]
 
     var body: some View {
-        HStack(spacing: 1) {
+        HStack(spacing: NotchAgentSupport.stripMarkSpacing) {
             ForEach(providers) { NotchAgentGlyph(provider: $0, size: CapsuleLayout.agentMarkSize(working: providers.count)) }
         }
     }

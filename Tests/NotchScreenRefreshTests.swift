@@ -56,6 +56,7 @@ enum NotchScreenRefreshContract {
         }
     }
     final class Panel {
+        var isVisible = true
         var resignations = 0
         func resignKey() { resignations += 1 }
     }
@@ -125,6 +126,8 @@ enum NotchScreenRefreshContract {
         var reads = 0
         var appliedRooms: [CGFloat?] = []
         var presentations = 0
+        var hidesMusicWhenPlayerActive = false
+        var presentationAnimations: [Bool] = []
         var collapses = 0
         func syncWithPreferences() { preferenceSyncs += 1 }
         func readMenuSpace() { reads += 1 }
@@ -132,7 +135,7 @@ enum NotchScreenRefreshContract {
             appliedRooms.append(room)
             geometry.compactSideRoom = room
         }
-        func refreshPresentation(animated: Bool) { presentations += 1 }
+        func refreshPresentation(animated: Bool = true) { presentations += 1; presentationAnimations.append(animated) }
         func collapse() { collapses += 1 }
         var displayHasMenuBar = true
         static let pointerFollowDelay: TimeInterval = 0.2
@@ -158,7 +161,29 @@ enum NotchScreenRefreshContract {
         func syncVisibleConsumers() { consumerSyncs += 1 }
     }
 
+    class MenuRoomState {
+        var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                                     safeAreaTop: 32, cameraWidth: 210, compactSideRoom: 64)
+        var panel: Panel? = Panel()
+        var surfaceSize: CGSize {
+            CGSize(width: geometry.cameraWidth + (geometry.compactSideRoom ?? 0) * 2, height: geometry.stripHeight)
+        }
+        var animations: [Bool] = []
+        func refreshPresentation(animated: Bool) { animations.append(animated) }
+    }
+
     static func run(_ suite: TestSuite) {
+        let menuRoom = MenuRoomService()
+        menuRoom.applyMenuSpace(44)
+        menuRoom.applyMenuSpace(0)
+        suite.expect(menuRoom.animations == [true, true],
+                     "late menu measurements cannot snap a physical island's app-context transition shut")
+        menuRoom.geometry = NotchGeometry(screen: menuRoom.geometry.screen, safeAreaTop: 0, cameraWidth: 0, compactSideRoom: 64)
+        menuRoom.animations = []
+        menuRoom.applyMenuSpace(44)
+        menuRoom.applyMenuSpace(64)
+        suite.expect(menuRoom.animations == [false, true],
+                     "floating islands retain immediate withdrawal from occupied menus and animated growth")
         DispatchQueue.main = Scheduler()
         NSWorkspace.shared.frontmostApplication = nil
         ClipboardHistoryService.shared.remembered = 0
@@ -413,6 +438,11 @@ enum NotchScreenRefreshContract {
         physical.applicationDidActivate()
         suite.expect(physical.geometry.compactSideRoom == 64 && physical.presentations == 0,
                "the physical camera retains its existing presentation during app changes")
+        physical.hidesMusicWhenPlayerActive = true
+        physical.applicationDidActivate()
+        physical.applicationDidActivate()
+        suite.expect(physical.presentationAnimations == [true, true] && physical.consumerSyncs == 2,
+                     "entering and leaving the player app animate the island and reconcile music consumers")
 
         let noMenuBar = Service()
         noMenuBar.geometry.compactSideRoom = nil

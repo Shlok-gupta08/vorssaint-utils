@@ -5,7 +5,7 @@ import SwiftUI
 
 /// The closed island while an agent works: its mark on one side of the
 /// camera, one reading the person chose on the other. The wings are as wide
-/// as the reading, and both sit at the ends, where the island shows.
+/// as the reading. The marks sit in the middle of the exposed camera wing.
 struct NotchAgentStrip: View {
     @ObservedObject var service: NotchService
     /// Another display's strip, when the island shows on every display.
@@ -28,23 +28,19 @@ struct NotchAgentStrip: View {
         let geometry = displayGeometry ?? service.compactActivityGeometry
         let working = working
         let tint = working.first?.tint ?? .white
-        let budget = geometry.compactActivityContentHeight - NotchLayout.compactEdgeGap * 2
-        let iconSize = min(working.count > 1 ? 11.0 : 14.0, max(8, budget - 4))
+        let iconSize = NotchAgentSupport.stripMarkSize(height: geometry.compactActivityContentHeight)
         let textSize = NotchAgentSupport.stripTextSize(height: geometry.compactActivityContentHeight)
-        let iconInset = !geometry.compactActivityUsesFooter
-            ? geometry.compactActivityEdgeInset(boxHeight: iconSize + 4, radius: (iconSize + 4) / 2) : 0
         let textInset = !geometry.compactActivityUsesFooter
             ? geometry.compactActivityEdgeInset(boxHeight: textSize * 0.72, radius: 0) : 0
         HStack(spacing: 0) {
             Button { service.openActivity(.agents) } label: {
-                HStack(spacing: 1) {
+                HStack(spacing: NotchAgentSupport.stripMarkSpacing) {
                     if geometry.compactActivityWingWidth >= 28 {
                         ForEach(working) { NotchAgentGlyph(provider: $0, size: iconSize) }
                     }
                 }
-                .padding(.leading, iconInset)
                 .frame(width: geometry.compactActivityWingWidth, height: geometry.compactActivityContentHeight,
-                       alignment: .leading)
+                       alignment: .center)
                 .contentShape(Rectangle())
             }
             Color.clear.frame(width: geometry.compactActivityCameraGap)

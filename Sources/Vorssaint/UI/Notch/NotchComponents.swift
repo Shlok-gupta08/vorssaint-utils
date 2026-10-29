@@ -60,19 +60,35 @@ struct NotchMeter: View {
     let value: Double
     var height: CGFloat = 5
     var tint: Color = .white
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let fraction = value.isFinite ? min(1, max(0, value)) : 0
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule(style: .continuous).fill(.white.opacity(0.14))
-                Capsule(style: .continuous)
-                    .fill(tint.opacity(0.9))
-                    .frame(width: max(fraction > 0 ? height : 0, proxy.size.width * fraction))
-            }
+        ZStack(alignment: .leading) {
+            Capsule(style: .continuous).fill(.white.opacity(0.14))
+            NotchMeterFill(fraction: fraction).fill(tint.opacity(0.9))
         }
         .frame(height: height)
+        // Retarget the visible fill itself, preserving velocity through key
+        // repeats. Presentation geometry intentionally disables animations;
+        // this small, local readout opts back in without moving the island.
+        .animation(reduceMotion ? nil : .smooth(duration: 0.26), value: fraction)
+        .transaction { $0.disablesAnimations = false }
         .accessibilityHidden(true)
+    }
+}
+
+private struct NotchMeterFill: Shape {
+    var fraction: Double
+    var animatableData: Double {
+        get { fraction }
+        set { fraction = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let width = max(0, min(rect.width, rect.width * fraction))
+        return Path(roundedRect: CGRect(x: rect.minX, y: rect.minY, width: width, height: rect.height),
+                    cornerRadius: min(rect.height, width) / 2)
     }
 }
 

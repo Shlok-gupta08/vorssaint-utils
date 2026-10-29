@@ -63,8 +63,9 @@ final class NotchOverlaySpace {
     private let space: UInt64
     private var windows = Set<Int>()
     private var closed = false
+    private var visible = false
 
-    init?(absoluteLevel: Int32? = nil) {
+    init?(absoluteLevel: Int32? = nil, initiallyVisible: Bool = true) {
         guard let bridge = Self.bridge else { return nil }
         // Any flag but 1 makes Finder draw the desktop icons in this Space.
         let space = bridge.create(bridge.connection, 1, nil)
@@ -77,10 +78,20 @@ final class NotchOverlaySpace {
         }
         self.bridge = bridge
         self.space = space
-        _ = bridge.show(bridge.connection, [NSNumber(value: space)] as CFArray)
+        setVisible(initiallyVisible)
     }
 
     deinit { close() }
+
+    /// Reusing a lock-screen Space avoids asking WindowServer to rebuild its
+    /// Space topology during the system's lock/unlock animation.
+    func setVisible(_ visible: Bool) {
+        guard !closed, self.visible != visible else { return }
+        self.visible = visible
+        let spaces = [NSNumber(value: space)] as CFArray
+        if visible { _ = bridge.show(bridge.connection, spaces) }
+        else { _ = bridge.hide(bridge.connection, spaces) }
+    }
 
     /// Joins a window before it is first ordered in: one already on screen
     /// would stay on its desktop as well and still slide with it. Ordering
@@ -89,6 +100,12 @@ final class NotchOverlaySpace {
         guard !closed, window.windowNumber > 0, windows.insert(window.windowNumber).inserted else { return }
         bridge.add(bridge.connection, [NSNumber(value: window.windowNumber)] as CFArray,
                    [NSNumber(value: space)] as CFArray)
+    }
+
+    func remove(_ window: NSWindow) {
+        guard !closed, windows.remove(window.windowNumber) != nil else { return }
+        bridge.remove(bridge.connection, [NSNumber(value: window.windowNumber)] as CFArray,
+                      [NSNumber(value: space)] as CFArray)
     }
 
 #if VORSSAINT_DEVELOPMENT

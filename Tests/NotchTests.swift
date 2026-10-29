@@ -7,7 +7,103 @@ import AppKit
 import SwiftUI
 
 enum NotchTests {
+    private static func expandedSizeScale(_ suite: TestSuite) {
+        suite.expect(NotchSize.expandedScale(.nan) == 1 && NotchSize.expandedScale(.infinity) == 1
+                     && NotchSize.expandedScale(-1) == 0.8 && NotchSize.expandedScale(10) == 1.6,
+                     "invalid expanded sizes fall back safely and extreme values stay in the slider range")
+        for physical in [false, true] {
+            for layout in NotchSize.allCases {
+                func geometry(_ scale: Double, screen: CGRect = CGRect(x: -1800, y: 200, width: 1800, height: 1200)) -> NotchGeometry {
+                    NotchGeometry(screen: screen, safeAreaTop: physical ? 32 : 0, cameraWidth: physical ? 180 : 0,
+                                  layout: layout, silhouette: physical ? .notch : .capsule, expandedScale: scale)
+                }
+                let base = geometry(1), large = geometry(1.5), small = geometry(0.8)
+                let original = base.expandedSize(module: .clipboard)
+                let enlarged = large.expandedSize(module: .clipboard)
+                let originalCanvas = base.contentSize(for: original)
+                let enlargedCanvas = large.contentSize(for: enlarged)
+                suite.expect(abs(enlargedCanvas.width - originalCanvas.width * 1.5) < 0.001
+                             && abs(enlargedCanvas.height - originalCanvas.height * 1.5) < 0.001,
+                             "the page canvas scales in both directions without scaling native header or edge padding")
+                suite.expect(small.expanded.width < base.expanded.width
+                             && small.contentSize(for: small.expanded).height < base.contentSize(for: base.expanded).height,
+                             "smaller expanded sizes reduce the Controls canvas while keeping space for the native camera header")
+                suite.expect(base.collapsed == large.collapsed && base.collapsed == small.collapsed
+                             && base.cameraWidth == large.cameraWidth && base.cameraHeight == large.cameraHeight,
+                             "expanded size leaves the closed island and physical camera fit unchanged")
+                suite.expect(large.sectionPickerSize(count: 24).width > base.sectionPickerSize(count: 24).width
+                             && large.sectionPickerSize(count: 24).height > base.sectionPickerSize(count: 24).height,
+                             "the section gallery follows the same expanded size setting")
+                var constrained = geometry(1.6, screen: CGRect(x: 100, y: 200, width: 640, height: 480))
+                constrained.quickAccessBottomInset = 40
+                for module in NotchModule.allCases {
+                    let size = constrained.expandedSize(module: module)
+                    let frame = constrained.frame(for: size)
+                    suite.expect(size.width <= constrained.screen.width - 24
+                                 && frame.minX >= constrained.screen.minX && frame.maxX <= constrained.screen.maxX
+                                 && frame.minY >= constrained.screen.minY + 48 + constrained.quickAccessBottomInset,
+                                 "every enlarged page stays on a constrained display with room for quick access")
+                }
+            }
+        }
+    }
+
     private static func railContracts(_ suite: TestSuite) {
+        for hasTabs in [false, true] {
+            let minimum = (hasTabs ? NotchLayout.minimumMediaTabsCardHeight : NotchLayout.minimumCardHeight)
+                + NotchLayout.musicTimelineHeight + NotchMusicCardLayout.tabsSpacing
+            for height in [minimum, minimum + 16, minimum + 40] {
+                let layout = NotchMusicCardLayout(height: height, hasTabs: hasTabs, hasTimeline: true)
+                let tabs = layout.showsTabs ? NotchMusicCardLayout.tabsHeight + NotchMusicCardLayout.tabsSpacing : 0
+                let used = layout.mainHeight + tabs + NotchLayout.musicTimelineHeight
+                    + NotchMusicCardLayout.tabsSpacing + layout.verticalInset * 2
+                suite.expect(layout.showsTimeline && layout.showsTabs == hasTabs && abs(used - height) < 0.001
+                             && layout.mainHeight >= 56 && layout.artworkSide <= layout.mainHeight,
+                             "timeline and timestamps retain their own row without squeezing out source tabs or transport")
+            }
+        }
+        for factor in [0.8, 1, 1.15, 1.6] {
+            let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1800, height: 1200),
+                safeAreaTop: 32, cameraWidth: 180, layout: .spacious, expandedScale: factor)
+            let surface = geometry.expandedSize(module: .controls, controlsHaveMusic: true,
+                controlsHaveSourceTabs: true, musicHasTimeline: true)
+            let area = geometry.contentSize(for: surface)
+            let drawn = NotchLayout.controls(hasCards: true, shortcutCount: 4,
+                width: area.width / factor, height: area.height / factor,
+                hasMediaTabs: true, hasPlaybackTimeline: true)
+            let card = NotchMusicCardLayout(height: drawn.cardRow, hasTabs: true, hasTimeline: true)
+            suite.expect(abs(drawn.height * factor - area.height) < 0.001 && card.showsTabs && card.showsTimeline,
+                         "scaled Controls fit a full timeline, media tabs and shortcut rail without a blank footer")
+            let music = geometry.expandedSize(module: .music, musicHasSourceTabs: true)
+            let referenceHeight = geometry.contentSize(for: music).height / factor
+            suite.expect(referenceHeight - NotchLayout.musicSourcePagerExtent
+                         - NotchLayout.musicControlsRowHeight - NotchLayout.rowSpacing >= NotchLayout.musicMinimumPlayerHeight,
+                         "expanded Now Playing reserves source-tab height in addition to the complete player timeline")
+        }
+        for height: CGFloat in [68, 84, 96, 112, 120, 128, 144] {
+            let layout = NotchMusicCardLayout(height: height, hasTabs: true)
+            let tabs = layout.showsTabs ? NotchMusicCardLayout.tabsHeight + NotchMusicCardLayout.tabsSpacing : 0
+            suite.expect(abs(layout.mainHeight + tabs + layout.verticalInset * 2 - height) < 0.001
+                         && layout.artworkSide <= layout.mainHeight && layout.mainHeight >= 56,
+                         "artwork, transport and source tabs fit inside the music card with their own vertical insets")
+            suite.expect(!layout.showsTabs || layout.verticalInset >= 12,
+                         "media source tabs keep bottom padding inside the rounded card boundary")
+        }
+        for factor in [0.8, 1, 1.2, 1.6] {
+            for preset in [NotchSize.spacious, .custom] {
+                let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1800, height: 1200),
+                    safeAreaTop: 32, cameraWidth: 180, layout: preset,
+                    customWidth: 600, customHeight: 260, expandedScale: factor)
+                let surface = geometry.expandedSize(module: .controls, controlsHaveMusic: true, controlsHaveSourceTabs: true)
+                let area = geometry.contentSize(for: surface)
+                let drawn = NotchLayout.controls(hasCards: true, shortcutCount: 4,
+                    width: area.width / factor, height: area.height / factor, hasMediaTabs: true)
+                suite.expect(abs(drawn.height * factor - area.height) < 0.001,
+                             "scaled Controls consume the panel height without a spare black footer")
+                suite.expect(drawn.cardRow >= NotchLayout.minimumMediaTabsCardHeight,
+                             "the Controls planner reserves a complete music row and media tabs")
+            }
+        }
         let domain = "com.vorssaint.tests.notch-fan-only"
         let defaults = UserDefaults(suiteName: domain)!
         defaults.removePersistentDomain(forName: domain)
@@ -325,6 +421,66 @@ enum NotchTests {
     }
 
     private static func noticeLayoutContracts(_ suite: TestSuite) {
+        for camera: CGFloat in [180, 210, 250] {
+            for cameraHeight: CGFloat in [32, 45] {
+                let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1470, height: 956),
+                                             safeAreaTop: cameraHeight, cameraWidth: camera)
+                let rest = geometry.restingSize(showsContent: false)
+                let open = geometry.underNotchLevelSize
+                let radius = NotchLayout.surfaceRadius(height: cameraHeight)
+                for pair in [(rest, open), (open, rest)] {
+                    for time in stride(from: 0.0, through: 0.4, by: 1.0 / 120) {
+                        let size = NotchLevelMotion.size(at: time, from: pair.0, to: pair.1)
+                        let widthProgress = (size.width - pair.0.width) / (pair.1.width - pair.0.width)
+                        let heightProgress = (size.height - pair.0.height) / (pair.1.height - pair.0.height)
+                        suite.expect(abs(widthProgress - heightProgress) < 0.000001,
+                                     "width and height glide together on one curve without separate stages")
+                        if time > 0 && time < 0.32 {
+                            suite.expect(widthProgress > 0 && widthProgress < 1 && heightProgress > 0 && heightProgress < 1,
+                                         "neither dimension pauses while the other moves")
+                        }
+                        guard size.height > cameraHeight + 0.01 else { continue }
+                        let shoulder = min(NotchLayout.shoulder(height: cameraHeight), max(0, (size.width - camera) / 2))
+                        let shape = NotchShape(attached: true, radius: radius, profileHeight: cameraHeight, minimumBodyWidth: camera)
+                            .path(in: CGRect(origin: .zero, size: size))
+                        for y in [(shoulder + size.height - radius) / 2] {
+                            suite.expect(shape.contains(CGPoint(x: (size.width - camera) / 2 + 0.01, y: y))
+                                         && shape.contains(CGPoint(x: (size.width + camera) / 2 - 0.01, y: y)),
+                                         "the meter's side walls never pinch narrower than the physical camera during the glide")
+                        }
+                    }
+                }
+            }
+        }
+        let fitted = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1470, height: 956),
+                                   safeAreaTop: 45, cameraWidth: 250,
+                                   cameraFit: NotchCameraFit(width: -12, height: 0))
+        for pair in [(fitted.restingSize(showsContent: false), fitted.underNotchLevelSize),
+                     (fitted.underNotchLevelSize, fitted.restingSize(showsContent: false))] {
+            for time in stride(from: 0.0, through: 1.0, by: 1.0 / 120) {
+                let size = fitted.coveringPhysicalCamera(NotchMotion.size(at: time, from: pair.0, to: pair.1))
+                suite.expect(size.width >= 250, "every opening and closing frame covers the real camera despite a narrower visual fit")
+            }
+        }
+        for camera: CGFloat in [160, 180, 210, 240] {
+            for height: CGFloat in [24, 32, 40] {
+                let geometry = NotchGeometry(screen: CGRect(x: -1470, y: 100, width: 1470, height: 956),
+                                             safeAreaTop: height, cameraWidth: camera)
+                let size = geometry.underNotchLevelSize
+                suite.expect(size.width >= camera + 32 && size.height == geometry.stripHeight + 42
+                             && geometry.underNotchLevelTop > geometry.cameraHeight
+                             && geometry.screen.contains(geometry.frame(for: size)),
+                             "the small level tray clears the physical camera and stays within the display")
+                for time in stride(from: 0.0, through: 1.0, by: 1.0 / 60) {
+                    let closing = NotchMotion.size(at: time, from: size, to: geometry.collapsed)
+                    suite.expect(closing.width >= geometry.collapsed.width && closing.height >= geometry.collapsed.height,
+                                 "closing a level tray never contracts through the physical camera")
+                }
+            }
+        }
+        suite.expect(!NotchNotice(event: .accessory, title: "Headphones", detail: "50%", symbol: "headphones", level: 0.5).isLevelFeedback
+                     && !NotchNotice(event: .brightness, title: "Brightness", detail: "Unavailable", symbol: "sun.max").isLevelFeedback,
+                     "device battery levels and unavailable controls retain their normal notice layout")
         let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         func width(_ text: String) -> CGFloat {
             (text as NSString).size(withAttributes: [.font: font]).width
@@ -887,6 +1043,7 @@ enum NotchTests {
     }
 
     static func run(_ suite: TestSuite) {
+        expandedSizeScale(suite)
         let previewStrip: CGFloat = 37
         suite.expect(NotchTranslucentTint.opacity(atDepth: previewStrip, stripHeight: previewStrip,
                                                   openness: 1, increasedContrast: false) == 1
@@ -1249,10 +1406,18 @@ enum NotchTests {
                "shortcut ordering tolerates duplicate and obsolete identifiers")
         suite.expect(!controls.contains(.volume) && !controls.contains(.screenshot), "individual controls can be hidden")
         defaults.set("", forKey: DefaultsKey.notchHiddenControls)
-        suite.expect(NotchSupport.controls(in: defaults).last == .scratchpad
+        suite.expect(NotchSupport.controls(in: defaults).contains(.scratchpad)
                && NotchQuickAction(id: NotchQuickAction.control(.scratchpad).id) == .control(.scratchpad)
                && NotchQuickAction.optionalActions.contains(.control(.scratchpad)),
                "the scratchpad shortcut can be shown among the controls and placed as a floating button")
+        suite.expect(NotchControlItem.agents.setupRequirement == .page(.agents, feature: .notchAgents)
+                     && NotchSupport.controls(in: defaults).contains(.agents)
+                     && NotchQuickAction(id: "control.agents") == .control(.agents),
+                     "AI Agents can open its page from Controls and floating shortcuts")
+        defaults.set(false, forKey: DefaultsKey.notchAgentsEnabled)
+        suite.expect(!NotchSupport.controls(in: defaults).contains(.agents),
+                     "AI Agents shortcuts follow the section's enabled state")
+        defaults.set(true, forKey: DefaultsKey.notchAgentsEnabled)
         defaults.set(false, forKey: AppFeature.scratchpad.availabilityKey)
         suite.expect(!NotchSupport.controls(in: defaults).contains(.scratchpad)
                && !NotchQuickAction.control(.scratchpad).isAvailable(in: defaults),
@@ -1413,7 +1578,7 @@ enum NotchTests {
                "hub removal gates every notch event")
 
         let keys: Set<String> = [DefaultsKey.notchShowPlayingMusic, DefaultsKey.notchHideMusicWhenPlayerActive, DefaultsKey.notchIncludeOtherPlayers, DefaultsKey.notchShowInCaptures, DefaultsKey.notchIdleContent, DefaultsKey.notchHiddenControls, DefaultsKey.notchControlOrder, DefaultsKey.notchSize, DefaultsKey.notchOutlineEnabled, DefaultsKey.notchShelf, DefaultsKey.notchDragReveal,
-                                DefaultsKey.notchCustomWidth, DefaultsKey.notchCustomHeight, DefaultsKey.notchHapticFeedback,
+                                DefaultsKey.notchCustomWidth, DefaultsKey.notchCustomHeight, DefaultsKey.notchExpandedScale, DefaultsKey.notchHapticFeedback,
                                 DefaultsKey.notchCaptureControls, DefaultsKey.notchQuickPanel, DefaultsKey.notchAppPanel,
                                 DefaultsKey.notchHidesMenuBarIcon, DefaultsKey.notchScratchpad,
                                 DefaultsKey.notchHoverExpands, DefaultsKey.notchEnabled, DefaultsKey.notchDisplay,
@@ -1431,6 +1596,7 @@ enum NotchTests {
                                                 DefaultsKey.notchSize: "custom",
                                                 DefaultsKey.notchCustomWidth: 390.0,
                                                 DefaultsKey.notchCustomHeight: 580.0,
+                                                DefaultsKey.notchExpandedScale: 1.35,
                                                 DefaultsKey.notchOutlineEnabled: true,
                                                 DefaultsKey.notchHapticFeedback: true,
                                                 DefaultsKey.notchIncludeOtherPlayers: true,
@@ -1447,6 +1613,7 @@ enum NotchTests {
         suite.expect(restored?[DefaultsKey.notchSize] as? String == "custom"
                && restored?[DefaultsKey.notchCustomWidth] as? Double == 390
                && restored?[DefaultsKey.notchCustomHeight] as? Double == 580
+               && restored?[DefaultsKey.notchExpandedScale] as? Double == 1.35
                && restored?[DefaultsKey.notchOutlineEnabled] as? Bool == true
                && restored?[DefaultsKey.notchHapticFeedback] as? Bool == true
                && restored?[DefaultsKey.notchIncludeOtherPlayers] as? Bool == true,

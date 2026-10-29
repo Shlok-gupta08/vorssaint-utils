@@ -363,6 +363,22 @@ enum NotchMusicVisibilityTests {
         suite.expect(service.surfaceSize == service.geometry.noticeSize(wingWidth: notice.preferredWingWidth)
                && service.surfaceSize.width > service.geometry.notice.width,
                "a device notice widens the actual presentation beyond the compact level indicator")
+        let priorGeometry = service.geometry
+        for physical in [false, true] {
+            service.geometry = NotchGeometry(screen: priorGeometry.screen, safeAreaTop: physical ? 32 : 0,
+                                             cameraWidth: physical ? 180 : 0, menuBarHeight: 32)
+            for event in [NotchEvent.volume, .brightness, .keyboardLight] {
+                for percent in [0, 9, 50, 100] {
+                    let level = NotchNotice(event: event, title: "Level", detail: "\(percent)%",
+                                            symbol: "speaker.wave.2.fill", level: Double(percent) / 100)
+                    service.notice = level
+                    suite.expect(service.surfaceSize == (physical ? service.geometry.underNotchLevelSize
+                                 : service.geometry.noticeSize(wingWidth: level.preferredWingWidth)),
+                                 "only a physical camera changes level feedback to the stable tray below the cutout")
+                }
+            }
+        }
+        service.geometry = priorGeometry
         service.notice = nil
         suite.expect(service.surfaceSize == service.compactActivityGeometry.compactActivitySize,
                "dismissing a device notice restores the underlying activity's width")
@@ -407,6 +423,8 @@ enum NotchMusicVisibilityTests {
 
         suite.expect(NotchMusicSupport.isSamePlayer(pid: 100, bundle: "com.google.Chrome", lastPID: 100, lastBundle: "com.google.Chrome"),
                      "same player matches when PID is identical")
+        suite.expect(NotchMusicSupport.isSamePlayer(pid: 101, bundle: "com.google.Chrome", lastPID: 100, lastBundle: "com.google.Chrome"),
+                     "a browser helper PID change still matches the same parent player")
         suite.expect(!NotchMusicSupport.isSamePlayer(pid: 200, bundle: "com.spotify.client", lastPID: 100, lastBundle: "com.google.Chrome"),
                      "different player does not match when PID changes from YouTube to Spotify")
         suite.expect(NotchMusicSupport.isSamePlayer(pid: nil, bundle: "com.apple.Music", lastPID: nil, lastBundle: "com.apple.Music"),

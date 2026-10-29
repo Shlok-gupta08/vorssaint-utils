@@ -82,6 +82,7 @@ enum NotchAgentSupport {
         case .claude: return DefaultsKey.notchAgentsClaude
         case .codex: return DefaultsKey.notchAgentsCodex
         case .opencode: return DefaultsKey.notchAgentsOpenCode
+        case .antigravity: return DefaultsKey.notchAgentsAntigravity
         }
     }
 
@@ -183,9 +184,27 @@ enum NotchAgentSupport {
 
     // MARK: Strip
 
-    /// A wing is never narrower than the music strip's, nor wide enough to
-    /// crowd the menus beside the camera.
-    static let stripWingRange: ClosedRange<CGFloat> = 44...80
+    /// Multiple agents keep their full-size marks; available menu-bar room
+    /// still bounds the wings on each display.
+    static let stripWingRange: ClosedRange<CGFloat> = 44...220
+    static let stripMarkSpacing: CGFloat = 10
+    static let stripMarkEdgePadding: CGFloat = 8
+    static func stripMarkSize(height: CGFloat) -> CGFloat {
+        min(18, max(8, height - NotchLayout.compactEdgeGap * 2 - 4))
+    }
+    static func stripMarksWidth(working: Int, height: CGFloat) -> CGFloat {
+        let count = CGFloat(max(1, working))
+        return count * (stripMarkSize(height: height) * 1.45 + 1) + (count - 1) * stripMarkSpacing
+    }
+    static func stripMarksWing(working: Int, geometry: NotchGeometry) -> CGFloat {
+        let side = stripMarkSize(height: geometry.compactActivityContentHeight)
+        let inset = geometry.compactActivityEdgeInset(boxHeight: side * 1.45 + 1, radius: side / 2)
+        // Center the marks in a wing with clearance on BOTH sides. A single
+        // inset split across the centered group lets its outside mark graze
+        // the curved edge, even when its frame fits the wing mathematically.
+        return stripMarksWidth(working: working, height: geometry.compactActivityContentHeight)
+            + 2 * (inset + stripMarkEdgePadding)
+    }
     /// Air between the camera and what sits beside it.
     static let stripCameraGap: CGFloat = 6
 
@@ -231,7 +250,7 @@ enum NotchAgentSupport {
     static func tiles(cards: [NotchAgentCard], providers: [AgentProvider]) -> [NotchAgentTile] {
         cards.flatMap { card -> [NotchAgentTile] in
             switch card {
-            case .limits: return providers.map { NotchAgentTile(card: .limits, provider: $0) }
+            case .limits: return providers.filter { $0 != .antigravity }.map { NotchAgentTile(card: .limits, provider: $0) }
             // Banked resets belong to a Codex account.
             case .resets: return providers.contains(.codex) ? [NotchAgentTile(card: .resets, provider: .codex)] : []
             default: return [NotchAgentTile(card: card, provider: nil)]
@@ -263,6 +282,14 @@ enum NotchAgentSupport {
 
     static func height(of row: [NotchAgentTile]) -> CGFloat {
         row.contains { $0.card.fullWidth } ? chartHeight : cardHeight
+    }
+
+    /// A full-width live card after a pair can instead occupy the right
+    /// column across both rows, leaving the other two cards stacked at left.
+    static func liveColumn(at index: Int, rows: [[NotchAgentTile]]) -> Bool {
+        rows.indices.contains(index) && rows.indices.contains(index + 1)
+            && rows[index].count == 2 && !rows[index].contains { $0.card.fullWidth }
+            && rows[index + 1].count == 1 && rows[index + 1][0].card == .live
     }
 
     static func contentHeight(_ rows: [[NotchAgentTile]]) -> CGFloat {

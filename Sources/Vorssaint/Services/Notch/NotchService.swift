@@ -20,6 +20,12 @@ struct NotchNotice: Equatable {
     /// so a burst of messages does not resize the island with each one.
     var minimumWingWidth: CGFloat = 0
 
+    /// These key-driven meters unfold below a physical camera. Floating
+    /// capsules keep their existing compact, end-to-end level animation.
+    var isLevelFeedback: Bool {
+        level != nil && (event == .volume || event == .brightness || event == .keyboardLight)
+    }
+
     var preferredWingWidth: CGFloat {
         if let notification { return max(minimumWingWidth, NotchNotificationBannerLayout.wing(for: notification)) }
         let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
@@ -504,7 +510,7 @@ final class NotchService: ObservableObject {
         case .agents:
             let working = Set(AgentUsageService.shared.snapshot.live.map(\.provider)).count
             let side = NotchTimerSupport.stripAgentMarkSize(height: height, working: working)
-            return CGFloat(max(1, working)) * (side * 1.45 + 1) + CGFloat(max(0, working - 1))
+            return NotchAgentSupport.stripMarksWidth(working: working, height: height)
                 + provisional.compactActivityEdgeInset(boxHeight: side + 4, radius: (side + 4) / 2)
         case .calendar:
             return provisional.compactActivityEdgeInset(boxHeight: 9, radius: 0) + calendarClockWidth
@@ -537,13 +543,9 @@ final class NotchService: ObservableObject {
             .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
         ]).width
         let reading = width.rounded(.up) + provisional.compactActivityEdgeInset(boxHeight: size * 0.72, radius: 0)
-        // The marks on the other side, drawn as the strip draws them: two
-        // working agents share a smaller size, each in a frame wider than it.
+        // Size the wing for every full-size mark, with space between them.
         let working = Set(AgentUsageService.shared.snapshot.live.map(\.provider)).count
-        let mark = CGFloat(working > 1 ? 11 : 14)
-        let frame = mark * 1.45 + 1
-        let marks = CGFloat(max(1, working)) * frame + CGFloat(max(0, working - 1))
-            + provisional.compactActivityEdgeInset(boxHeight: mark + 4, radius: (mark + 4) / 2)
+        let marks = NotchAgentSupport.stripMarksWing(working: working, geometry: provisional)
         return max(reading, marks) + NotchAgentSupport.stripCameraGap
     }
 
@@ -607,7 +609,11 @@ final class NotchService: ObservableObject {
         let musicExtras = NotchLyricsSupport.isEnabled() || NotchQueueSupport.isEnabled()
         return geometry.expandedSize(module: module, detail: detail, panel: panel, detailHeight: detailHeight,
                                      shortcutCount: shortcuts,
-                                     sliderCount: sliders, controlsHaveMusic: controls.contains(.music), musicHasContent: NotchMusicService.shared.playback != nil,
+                                     sliderCount: sliders, controlsHaveMusic: controls.contains(.music),
+                                     controlsHaveSourceTabs: NotchMusicService.shared.sources.count > 1,
+                                     musicHasContent: NotchMusicService.shared.playback != nil,
+                                     musicHasSourceTabs: NotchMusicService.shared.sources.count > 1,
+                                     musicHasTimeline: NotchMusicService.shared.hasPlaybackTimeline,
                                      musicHasControlsRow: AppFeature.mixer.isAvailable || musicExtras,
                                      musicExtraHeight: musicExtraHeight, fileMediaHeight: fileMediaHeight,
                                      systemCards: NotchSupport.systemCardCount(hasBattery: PowerSampler.hasInternalBattery,
@@ -688,6 +694,7 @@ final class NotchService: ObservableObject {
         if expanded { return expandedSize }
         if dragPlaceholder { return CGSize(width: geometry.peek.width, height: geometry.safeContentTop + 66) }
         if let notice {
+            if geometry.isNotched, notice.isLevelFeedback { return geometry.underNotchLevelSize }
             guard noticeExpanded else { return geometry.noticeSize(wingWidth: notice.preferredWingWidth) }
             return geometry.notificationPreviewSize(
                 contentHeight: notice.previewContentHeight(width: geometry.notificationPreviewContentWidth))
@@ -898,6 +905,7 @@ final class NotchService: ObservableObject {
         syncNoticeWithPreferences()
         syncVisibleConsumers()
         refreshPresentation(animated: false)
+        NotchLockScreenService.shared.prepare()
         // Pages read their preferences as they draw, and a change that keeps
         // the island's size publishes nothing else: hiding a control left the
         // open island, and the preview in Settings, as they were.
@@ -969,7 +977,9 @@ final class NotchService: ObservableObject {
         awaitsTrackNotice = false
         subscriptions.removeAll()
         stopPower()
-        NotchMusicService.shared.stop()
+        if !session.showsLockScreen || !NotchLockScreenSupport.isEnabled() || !NotchLockScreenSupport.showsMusic() {
+            NotchMusicService.shared.stop()
+        }
         NotchAudioLevelService.shared.stop()
         CameraPreviewService.shared.hideEmbedded()
         NotchAccessoryService.shared.suspend()
@@ -1476,6 +1486,7 @@ final class NotchService: ObservableObject {
             case .music: select(.music)
             case .timer: select(.timer)
             case .calendar: select(.calendar)
+            case .agents: select(.agents)
             case .commandBar: perform { CommandBarService.shared.show() }
             case .scratchpad: openScratchpad()
             case .volume, .brightness: select(.controls)
@@ -2268,6 +2279,7 @@ final class NotchService: ObservableObject {
         let access = NotchQuickAccessConfiguration.current()
         let size = surfaceSize
         let contentTransition = compactMusicTransition(transitionContent, animated: animated)
+        windowHost?.animatesContentArrival = !noticeCanPresent || !geometry.isNotched || notice?.isLevelFeedback != true
         if captureControls == nil {
             // A simulated cutout yields to the menu bar when it reappears in full screen.
             panel?.level = hiddenInFullscreen && !geometry.isNotched && !NotchSupport.coversMenus()
@@ -2750,7 +2762,9 @@ final class NotchService: ObservableObject {
         geometry.compactSideRoom = room
         // Losing a safe center must also hide an unchanged bare cutout.
         if previousSize != surfaceSize || panel?.isVisible != true || room == nil {
-            refreshPresentation(animated: grows)
+            // The asynchronous menu measurement can arrive mid app-switch.
+            // On a physical camera, narrowing must not snap that morph shut.
+            refreshPresentation(animated: geometry.isNotched || grows)
         }
     }
 
@@ -2858,7 +2872,9 @@ final class NotchService: ObservableObject {
                              customHeight: UserDefaults.standard.double(forKey: DefaultsKey.notchCustomHeight),
                              cameraFit: NotchCameraFit.current(), silhouette: NotchSilhouette.current(),
                              capsuleFit: NotchCapsuleFit.current(),
-                             outline: UserDefaults.standard.bool(forKey: DefaultsKey.notchOutlineEnabled))
+                             outline: UserDefaults.standard.bool(forKey: DefaultsKey.notchOutlineEnabled),
+                             expandedScale: UserDefaults.standard.object(forKey: DefaultsKey.notchExpandedScale) as? Double
+                                ?? NotchSize.defaultExpandedScale)
     }
 
     private func updateFullscreenVisibility(displayID: CGDirectDisplayID) {
@@ -2999,7 +3015,8 @@ final class NotchService: ObservableObject {
             collapse()
         }
         if !expanded, NotchSupport.hidesMusicWhenPlayerActive() {
-            refreshPresentation(animated: false)
+            syncVisibleConsumers()
+            refreshPresentation()
         }
     }
 
@@ -3322,6 +3339,14 @@ final class NotchService: ObservableObject {
             }.store(in: &subscriptions)
             // A capsule names each new song for a moment: the song playing,
             // or the next one once the notice releases the song it held.
+            music.$sources.map { $0.count > 1 }
+                .combineLatest(music.$playback.map { ($0?.duration ?? 0) > 0 })
+                .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 }
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.objectWillChange.send()
+                    self?.refreshPresentation()
+                }.store(in: &subscriptions)
             music.$playback.map { $0?.track.title }.removeDuplicates().map { _ in () }
                 .merge(with: $heldMusic.map { $0?.playback.track.title }.removeDuplicates().map { _ in () })
                 .receive(on: DispatchQueue.main)
@@ -3519,9 +3544,14 @@ final class NotchService: ObservableObject {
     func showVolume(_ volume: Double, muted: Bool? = nil) -> Bool {
         guard volume.isFinite else { return false }
         let value = muted == true ? 0 : min(1, max(0, volume))
+        let mixer = AppVolumeMixer.shared
+        let output = mixer.outputDevices.first { $0.uid == mixer.currentOutputDeviceUID }
+        let symbol = output?.isHeadphones == true
+            ? NotchAccessorySupport.symbol(for: .audio, name: output?.name ?? "")
+            : (value == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
         return show(NotchNotice(event: .volume, title: FeatureStrings.notch(L10n.shared.language).volume,
                                 detail: "\(Int((value * 100).rounded()))%",
-                                symbol: value == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill", level: value))
+                                symbol: symbol, level: value))
     }
 
     private func startPower() {

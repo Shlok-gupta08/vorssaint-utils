@@ -84,6 +84,7 @@ enum NotchPresentationRefreshContract {
         func orderFrontRegardless() { isVisible = true }
     }
     final class Host {
+        var animatesContentArrival = true
         let panel = Panel()
         var departsContent = false
         func finishDeparture() { departsContent = false }
@@ -183,7 +184,8 @@ enum NotchPresentationRefreshContract {
         var departingMusic: NotchCompactMusicSnapshot?
         var musicDepartureWork: DispatchWorkItem?
         var noticeExpanded = false
-        var notice: Bool?
+        var notice: NotchNotice?
+        var noticeCanPresent: Bool { !expanded && !dragPlaceholder && captureControls == nil }
         var captureControls: CaptureOptions?
         var captureControlsCollapsed = false, captureSelectionInProgress = false
         var inside = false, trackingMenu = false
@@ -231,6 +233,15 @@ enum NotchPresentationRefreshContract {
     }
 
     static func run(_ suite: TestSuite) {
+        let level = Service()
+        level.expanded = false
+        level.notice = NotchNotice(event: .volume, title: "Volume", detail: "50%", symbol: "speaker.wave.2.fill", level: 0.5)
+        level.refreshPresentation()
+        suite.expect(level.windowHost?.animatesContentArrival == false,
+                     "a physical-camera meter is revealed by the island without separately scaling from behind it")
+        level.notice = nil
+        level.refreshPresentation()
+        suite.expect(level.windowHost?.animatesContentArrival == true, "other island content retains its existing arrival animation")
         compactMusicDepartureChecks(suite)
         UserDefaults.standard.hides = false
         UserDefaults.standard.outline = false
@@ -522,7 +533,7 @@ enum NotchPresentationRefreshContract {
             if !isPhysical { hidden.geometry = simulated.geometry }
             hidden.expanded = false
             hidden.compactActivityIsVisible = true
-            hidden.notice = true
+            hidden.notice = NotchNotice(event: .clipboard, title: "Copied", detail: "Text", symbol: "doc.on.clipboard")
             hidden.refreshPresentation()
             suite.expect(hidden.panel?.isVisible == false && !hidden.edgeClicksEnabled && !hidden.showsSystemFeedback,
                    "hidden mode withdraws the entire window, including compact activity and an existing notice")

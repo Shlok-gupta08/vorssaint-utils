@@ -68,7 +68,8 @@ struct NotchPlaybackSource: Equatable {
     /// Automatic playback follows music apps, but whenever music is paused,
     /// it follows whatever macOS Now Playing is actively playing or any actively
     /// playing app if broader playback is enabled. A manual source choice always
-    /// takes precedence. Paused music keeps its resume control when nothing is playing.
+    /// takes precedence. Once playback stops everywhere, the media that was
+    /// playing most recently stays selected so its resume control remains useful.
     static func preferred(in sources: [Self], previousPID: Int32?, systemPID: Int32?, selection: Selection? = nil,
                           includeOtherPlayers: Bool = false) -> Self? {
         let available = sources.filter { $0.pid > 0 && $0.hasTrack }
@@ -97,15 +98,23 @@ struct NotchPlaybackSource: Equatable {
             if let first = playingOther.sorted(by: { $0.pid < $1.pid }).first { return first }
         }
 
-        // 3. When nothing is playing anywhere, paused music keeps its place
-        // so its resume control stays reachable.
+        // 3. When nothing is playing anywhere, keep the last active session.
+        // Browser players can rotate their helper PID or lose the system
+        // session as soon as a YouTube video pauses, but still expose the same
+        // track and a valid Play command. Prefer that session before a dormant
+        // music app so a pause never looks like a source switch.
+        if let previous = available.first(where: { $0.pid == previousPID && !$0.isPlaying }) {
+            return previous
+        }
+
+        // 4. With no remembered paused session, a music app is the most useful
+        // fallback because it provides a resume control even while idle.
         if !music.isEmpty {
-            if let previous = music.first(where: { $0.pid == previousPID }) { return previous }
             if let current = music.first(where: { $0.pid == systemPID }) { return current }
             if let first = music.sorted(by: { $0.pid < $1.pid }).first { return first }
         }
 
-        // 4. If no music app is available, a paused other app is kept if it was already
+        // 5. If no music app is available, a paused other app is kept if it was already
         // being followed or owns the system session.
         if includeOtherPlayers {
             let pausedOther = available.filter {

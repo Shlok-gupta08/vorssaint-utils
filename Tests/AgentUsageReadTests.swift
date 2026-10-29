@@ -71,6 +71,7 @@ enum AgentUsageReadTests {
                 switch provider {
                 case .claude: entries += AgentLogParser.parseClaude(line, state: &cursor.state, now: now)
                 case .codex: entries += AgentLogParser.parseCodex(line, state: &cursor.state, now: now)
+                case .antigravity: entries += AgentLogParser.parseAntigravity(line, state: &cursor.state, now: now)
                 case .opencode: entries += AgentLogParser.parseOpenCode(line, state: &cursor.state, now: now)
                 }
             }
@@ -98,5 +99,32 @@ enum AgentUsageReadTests {
             host.readerCancellation?.isCancelled = true
             suite.expect(!host.read(file.path, provider: provider), "a cancelled reading consumes no more entries")
         }
+        do {
+            let root = folder.appending(path: ".gemini/antigravity-ide/brain")
+            let logs = root.appending(path: "session/.system_generated/logs")
+            try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+            let file = logs.appending(path: "transcript.jsonl")
+            func transcript(_ status: String) -> Data {
+                let user = #"{"step_index":0,"type":"USER_INPUT","status":"DONE","source":"USER_EXPLICIT","created_at":\#(timestamp)}"#
+                let response = #"{"step_index":1,"type":"PLANNER_RESPONSE","status":"\#(status)","source":"MODEL","created_at":\#(timestamp),"tool_calls":[],"output_tokens":8}"#
+                return Data((user + "\n" + response.padding(toLength: 256, withPad: " ", startingAt: 0) + "\n").utf8)
+            }
+            try transcript("RUNNING").write(to: file)
+            try transcript("DONE").write(to: logs.appending(path: "transcript_full.jsonl"))
+            let found = AgentUsageProductionLogReader.discover([AgentLogRoot(provider: .antigravity, url: root)], since: .distantPast)
+            suite.expect(found.count == 1 && found.first?.path.hasSuffix("/session/.system_generated/logs/transcript.jsonl") == true,
+                         "Antigravity reads its display transcript once and skips full copies")
+            let host = Host()
+            host.store.reportsTransitions = true
+            suite.expect(host.read(file.path, provider: .antigravity) && host.store.live.count == 1,
+                         "the production reader detects Antigravity working")
+            let size = try Data(contentsOf: file).count
+            try transcript("DONE").write(to: file)
+            suite.expect(try Data(contentsOf: file).count == size, "the Antigravity rewrite fixture keeps the same size")
+            suite.expect(host.read(file.path, provider: .antigravity) && host.store.live.isEmpty && host.events.count == 1,
+                         "same-size transcript status rewrites end work and emit one completion")
+            suite.expect(!host.read(file.path, provider: .antigravity) && host.events.count == 1,
+                         "unchanged Antigravity transcripts never replay completion alerts")
+        } catch { suite.expect(false, "Antigravity transcript fixtures: \(error)") }
     }
 }

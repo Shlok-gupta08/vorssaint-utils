@@ -177,9 +177,108 @@ enum NotchPresentationProbe {
         return failures
     }
 
+    private final class NoticePreviewModel: ObservableObject {
+        @Published var notice: NotchNotice
+        init(_ notice: NotchNotice) { self.notice = notice }
+    }
+
+    /// Exercises real compositor frames and Space reuse without locking the
+    /// Mac, changing preferences or starting any media/device readers.
+    private static func runCameraTransitionsAndExit() -> Never {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)
+        guard let screen = NSScreen.main else { print("CAMERA TRANSITIONS FAILED: no display"); exit(1) }
+        var failures: [String] = []
+        let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        func advance(_ duration: TimeInterval) { RunLoop.current.run(until: Date().addingTimeInterval(duration)) }
+        for fit in [0.0, -10] {
+            let geometry = NotchGeometry(screen: screen.frame, safeAreaTop: 45, cameraWidth: 250,
+                                         cameraFit: NotchCameraFit(width: fit, height: 0))
+            let rest = geometry.restingSize(showsContent: false)
+            let host = NotchWindowHost(content: AnyView(Color.clear), geometry: geometry, size: rest)
+            host.animatesContentArrival = false
+            host.panel.alphaValue = 0.01
+            host.panel.ignoresMouseEvents = true
+            host.panel.orderFrontRegardless()
+            advance(0.05)
+            for opening in [true, false, true, false] {
+                let target = opening ? geometry.underNotchLevelSize : rest
+                host.present(size: target, geometry: geometry, animated: true,
+                             transitionContent: opening ? .reveal : .depart)
+                var intermediate = false
+                var overlappingFade = false
+                let origin = opening ? geometry.coveringPhysicalCamera(rest) : geometry.underNotchLevelSize
+                let destination = geometry.coveringPhysicalCamera(target)
+                for _ in 0..<40 {
+                    advance(0.015)
+                    let size = host.visibleFrame.size
+                    let widthProgress = (size.width - origin.width) / (destination.width - origin.width)
+                    let heightProgress = (size.height - origin.height) / (destination.height - origin.height)
+                    if abs(widthProgress - heightProgress) > 0.03 {
+                        failures.append("native width and height moved as separate stages")
+                    }
+                    if opening, size.height < target.height - 0.5, host.contentProbeOpacity > 0.01 {
+                        overlappingFade = true
+                    }
+                    if size.width < 249.5 || host.panel.frame.width < 249.5 {
+                        failures.append("a native frame narrowed through the physical camera (fit \(fit))")
+                    }
+                    if size.height > geometry.cameraHeight + 0.02 {
+                        if let path = host.silhouetteProbePath {
+                            let box = path.boundingBoxOfPath
+                            let radius = NotchLayout.surfaceRadius(height: geometry.cameraHeight)
+                            let shoulder = min(NotchLayout.shoulder(height: geometry.cameraHeight), max(0, (box.width - 250) / 2))
+                            for y in [(shoulder + box.maxY - radius) / 2] {
+                                if !path.contains(CGPoint(x: box.midX - 124.99, y: y))
+                                    || !path.contains(CGPoint(x: box.midX + 124.99, y: y)) {
+                                    failures.append("the meter's side walls narrowed inside the physical camera")
+                                }
+                            }
+                        }
+                    }
+                    if host.contentProbeGrowing || host.contentProbeBlurred {
+                        failures.append("a meter scaled or blurred separately from its silhouette")
+                    }
+                    if size.height > rest.height + 0.5 && size.height < geometry.underNotchLevelSize.height - 0.5 {
+                        intermediate = true
+                    }
+                }
+                if !reduced && !intermediate { failures.append("a level transition snapped instead of morphing") }
+                if opening && !reduced && !overlappingFade { failures.append("the meter waited until the unfold finished before fading in") }
+            }
+            host.close()
+        }
+        if let space = NotchOverlaySpace(absoluteLevel: NotchLockScreenSupport.spaceLevel, initiallyVisible: false) {
+            let panel = NSPanel(contentRect: CGRect(x: screen.frame.minX, y: screen.frame.minY, width: 2, height: 2),
+                                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            panel.alphaValue = 0
+            panel.ignoresMouseEvents = true
+            for _ in 0..<4 {
+                space.add(panel)
+                space.setVisible(true)
+                panel.orderFrontRegardless()
+                if !space.probeHolds(panel) { failures.append("a reused overlay lost its private Space membership") }
+                panel.orderOut(nil)
+                space.remove(panel)
+                space.setVisible(false)
+                if space.probeHolds(panel) { failures.append("a retired panel remained attached to the cached Space") }
+            }
+            space.close()
+        } else { failures.append("could not create the lock-screen overlay Space") }
+        print(failures.isEmpty ? "CAMERA TRANSITIONS AND OVERLAY REUSE OK"
+              : "CAMERA TRANSITIONS FAILED\n" + Array(Set(failures)).sorted().joined(separator: "\n"))
+        exit(failures.isEmpty ? 0 : 1)
+    }
+
+    private struct NoticePreviewContent: View {
+        @ObservedObject var model: NoticePreviewModel
+        let geometry: NotchGeometry
+        var body: some View { NotchNoticeView(notice: model.notice, geometry: geometry) }
+    }
+
     /// An explicitly requested preview uses the real notice and animation host,
     /// with no connection, audio adjustment or preference change.
-    private static func previewNoticeAndExit(title: String) -> Never {
+    private static func previewNoticeAndExit(title: String, levelEvent: NotchEvent? = nil) -> Never {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         guard let screen = NSScreen.main else { print("NOTCH PREVIEW FAILED: no display"); exit(1) }
@@ -191,24 +290,47 @@ enum NotchPresentationProbe {
             cameraWidth: cameraWidth, menuBarHeight: measurements.height(
                 displayID: screen.notchDisplayID, frame: screen.frame, visibleTop: screen.visibleFrame.maxY,
                 scale: screen.backingScaleFactor, statusBarThickness: NSStatusBar.system.thickness))
-        let notice = NotchNotice(event: .accessory, title: FeatureStrings.notchActivities(L10n.shared.language).connected,
+        let notice = levelEvent.map {
+            NotchNotice(event: $0, title: title, detail: "65%",
+                        symbol: $0 == .brightness ? "sun.max.fill" : "speaker.wave.2.fill", level: 0.65)
+        } ?? NotchNotice(event: .accessory, title: FeatureStrings.notchActivities(L10n.shared.language).connected,
                                 detail: title, symbol: NotchAccessorySupport.symbol(name: title, majorClass: 0x04, minorClass: 0x06))
-        let size = geometry.noticeSize(wingWidth: notice.preferredWingWidth)
-        let content = NotchNoticeView(notice: notice, geometry: geometry)
+        let size = geometry.isNotched && notice.isLevelFeedback ? geometry.underNotchLevelSize
+            : geometry.noticeSize(wingWidth: notice.preferredWingWidth)
+        // Leave enough time to inspect a development-only level preview using
+        // Accessibility without adjusting hardware or extending real feedback.
+        let duration: TimeInterval = levelEvent == nil ? NotchEvent.accessory.duration : 12
+        if levelEvent != nil { app.setActivationPolicy(.accessory) }
+        let model = NoticePreviewModel(notice)
+        let content = NoticePreviewContent(model: model, geometry: geometry)
             .frame(width: size.width, height: size.height).background(.black)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         let idle = geometry.restingSize(showsContent: false)
         let host = NotchWindowHost(content: AnyView(content), geometry: geometry, size: idle)
+        host.animatesContentArrival = levelEvent == nil || !geometry.isNotched
         host.panel.ignoresMouseEvents = true
-        host.panel.title = "Connection preview"
+        host.panel.title = levelEvent == nil ? "Connection preview" : "Level preview"
         host.panel.orderFrontRegardless()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             host.present(size: size, geometry: geometry, animated: true, transitionContent: .reveal)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1 + NotchEvent.accessory.duration) {
+        if let event = levelEvent {
+            print("LEVEL PREVIEW physical=\(geometry.isNotched) camera=\(geometry.cameraWidth)x\(geometry.cameraHeight) surface=\(size)")
+            for (index, level) in [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.8, 0.7, 0.6, 0.5].enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3 + Double(index) * 0.15) {
+                    var transaction = Transaction(animation: nil)
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        model.notice = NotchNotice(event: event, title: title, detail: "\(Int(level * 100))%",
+                                                   symbol: notice.symbol, level: level)
+                    }
+                }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1 + duration) {
             host.present(size: idle, geometry: geometry, animated: true, transitionContent: .dismiss)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2 + NotchEvent.accessory.duration) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2 + duration) {
             host.close()
             print("NOTCH NOTICE PREVIEW OK")
             exit(0)
@@ -394,8 +516,14 @@ enum NotchPresentationProbe {
     }
 
     static func runAndExit() -> Never {
+        if CommandLine.arguments.contains("--camera-transitions") { runCameraTransitionsAndExit() }
         if CommandLine.arguments.contains("--media-layout") { NotchMediaPresentationProbe.runAndExit() }
         if CommandLine.arguments.contains("--mission-control") { runMissionControlAndExit() }
+        if let index = CommandLine.arguments.firstIndex(of: "--preview-level"),
+           CommandLine.arguments.indices.contains(index + 1) {
+            let brightness = CommandLine.arguments[index + 1] == "brightness"
+            previewNoticeAndExit(title: brightness ? "Brightness" : "Volume", levelEvent: brightness ? .brightness : .volume)
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--preview-notice"),
            CommandLine.arguments.indices.contains(index + 1) {
             previewNoticeAndExit(title: CommandLine.arguments[index + 1])

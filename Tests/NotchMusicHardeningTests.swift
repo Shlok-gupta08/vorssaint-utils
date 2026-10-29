@@ -233,6 +233,25 @@ enum NotchMusicHardeningTests {
         suite.expect(automatic == NotchPlaybackRequest(command: .source(nil)),
                      "a selected source that is not responding can be released from the empty state")
         service.stop()
+
+        let pager = NotchMusicCommandContract.Service()
+        pager.start()
+        pager.sources = [browser]
+        pager.playback = current
+        pager.browseSource(browser.selection)
+        pager.queue.drain()
+        suite.expect(pager.chosenSource == nil && pager.browsingSource == browser.selection
+                     && pager.playback == nil && pager.awaitingPlayback,
+                     "a horizontal media tab changes the session without becoming a saved source choice")
+        pager.sourceIsAutomatic = false
+        pager.endSourceBrowsing()
+        pager.queue.drain()
+        let pagerAutomatic = pager.input?.fileHandleForWriting.written.last.flatMap {
+            String(data: $0, encoding: .utf8).flatMap { NotchPlaybackRequest(message: $0.trimmingCharacters(in: .newlines)) }
+        }
+        suite.expect(pagerAutomatic == NotchPlaybackRequest(command: .source(nil)) && pager.browsingSource == nil,
+                     "leaving the horizontal media tabs returns the adapter to automatic selection")
+        pager.stop()
     }
 
     /// The adapter keeps a choice only while it runs, and it stops on lock,
@@ -567,6 +586,8 @@ enum NotchMusicHardeningTests {
                      "an explicit browser selection overrides simultaneous music playback")
         suite.expect(choose([paused, idleBrowser], previous: 10, system: 10, includeOtherPlayers: true) == paused,
                      "an unrelated paused browser cannot replace a music resume control")
+        suite.expect(choose([paused, idleBrowser], previous: 20, system: 10) == idleBrowser,
+                     "a paused browser that just played remains available when the system session moves away")
         suite.expect(NotchPlaybackSource.preferred(in: [music, idleBrowser], previousPID: 20, systemPID: 10,
                                                    selection: browser.selection) == idleBrowser,
                      "pausing a chosen browser keeps its resume control reachable")

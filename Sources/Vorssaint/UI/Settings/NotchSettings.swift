@@ -60,6 +60,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchLockScreen) private var lockScreen = false
     @AppStorage(DefaultsKey.notchLockSounds) private var lockSounds = false
     @AppStorage(DefaultsKey.notchSize) private var size = NotchSize.spacious.rawValue
+    @AppStorage(DefaultsKey.notchExpandedScale) private var expandedScale = NotchSize.defaultExpandedScale
     @AppStorage(DefaultsKey.notchOutlineEnabled) private var outlineEnabled = false
     @AppStorage(DefaultsKey.notchCustomWidth) private var customWidth = NotchSize.defaultWidth
     @AppStorage(DefaultsKey.notchCustomHeight) private var customHeight = NotchSize.defaultHeight
@@ -95,7 +96,7 @@ struct NotchSettings: View {
     private var configuration: [String] {
         [String(enabled), String(calendarEnabled), String(calendarCountdown), String(calendarTimeLeft), String(notificationsEnabled), String(dismissNativeNotifications), String(gesturesEnabled), String(lyricsEnabled), String(lyricsOnline), String(queueEnabled), String(liveEqualizer), String(showPlayingMusic), String(hideMusicWhenPlayerActive), String(includeOtherPlayers), idle, hiddenControls, controlOrder, size,
          String(timerEnabled), String(timerSoundEnabled), String(cameraEnabled), String(accessoriesEnabled), String(outlineEnabled), String(customWidth), String(customHeight), String(cameraFitWidth), String(cameraFitHeight), String(capsuleFitWidth), String(capsuleFitHeight), String(capsuleFitDrop), String(hapticFeedback), String(shelfWindow), String(dragReveal), String(captureControls), String(quickPanel), String(appPanel), String(hoverExpand), String(hideUntilHover), String(hideInFullscreen), String(coversMenus), display, silhouette, String(hover), hidden, order, String(volume),
-         String(brightness), String(keyboardLight), String(microphone), String(battery), String(clipboard), String(clipboardWindow), String(capture), String(trackChange), captureAction, String(showInCaptures), String(returnHome), homeModule, String(opensActivity), String(scratchpad), String(agentsEnabled), String(watchEnabled), String(keepAwakeActivity)]
+         String(brightness), String(keyboardLight), String(microphone), String(battery), String(clipboard), String(clipboardWindow), String(capture), String(trackChange), captureAction, String(showInCaptures), String(returnHome), homeModule, String(opensActivity), String(scratchpad), String(agentsEnabled), String(watchEnabled), String(keepAwakeActivity), String(expandedScale)]
     }
 
     private var access: Binding<NotchQuickAccessConfiguration> {
@@ -176,6 +177,8 @@ struct NotchSettings: View {
                 selectedModule = .controls; tab = .content
             }
             SettingsCard(title: text.size) {
+                expandedSizeSlider
+                Divider()
                 HStack(spacing: 10) {
                     choice(text.compact, symbol: "rectangle.compress.vertical", selected: size == NotchSize.compact.rawValue) { size = NotchSize.compact.rawValue }
                     choice(text.spacious, symbol: "rectangle.expand.vertical", selected: size == NotchSize.spacious.rawValue) { size = NotchSize.spacious.rawValue }
@@ -787,6 +790,37 @@ struct NotchSettings: View {
     private func switchRow(_ symbol: String, _ title: String, caption: String? = nil, isOn: Binding<Bool>) -> some View {
         SettingsRow(symbol: symbol, title: title, caption: caption) {
             Toggle(title, isOn: isOn).labelsHidden().toggleStyle(.switch)
+        }
+    }
+
+    private var expandedSizeSlider: some View {
+        let strings = FeatureStrings.notchExpandedSize(l10n.language)
+        let bounded = Binding(get: { NotchSize.expandedScale(expandedScale) },
+                              set: { expandedScale = NotchSize.expandedScale($0) })
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Label(strings.title, systemImage: "arrow.up.left.and.arrow.down.right")
+                    .font(.callout.weight(.medium))
+                Spacer(minLength: 0)
+                Text(bounded.wrappedValue, format: .percent.precision(.fractionLength(0)))
+                    .monospacedDigit().foregroundStyle(.secondary)
+                    .frame(minWidth: 42, alignment: .trailing)
+                Button {
+                    expandedScale = NotchSize.defaultExpandedScale
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                }
+                .buttonStyle(.borderless)
+                .help(l10n.s.shortcutReset)
+                .accessibilityLabel(l10n.s.shortcutReset + ", " + strings.title)
+                .disabled(abs(bounded.wrappedValue - NotchSize.defaultExpandedScale) < 0.001)
+            }
+            Slider(value: bounded, in: NotchSize.expandedScaleRange, step: 0.05) {
+                Text(strings.title)
+            }.labelsHidden()
+                .accessibilityValue(bounded.wrappedValue.formatted(.percent.precision(.fractionLength(0))))
+            Text(strings.hint).font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

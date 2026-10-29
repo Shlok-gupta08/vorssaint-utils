@@ -18,6 +18,9 @@ enum NotchAgentTests {
         claudeTurns(suite)
         codexParsing(suite)
         openCodeParsing(suite)
+        antigravityParsing(suite)
+        antigravityLiveActivity(suite)
+        antigravityT3Activity(suite)
         timestamps(suite)
         summary(suite)
         AgentUsageSummaryCacheTests.run(suite)
@@ -38,6 +41,103 @@ enum NotchAgentTests {
     }
 
     private static func line(_ json: String) -> Data { Data(json.utf8) }
+
+    private static func antigravityT3Activity(_ suite: TestSuite) {
+        let file = FileManager.default.temporaryDirectory.appending(path: "vorssaint-t3-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: file) }
+        var db: OpaquePointer?
+        guard sqlite3_open(file.path, &db) == SQLITE_OK else { suite.expect(false, "T3 fixture opens"); return }
+        defer { sqlite3_close(db) }
+        let sql = """
+        CREATE TABLE orchestration_v2_projection_runs(run_id TEXT, thread_id TEXT, provider TEXT, status TEXT, completed_at TEXT, requested_at TEXT, payload_json TEXT);
+        CREATE TABLE orchestration_v2_projection_threads(thread_id TEXT, project_id TEXT, deleted_at TEXT, payload_json TEXT);
+        CREATE TABLE orchestration_v2_projection_nodes(node_id TEXT, status TEXT, started_at TEXT, completed_at TEXT);
+        CREATE TABLE projection_projects(project_id TEXT, workspace_root TEXT);
+        INSERT INTO projection_projects VALUES ('p', '/Users/me/Projects/Example');
+        INSERT INTO orchestration_v2_projection_threads VALUES ('t', 'p', NULL, '{}');
+        INSERT INTO orchestration_v2_projection_nodes VALUES ('n', 'running', '2026-10-29T21:13:51Z', NULL);
+        INSERT INTO orchestration_v2_projection_runs VALUES ('r', 't', 'antigravity', 'running', NULL, '2026-10-29T21:13:50Z',
+          '{"rootNodeId":"n","modelSelection":{"model":"gemini-test"}}');
+        """
+        suite.expect(sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK, "T3 metadata fixture is created without message tables")
+        let now = AgentTimestamp.parse("2026-10-29T22:00:00Z")!
+        let live = AgentT3AntigravityReader.read(database: file, now: now)
+        suite.expect(live.count == 1 && live.first?.model == "gemini-test" && live.first?.project == "Example",
+                     "T3 Antigravity activity uses run state and model/workspace metadata without transcripts")
+        sqlite3_exec(db, "UPDATE orchestration_v2_projection_nodes SET status='waiting'", nil, nil, nil)
+        suite.expect(AgentT3AntigravityReader.read(database: file, now: now).isEmpty,
+                     "T3 Antigravity awaiting input is not shown as actively working")
+        sqlite3_exec(db, "UPDATE orchestration_v2_projection_nodes SET status='running'; UPDATE orchestration_v2_projection_runs SET status='completed'", nil, nil, nil)
+        suite.expect(AgentT3AntigravityReader.read(database: file, now: now).isEmpty,
+                     "completed T3 runs stop the notch activity even while the adapter remains open")
+        sqlite3_exec(db, "UPDATE orchestration_v2_projection_runs SET status='running'; UPDATE orchestration_v2_projection_threads SET deleted_at='2026-10-29T21:30:00Z'", nil, nil, nil)
+        suite.expect(AgentT3AntigravityReader.read(database: file, now: now).isEmpty,
+                     "deleted T3 conversations never leave ghost activity")
+    }
+
+    private static func antigravityLiveActivity(_ suite: TestSuite) {
+        let endpoint = AgentAntigravityActivity.endpoint(pid: 123, arguments: ["/Users/me/.gemini/bin/agy", "--hub",
+            "--hub-port=54321", "--csrf_token", "test-only"])
+        suite.expect(endpoint?.port == 54321, "Antigravity discovers the modern hub's actual port")
+        suite.expect(AgentAntigravityActivity.endpoint(pid: 123, arguments: ["/bin/sh", "agy", "--hub-port=54321",
+            "--csrf_token=test-only"]) == nil, "shell command text cannot masquerade as an agent server")
+        suite.expect(AgentAntigravityActivity.endpoint(pid: 123, arguments: ["/tmp/agy", "--hub-port=70000",
+            "--csrf_token=test-only"]) == nil, "Antigravity rejects invalid endpoint ports")
+        guard let endpoint else { return }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func read(_ status: String, killed: Bool = false) -> [AgentLiveSession]? {
+            AgentAntigravityActivity.live(line("""
+            {"trajectorySummaries":{"task":{"status":"\(status)","killed":\(killed),"lastUserInputTime":\(now.addingTimeInterval(-3600).timeIntervalSince1970),"summary":"private title","workspaces":[{"workspaceFolderAbsoluteUri":"file:///Users/me/Projects/Example"}]}}}
+            """), endpoint: endpoint, now: now)
+        }
+        let busy = read("CASCADE_RUN_STATUS_BUSY")
+        suite.expect(busy?.count == 1 && busy?.first?.project == "Example" && busy?.first?.lastActivity == now,
+                     "Antigravity busy state produces live activity even when transcript timestamps are old")
+        suite.expect(busy?.first?.started == now.addingTimeInterval(-3600), "long-running Antigravity tasks retain their true start time")
+        suite.expect(read("CASCADE_RUN_STATUS_RUNNING")?.count == 1, "Antigravity running state is recognized")
+        suite.expect(read("CASCADE_RUN_STATUS_IDLE")?.isEmpty == true, "idle Antigravity tasks disappear from live activity")
+        suite.expect(read("CASCADE_RUN_STATUS_BUSY", killed: true)?.isEmpty == true, "killed tasks never remain live")
+        suite.expect(AgentAntigravityActivity.live(line("{}"), endpoint: endpoint, now: now) == nil,
+                     "unsupported live response schemas are rejected")
+    }
+
+    private static func antigravityParsing(_ suite: TestSuite) {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let store = AgentUsageStore()
+        let cursor = AgentLogCursor(path: "/tmp/brain/session/.system_generated/logs/transcript.jsonl", provider: .antigravity)
+        cursor.state.session = "antigravity:session"
+        func parse(_ step: Int, _ type: String, _ status: String = "DONE", tool: Bool = false, tokens: Bool = false) -> [AgentLogEntry] {
+            let json = """
+            {"step_index":\(step),"type":"\(type)","status":"\(status)","source":"\(type == "USER_INPUT" ? "USER_EXPLICIT" : "MODEL")","created_at":\(now.timeIntervalSince1970),"content":"private text", "tool_calls":\(tool ? "[{}]" : "[]")\(tokens ? ",\"input_tokens\":100,\"output_tokens\":20,\"cache_read_tokens\":50" : "")}
+            """
+            return AgentLogParser.parseAntigravity(line(json), state: &cursor.state, now: now)
+        }
+        func apply(_ entries: [AgentLogEntry]) {
+            store.apply(entries, file: cursor.path, provider: .antigravity, tracksTurns: true, modified: now, now: now)
+        }
+        apply(parse(0, "USER_INPUT"))
+        suite.expect(store.live.count == 1, "Antigravity user input opens a live turn")
+        apply(parse(1, "PLANNER_RESPONSE", tool: true, tokens: true))
+        suite.expect(store.live.count == 1 && store.records.count == 1 && store.records[0].cost == nil,
+                     "Antigravity tool calls keep working and unknown model prices stay unknown")
+        cursor.startOver(identity: 2)
+        suite.expect(parse(0, "USER_INPUT").isEmpty && parse(1, "PLANNER_RESPONSE", tool: true, tokens: true).isEmpty,
+                     "rewritten Antigravity transcripts do not replay previous prompts or responses")
+        apply(parse(2, "RUN_COMMAND", "RUNNING"))
+        apply(parse(2, "RUN_COMMAND"))
+        apply(parse(3, "PLANNER_RESPONSE"))
+        suite.expect(store.live.isEmpty && store.records.count == 2 && store.records[0].tokens.total == 170,
+                     "a final Antigravity response ends work and retains only available counters")
+        suite.expect(store.records[1].tokens.total == 0 && store.records[1].cost == nil,
+                     "transcripts without counters never invent token usage or cost")
+        apply(parse(4, "USER_INPUT"))
+        apply(parse(5, "ERROR_MESSAGE"))
+        suite.expect(store.live.isEmpty, "Antigravity errors close activity without a successful completion")
+        suite.expect(AgentLogParser.parseAntigravity(line("{}"), state: &cursor.state, now: now).isEmpty,
+                     "partial or unrelated Antigravity records are ignored")
+        suite.expect(AgentLogRoot.all(home: URL(fileURLWithPath: "/tmp")).filter { $0.provider == .antigravity }.count == 3,
+                     "Antigravity App, IDE and CLI roots are all monitored")
+    }
 
     private static func claudeAssistant(id: String = "msg_1", request: String = "req_1", model: String = "claude-opus-5-5",
                                         stop: String = "tool_use", output: Int = 225, time: String = "2026-09-21T23:42:45.078Z",
@@ -2041,8 +2141,22 @@ enum NotchAgentTests {
                         && geometry.compactAgentGeometry(wing: 57.2).compactActivitySize.width == 185 + 116,
                      "the wings take the width the reading needs, with the camera between them")
         suite.expect(geometry.compactAgentGeometry(wing: 12).compactActivityWingWidth == 44
-                        && geometry.compactAgentGeometry(wing: 300).compactActivityWingWidth == 80,
+                        && geometry.compactAgentGeometry(wing: 300).compactActivityWingWidth == 220,
                      "a wing is never narrower than the music strip's nor wider than the menus allow")
+        let markHeight = geometry.compactActivityContentHeight
+        let single = NotchAgentSupport.stripMarksWidth(working: 1, height: markHeight)
+        let pair = NotchAgentSupport.stripMarksWidth(working: 2, height: markHeight)
+        suite.expect(pair == single * 2 + NotchAgentSupport.stripMarkSpacing
+                     && NotchCapsuleLayout.agentMarkSize(working: 1) == NotchCapsuleLayout.agentMarkSize(working: 4),
+                     "multiple agents retain their original mark size and gain spacing instead of shrinking")
+        suite.expect(geometry.compactAgentGeometry(wing: pair + 32).compactActivitySize.width
+                     > geometry.compactAgentGeometry(wing: single + 32).compactActivitySize.width,
+                     "the physical-notch strip widens to fit full-size concurrent agent marks")
+        let pairWing = NotchAgentSupport.stripMarksWing(working: 2, geometry: geometry)
+        let inset = geometry.compactActivityEdgeInset(boxHeight: NotchAgentSupport.stripMarkSize(height: markHeight) * 1.45 + 1,
+                                                     radius: NotchAgentSupport.stripMarkSize(height: markHeight) / 2)
+        suite.expect((pairWing - pair) / 2 >= inset + NotchAgentSupport.stripMarkEdgePadding - 0.001,
+                     "centered full-size agent marks keep padding beyond the curved outer edge")
         var crowded = geometry
         crowded.compactSideRoom = 30
         suite.expect(crowded.compactAgentGeometry(wing: 57).compactActivityWingWidth == 0
@@ -2348,9 +2462,11 @@ enum NotchAgentTests {
         suite.expect(NotchAgentSupport.cards(in: defaults) == [.trend, .spend, .limits, .live, .models, .resets],
                      "the saved order ignores unknown and repeated cards and appends new ones")
         defaults.set(false, forKey: DefaultsKey.notchAgentsCodex)
-        suite.expect(NotchAgentSupport.providers(in: defaults) == [.claude, .opencode], "an agent can be left out")
+        suite.expect(NotchAgentSupport.providers(in: defaults) == [.claude, .opencode, .antigravity], "an agent can be left out")
         defaults.set(false, forKey: DefaultsKey.notchAgentsOpenCode)
-        suite.expect(NotchAgentSupport.providers(in: defaults) == [.claude], "multiple agents can be left out")
+        suite.expect(NotchAgentSupport.providers(in: defaults) == [.claude, .antigravity], "multiple agents can be left out")
+        defaults.set(false, forKey: DefaultsKey.notchAgentsAntigravity)
+        suite.expect(NotchAgentSupport.providers(in: defaults) == [.claude], "Antigravity can be disabled independently")
         defaults.set("unknown", forKey: DefaultsKey.notchAgentsLimitFocus)
         suite.expect(NotchAgentSupport.limitFocus(in: defaults) == .mostUsed, "an unknown limit choice shows the most used")
         defaults.set(NotchAgentLimitFocus.weekly.rawValue, forKey: DefaultsKey.notchAgentsLimitFocus)
@@ -2363,7 +2479,7 @@ enum NotchAgentTests {
                      "alerts follow their switches and a budget must be positive")
 
         let keys = [DefaultsKey.notchAgentsEnabled, DefaultsKey.notchAgentsClaude, DefaultsKey.notchAgentsCodex,
-                    DefaultsKey.notchAgentsOpenCode,
+                    DefaultsKey.notchAgentsOpenCode, DefaultsKey.notchAgentsAntigravity,
                     DefaultsKey.notchAgentsCardOrder, DefaultsKey.notchAgentsHiddenCards, DefaultsKey.notchAgentsPeriod,
                     DefaultsKey.notchAgentsLimitDisplay, DefaultsKey.notchAgentsLimitFocus, DefaultsKey.notchAgentsLiveActivity, DefaultsKey.notchAgentsReadout,
                     DefaultsKey.notchAgentsFinishAlert, DefaultsKey.notchAgentsFinishMinimum, DefaultsKey.notchAgentsLimitAlert,
@@ -2385,6 +2501,13 @@ enum NotchAgentTests {
         let trend = NotchAgentTile(card: .trend, provider: nil)
         suite.expect(NotchAgentSupport.tiles(cards: [.limits, .trend], providers: [.claude, .codex]) == [limits, codex, trend],
                      "each agent gets its own limits card")
+        let live = NotchAgentTile(card: .live, provider: nil)
+        let supported = NotchAgentSupport.tiles(cards: [.limits, .spend, .live, .trend], providers: [.codex, .antigravity])
+        suite.expect(supported == [codex, spend, live, trend], "Antigravity keeps live activity without an unsupported limits placeholder")
+        let activeRows = NotchAgentSupport.rows(supported, width: 600)
+        suite.expect(NotchAgentSupport.liveColumn(at: 0, rows: activeRows)
+                     && !NotchAgentSupport.liveColumn(at: 0, rows: NotchAgentSupport.rows(supported, width: 330)),
+                     "active threads gain a tall column beside the limits and spending cards, while narrow layouts stack")
         let resets = NotchAgentTile(card: .resets, provider: .codex)
         suite.expect(NotchAgentSupport.tiles(cards: [.resets, .spend], providers: [.claude, .codex]) == [resets, spend]
                         && NotchAgentSupport.tiles(cards: [.resets, .spend], providers: [.claude]) == [spend],

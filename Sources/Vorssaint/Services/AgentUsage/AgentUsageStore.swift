@@ -416,7 +416,10 @@ struct AgentLogRoot: Equatable {
     static func all(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [AgentLogRoot] {
         [(AgentProvider.claude, ".claude/projects"), (.claude, ".config/claude/projects"),
          (.codex, ".codex/sessions"), (.codex, ".codex/archived_sessions"),
-         (.opencode, ".local/share/opencode")].map { provider, path in
+         (.opencode, ".local/share/opencode"),
+         (.antigravity, ".gemini/antigravity/brain"),
+         (.antigravity, ".gemini/antigravity-ide/brain"),
+         (.antigravity, ".gemini/antigravity-cli/brain")].map { provider, path in
             AgentLogRoot(provider: provider, url: canonical(home.appending(path: path, directoryHint: .isDirectory)))
         }
     }
@@ -538,7 +541,9 @@ final class AgentLogCursor {
         offset = 0
         pending = Data()
         discarding = false
-        state = AgentLogState()
+        // A transcript rewrite updates existing steps; replaying its older
+        // prompts would reopen finished turns and repeat completion alerts.
+        if provider != .antigravity { state = AgentLogState() }
         fingerprinted = nil
     }
 
@@ -641,6 +646,19 @@ enum AgentLogReader {
         var found: [(path: String, provider: AgentProvider, modified: Date, subagent: Bool)] = []
         let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
         for root in roots where root.exists {
+            if root.provider == .antigravity {
+                // Walk conversation directories only, never artifacts or the
+                // full transcripts alongside the bounded display transcript.
+                let sessions = (try? FileManager.default.contentsOfDirectory(at: root.url,
+                    includingPropertiesForKeys: nil)) ?? []
+                for session in sessions {
+                    let url = session.appending(path: ".system_generated/logs/transcript.jsonl")
+                    guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true,
+                          let modified = values.contentModificationDate, modified >= horizon else { continue }
+                    found.append((url.path, root.provider, modified, false))
+                }
+                continue
+            }
             // OpenCode keeps its database beside the snapshots, clones and
             // logs of its data folder, which are never walked.
             if root.provider == .opencode {
@@ -681,7 +699,7 @@ enum AgentLogReader {
         cursor.modified = Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec)
                                 + TimeInterval(info.st_mtimespec.tv_nsec) / 1_000_000_000)
         if identity != cursor.identity || size < cursor.offset
-            || (size > cursor.offset && !cursor.holdsWhatWasRead) {
+            || ((size > cursor.offset || cursor.provider == .antigravity) && !cursor.holdsWhatWasRead) {
             cursor.startOver(identity: identity)
         }
         defer { cursor.fingerprintRead() }

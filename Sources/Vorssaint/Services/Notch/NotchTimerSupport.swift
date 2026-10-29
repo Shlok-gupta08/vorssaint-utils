@@ -306,6 +306,6 @@ enum NotchTimerSupport {
     /// The mark takes the strip's height less an even gap above and below.
     static func stripIconSize(height: CGFloat) -> CGFloat { min(20, height - NotchLayout.compactEdgeGap * 2) }
     static func stripAgentMarkSize(height: CGFloat, working: Int) -> CGFloat {
-        min(working > 1 ? 11 : 14, max(8, height - NotchLayout.compactEdgeGap * 2 - 4))
+        NotchAgentSupport.stripMarkSize(height: height)
     }
 }
