@@ -211,7 +211,7 @@ enum NotchAgentSupport {
     static let stripCameraGap: CGFloat = 6
 
     static func stripTextSize(height: CGFloat) -> CGFloat { min(15, height - 7) }
-    static let stripTextEdgePadding: CGFloat = 8
+    static let stripTextEdgePadding: CGFloat = 12
     static func stripTextOuterInset(geometry: NotchGeometry) -> CGFloat {
         let size = stripTextSize(height: geometry.compactActivityContentHeight)
         let inset = !geometry.compactActivityUsesFooter
