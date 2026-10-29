@@ -398,8 +398,8 @@ extension KeepAwakeAutomationStrings {
         matchAny: "L’une",
         matchAll: "Toutes",
         automationCaptionAll: "Démarre uniquement lorsque toutes les conditions sélectionnées sont actives.",
-        aiAgentsToggle: "Agents d'IA",
-        aiAgentsActive: "Actif pendant qu'un agent d'IA est en cours d'exécution"
+        aiAgentsToggle: "Agents d’IA",
+        aiAgentsActive: "Actif pendant qu’un agent d’IA est en cours d’exécution"
     )
 
     static let it = KeepAwakeAutomationStrings(

@@ -30,8 +30,7 @@ struct NotchAgentStrip: View {
         let tint = working.first?.tint ?? .white
         let iconSize = NotchAgentSupport.stripMarkSize(height: geometry.compactActivityContentHeight)
         let textSize = NotchAgentSupport.stripTextSize(height: geometry.compactActivityContentHeight)
-        let textInset = !geometry.compactActivityUsesFooter
-            ? geometry.compactActivityEdgeInset(boxHeight: textSize * 0.72, radius: 0) : 0
+        let textInset = NotchAgentSupport.stripTextOuterInset(geometry: geometry)
         HStack(spacing: 0) {
             Button { service.openActivity(.agents) } label: {
                 HStack(spacing: NotchAgentSupport.stripMarkSpacing) {

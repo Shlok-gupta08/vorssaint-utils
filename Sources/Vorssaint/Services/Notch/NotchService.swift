@@ -546,7 +546,7 @@ final class NotchService: ObservableObject {
         let width = (shape as NSString).size(withAttributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
         ]).width
-        let reading = width.rounded(.up) + provisional.compactActivityEdgeInset(boxHeight: size * 0.72, radius: 0)
+        let reading = width.rounded(.up) + NotchAgentSupport.stripTextOuterInset(geometry: provisional)
         // Size the wing for every full-size mark, with space between them.
         let working = Set(AgentUsageService.shared.snapshot.live.map(\.provider)).count
         let marks = NotchAgentSupport.stripMarksWing(working: working, geometry: provisional)

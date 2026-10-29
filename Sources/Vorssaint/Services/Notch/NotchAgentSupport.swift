@@ -211,6 +211,13 @@ enum NotchAgentSupport {
     static let stripCameraGap: CGFloat = 6
 
     static func stripTextSize(height: CGFloat) -> CGFloat { min(15, height - 7) }
+    static let stripTextEdgePadding: CGFloat = 8
+    static func stripTextOuterInset(geometry: NotchGeometry) -> CGFloat {
+        let size = stripTextSize(height: geometry.compactActivityContentHeight)
+        let inset = !geometry.compactActivityUsesFooter
+            ? geometry.compactActivityEdgeInset(boxHeight: size * 0.72, radius: 0) : 0
+        return inset + stripTextEdgePadding
+    }
 
     /// What the strip shows beside the camera while agents work: the reading
     /// the person chose, or the time elapsed while that one is unknown.

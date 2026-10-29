@@ -44,7 +44,7 @@ enum NotchAgentTests {
     private static func line(_ json: String) -> Data { Data(json.utf8) }
 
     private static func automationLifecycle(_ suite: TestSuite) {
-        let name = "vorssaint-agent-lifecycle-\(UUID().uuidString)"
+        let name = "com.vorssaint.tests.agent-lifecycle-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
         defaults.set(false, forKey: DefaultsKey.notchEnabled)
