@@ -6,6 +6,7 @@ import AVFoundation
 import Carbon.HIToolbox
 import Combine
 import UniformTypeIdentifiers
+import IOKit.pwr_mgt
 
 private final class DictationDeliveryValidity {
     private let lock = NSLock()
@@ -17,8 +18,18 @@ private final class DictationDeliveryValidity {
 final class DictationService: ObservableObject {
     static let shared = DictationService()
     @Published private(set) var phase: DictationPhase = .idle {
-        didSet { shortcut.setBusy(phase.isBusy) }
+        didSet {
+            shortcut.setBusy(phase.isBusy)
+            syncSleepPrevention()
+        }
     }
+    private var sleepActivity: NSObjectProtocol?
+    private var displayAssertion = IOPMAssertionID(0)
+    private var systemAssertion = IOPMAssertionID(0)
+    private var userActivityAssertion = IOPMAssertionID(0)
+    private var hasDisplayAssertion = false
+    private var hasSystemAssertion = false
+    private var lastActivityDeclaration = 0.0
     @Published private(set) var elapsed = 0.0
     @Published private(set) var waveform = [Double](repeating: 0, count: DictationSpectrum.count)
     @Published private(set) var result = ""
@@ -111,8 +122,13 @@ final class DictationService: ObservableObject {
         enabled = false
         shortcut.stop(); shortcutSignature = ""; shortcutAvailable = false
         cancel()
+        releaseSleepPrevention()
         for (center, token) in observers { center.removeObserver(token) }
         observers.removeAll()
+    }
+
+    deinit {
+        releaseSleepPrevention()
     }
 
     private func shortcutPressed() {
@@ -206,7 +222,7 @@ final class DictationService: ObservableObject {
         let reading = recorder.reading()
         if let error = reading.error { fail("Recording failed: \(error.localizedDescription)"); return }
         waveform = reading.waveform
-        if reading.level > 0.035 { heardSpeech = true; lastSpeech = elapsed }
+        if reading.level > 0.035 { heardSpeech = true; lastSpeech = elapsed; declareUserActivityIfNeeded() }
         let silence = defaults.double(forKey: DefaultsKey.dictationSilenceStop)
         if elapsed >= DictationSupport.maximumRecordingSeconds || (silence >= 1 && heardSpeech && elapsed - lastSpeech >= silence) { finish() }
     }
@@ -435,6 +451,81 @@ final class DictationService: ObservableObject {
     }
 
     func unloadEngine() { unloadWork?.cancel(); unloadWork = nil; engine.cancel() }
+
+    private func syncSleepPrevention() {
+        if phase.isBusy {
+            acquireSleepPrevention()
+        } else {
+            releaseSleepPrevention()
+        }
+    }
+
+    private func acquireSleepPrevention() {
+        guard isEnabled else { return }
+        if sleepActivity == nil {
+            sleepActivity = ProcessInfo.processInfo.beginActivity(
+                options: [.idleDisplaySleepDisabled, .idleSystemSleepDisabled],
+                reason: "Vorssaint: dictation in progress"
+            )
+        }
+        if !hasDisplayAssertion {
+            var id = IOPMAssertionID(0)
+            let ok = IOPMAssertionCreateWithName(
+                "PreventUserIdleDisplaySleep" as CFString,
+                IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                "Vorssaint: dictation in progress" as CFString,
+                &id
+            )
+            if ok == kIOReturnSuccess {
+                displayAssertion = id
+                hasDisplayAssertion = true
+            }
+        }
+        if !hasSystemAssertion {
+            var id = IOPMAssertionID(0)
+            let ok = IOPMAssertionCreateWithName(
+                "PreventUserIdleSystemSleep" as CFString,
+                IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                "Vorssaint: dictation in progress" as CFString,
+                &id
+            )
+            if ok == kIOReturnSuccess {
+                systemAssertion = id
+                hasSystemAssertion = true
+            }
+        }
+        IOPMAssertionDeclareUserActivity("Vorssaint: dictation in progress" as CFString, kIOPMUserActiveLocal, &userActivityAssertion)
+        lastActivityDeclaration = ProcessInfo.processInfo.systemUptime
+    }
+
+    private func releaseSleepPrevention() {
+        if let activity = sleepActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            sleepActivity = nil
+        }
+        if hasDisplayAssertion {
+            IOPMAssertionRelease(displayAssertion)
+            displayAssertion = 0
+            hasDisplayAssertion = false
+        }
+        if hasSystemAssertion {
+            IOPMAssertionRelease(systemAssertion)
+            systemAssertion = 0
+            hasSystemAssertion = false
+        }
+        if userActivityAssertion != 0 {
+            IOPMAssertionRelease(userActivityAssertion)
+            userActivityAssertion = 0
+        }
+        lastActivityDeclaration = 0.0
+    }
+
+    private func declareUserActivityIfNeeded() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastActivityDeclaration >= 5.0 else { return }
+        lastActivityDeclaration = now
+        IOPMAssertionDeclareUserActivity("Vorssaint: dictation speech" as CFString, kIOPMUserActiveLocal, &userActivityAssertion)
+    }
 
     private func scheduleUnload() {
         unloadWork?.cancel()

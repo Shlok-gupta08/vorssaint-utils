@@ -99,8 +99,21 @@ final class AgentUsageService: ObservableObject {
 
     private init() {}
 
+    static func isNeeded(in defaults: UserDefaults = .standard) -> Bool {
+        NotchAgentSupport.isEnabled(in: defaults)
+            || needsAutomation(in: defaults)
+    }
+
+    static func needsAutomation(in defaults: UserDefaults = .standard) -> Bool {
+        AppFeature.keepAwake.isAvailable(in: defaults) && defaults.bool(forKey: DefaultsKey.keepAwakeAIAgents)
+    }
+
+    static func canPauseForVisibility(in defaults: UserDefaults = .standard) -> Bool {
+        !needsAutomation(in: defaults)
+    }
+
     func syncWithPreferences() {
-        guard NotchAgentSupport.isEnabled() else { stop(); return }
+        guard Self.isNeeded() else { stop(); return }
         let wanted = NotchAgentSupport.providers()
         // An agent turned off is no longer read at all, and one turned on is
         // read from its start: both take a fresh reading, which would not
@@ -122,7 +135,7 @@ final class AgentUsageService: ObservableObject {
     /// the Mac locked, and keeps what was read: reading every log again on the
     /// way back costs far more than the pause saves.
     func pause() {
-        guard running, !paused else { return }
+        guard running, !paused, Self.canPauseForVisibility() else { return }
         paused = true
         timer?.invalidate()
         timer = nil
@@ -154,7 +167,7 @@ final class AgentUsageService: ObservableObject {
         // A first read still going stops at its next chunk, so the wait
         // below is short.
         if running { cancellation.cancel() }
-        settleArchive(keeping: keeps && NotchAgentSupport.isEnabled())
+        settleArchive(keeping: keeps && Self.isNeeded())
         guard running else { return }
         running = false
         paused = false

@@ -9,36 +9,82 @@ struct KeepAwakeAutomationEditor: View {
     @AppStorage(DefaultsKey.keepAwakeExternalDisplay) private var externalDisplay = false
     @AppStorage(DefaultsKey.keepAwakeConnectedToPower) private var connectedToPower = false
     @AppStorage(DefaultsKey.keepAwakeRunningApps) private var runningApps = false
+    @AppStorage(DefaultsKey.keepAwakeAIAgents) private var aiAgents = false
     @AppStorage(DefaultsKey.keepAwakeAutomationRequireAll) private var requireAll = false
 
     var compact = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 8 : 10) {
-            HStack(alignment: .top, spacing: compact ? 6 : 8) {
-                conditionTile(
-                    title: strings.externalDisplayToggle,
-                    icon: "display",
-                    selected: externalDisplay
-                ) {
-                    externalDisplay.toggle()
-                    awake.automationPreferencesDidChange()
+            if compact {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)], spacing: 6) {
+                    conditionTile(
+                        title: strings.externalDisplayToggle,
+                        icon: "display",
+                        selected: externalDisplay
+                    ) {
+                        externalDisplay.toggle()
+                        awake.automationPreferencesDidChange()
+                    }
+                    conditionTile(
+                        title: strings.powerToggle,
+                        icon: "powerplug.fill",
+                        selected: connectedToPower
+                    ) {
+                        connectedToPower.toggle()
+                        awake.automationPreferencesDidChange()
+                    }
+                    conditionTile(
+                        title: strings.runningAppsToggle,
+                        icon: "app.fill",
+                        selected: runningApps
+                    ) {
+                        runningApps.toggle()
+                        awake.automationPreferencesDidChange()
+                    }
+                    conditionTile(
+                        title: strings.aiAgentsToggle,
+                        icon: "sparkles",
+                        selected: aiAgents
+                    ) {
+                        aiAgents.toggle()
+                        awake.automationPreferencesDidChange()
+                    }
                 }
-                conditionTile(
-                    title: strings.powerToggle,
-                    icon: "powerplug.fill",
-                    selected: connectedToPower
-                ) {
-                    connectedToPower.toggle()
-                    awake.automationPreferencesDidChange()
-                }
-                conditionTile(
-                    title: strings.runningAppsToggle,
-                    icon: "app.fill",
-                    selected: runningApps
-                ) {
-                    runningApps.toggle()
-                    awake.automationPreferencesDidChange()
+            } else {
+                HStack(alignment: .top, spacing: 8) {
+                    conditionTile(
+                        title: strings.externalDisplayToggle,
+                        icon: "display",
+                        selected: externalDisplay
+                    ) {
+                        externalDisplay.toggle()
+                        awake.automationPreferencesDidChange()
+                    }
+                    conditionTile(
+                        title: strings.powerToggle,
+                        icon: "powerplug.fill",
+                        selected: connectedToPower
+                    ) {
+                        connectedToPower.toggle()
+                        awake.automationPreferencesDidChange()
+                    }
+                    conditionTile(
+                        title: strings.runningAppsToggle,
+                        icon: "app.fill",
+                        selected: runningApps
+                    ) {
+                        runningApps.toggle()
+                        awake.automationPreferencesDidChange()
+                    }
+                    conditionTile(
+                        title: strings.aiAgentsToggle,
+                        icon: "sparkles",
+                        selected: aiAgents
+                    ) {
+                        aiAgents.toggle()
+                        awake.automationPreferencesDidChange()
+                    }
                 }
             }
             // One condition cannot be combined with anything, so the mode
@@ -69,7 +115,7 @@ struct KeepAwakeAutomationEditor: View {
     }
 
     private var selectedConditionCount: Int {
-        [externalDisplay, connectedToPower, runningApps].filter { $0 }.count
+        [externalDisplay, connectedToPower, runningApps, aiAgents].filter { $0 }.count
     }
 
     private var strings: KeepAwakeAutomationStrings {
@@ -119,5 +165,4 @@ struct KeepAwakeAutomationEditor: View {
         }
         .buttonStyle(.plain)
     }
-
 }

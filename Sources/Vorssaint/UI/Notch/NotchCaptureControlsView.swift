@@ -29,7 +29,7 @@ struct NotchCaptureControlsView: View {
                         .focused($focusedControl, equals: .tool(tool))
                 }
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, NotchLayout.horizontalInset)
             if options.selectedTool.capturesAudio {
                 NotchRecordingAudioOptions(options: options.recorderAudio, focusedControl: $focusedControl)
             }
@@ -109,6 +109,8 @@ private struct NotchRecordingAudioOptions: View {
         .toggleStyle(.switch)
         .tint(.green)
         .controlSize(.small)
-        .fixedSize()
+        .lineLimit(1)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, NotchLayout.horizontalInset)
     }
 }

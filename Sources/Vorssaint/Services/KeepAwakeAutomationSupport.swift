@@ -7,6 +7,7 @@ enum KeepAwakeAutomationCondition: String, CaseIterable, Hashable {
     case externalDisplay
     case power
     case runningApps
+    case aiAgents
 }
 
 enum KeepAwakeAutomationAction: Equatable {
@@ -58,7 +59,9 @@ enum KeepAwakeAutomationSupport {
                                    powerEnabled: Bool,
                                    connectedToPower: Bool,
                                    runningAppsEnabled: Bool,
-                                   selectedAppsRunning: Bool) -> Set<KeepAwakeAutomationCondition> {
+                                   selectedAppsRunning: Bool,
+                                   aiAgentsEnabled: Bool = false,
+                                   aiAgentsRunning: Bool = false) -> Set<KeepAwakeAutomationCondition> {
         var matches = Set<KeepAwakeAutomationCondition>()
         if externalDisplayEnabled, externalDisplayConnected {
             matches.insert(.externalDisplay)
@@ -68,6 +71,9 @@ enum KeepAwakeAutomationSupport {
         }
         if runningAppsEnabled, selectedAppsRunning {
             matches.insert(.runningApps)
+        }
+        if aiAgentsEnabled, aiAgentsRunning {
+            matches.insert(.aiAgents)
         }
         return matches
     }
@@ -84,11 +90,13 @@ enum KeepAwakeAutomationSupport {
     static func enabledConditions(externalDisplayEnabled: Bool,
                                   powerEnabled: Bool,
                                   runningAppsEnabled: Bool,
-                                  hasSelectedApps: Bool = true) -> Set<KeepAwakeAutomationCondition> {
+                                  hasSelectedApps: Bool = true,
+                                  aiAgentsEnabled: Bool = false) -> Set<KeepAwakeAutomationCondition> {
         var enabled = Set<KeepAwakeAutomationCondition>()
         if externalDisplayEnabled { enabled.insert(.externalDisplay) }
         if powerEnabled { enabled.insert(.power) }
         if runningAppsEnabled, hasSelectedApps { enabled.insert(.runningApps) }
+        if aiAgentsEnabled { enabled.insert(.aiAgents) }
         return enabled
     }
 

@@ -39,6 +39,8 @@ struct NotchAgentStrip: View {
                         ForEach(working) { NotchAgentGlyph(provider: $0, size: iconSize) }
                     }
                 }
+                .padding(.leading, NotchAgentSupport.stripMarkOuterInset(geometry: geometry))
+                .padding(.trailing, NotchAgentSupport.stripCameraGap)
                 .frame(width: geometry.compactActivityWingWidth, height: geometry.compactActivityContentHeight,
                        alignment: .center)
                 .contentShape(Rectangle())

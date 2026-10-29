@@ -1324,6 +1324,20 @@ def main():
           + declaration(dock, "    func endWindowDrag(")
           + "}\n")
 
+    write("DictationSleepPrevention.swift", "import Foundation\nimport IOKit.pwr_mgt\n"
+          + "extension DictationSleepPreventionTests { final class Host: Fixture {\n"
+          + "".join(declaration("Sources/Vorssaint/Services/Dictation/DictationService.swift", prefix)
+                    .replace("private func", "func", 1) for prefix in [
+                        "    private func syncSleepPrevention(", "    private func acquireSleepPrevention(",
+                        "    private func releaseSleepPrevention(", "    private func declareUserActivityIfNeeded("])
+          + "}\n}\n")
+
+    write("AgentUsageLifecyclePolicy.swift", "import Foundation\nenum AgentUsageLifecyclePolicy {\n"
+          + "".join(declaration("Sources/Vorssaint/Services/AgentUsage/AgentUsageService.swift", prefix)
+                    for prefix in ["    static func isNeeded(", "    static func needsAutomation(",
+                                   "    static func canPauseForVisibility("])
+          + "}\n")
+
     write("AgentUsageEventDelivery.swift", "import Foundation\n"
           + "extension AgentUsageEventDeliveryTests {\nfinal class Host: Fixture {\n"
           + declaration("Sources/Vorssaint/Services/AgentUsage/AgentUsageService.swift",

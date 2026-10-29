@@ -36,8 +36,12 @@ struct NotchNotice: Equatable {
         if level != nil, event != .accessory { return 80 }
         // Long accessory names still use bounded truncation.
         let maximum: CGFloat = event == .accessory && level == nil ? 160 : 240
-        return min(maximum, max(88, ceil(max(leading + 18 + 8, trailing)) + 16 + cameraGap))
+        return min(maximum, max(88, ceil(max(leading + 18 + 8, trailing)) + 16 + additionalOuterPadding + cameraGap))
     }
+
+    /// A little extra clearance for the charging icon and percentage at
+    /// the curved outside edges, without widening other notice types.
+    var additionalOuterPadding: CGFloat { event == .battery ? 4 : 0 }
 
     /// Two lines of text sit at the island's two ends, each as far from its
     /// curved edge, so a short one leaves its spare room beside the camera
@@ -546,7 +550,7 @@ final class NotchService: ObservableObject {
         // Size the wing for every full-size mark, with space between them.
         let working = Set(AgentUsageService.shared.snapshot.live.map(\.provider)).count
         let marks = NotchAgentSupport.stripMarksWing(working: working, geometry: provisional)
-        return max(reading, marks) + NotchAgentSupport.stripCameraGap
+        return max(reading + NotchAgentSupport.stripCameraGap, marks)
     }
 
     var expandedSize: CGSize {
@@ -860,7 +864,7 @@ final class NotchService: ObservableObject {
         if !NotchFileToolsService.shared.offersMediaDrop { endFileDrop() }
         // Paused while the island is away, the section still stops at once
         // when it is turned off.
-        if !NotchAgentSupport.isEnabled() { AgentUsageService.shared.stop() }
+        if !AgentUsageService.isNeeded() { AgentUsageService.shared.stop() }
         guard !suspended else {
             if session.canRunTimer { NotchTimerService.shared.syncWithPreferences() }
             else { NotchTimerService.shared.suspend() }
@@ -930,7 +934,8 @@ final class NotchService: ObservableObject {
         preferenceSyncWork?.cancel(); preferenceSyncWork = nil
         NotchLyricsService.shared.stop()
         NotchFileToolsService.shared.stop()
-        AgentUsageService.shared.stop()
+        if AgentUsageService.needsAutomation() { AgentUsageService.shared.syncWithPreferences() }
+        else { AgentUsageService.shared.stop() }
         guard running else { return }
         running = false
         NotchTimerService.shared.stop()

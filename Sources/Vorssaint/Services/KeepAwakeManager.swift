@@ -79,6 +79,7 @@ final class KeepAwakeManager: ObservableObject {
     private var mouseJiggleTimer: Timer?
     private var pendingMouseReturn: DispatchWorkItem?
     private var defaultsObserver: AnyCancellable?
+    private var agentUsageObserver: AnyCancellable?
     private var screenParametersObserver: NSObjectProtocol?
     private var screenLockObservers: [NSObjectProtocol] = []
     private var powerSourceRunLoopSource: CFRunLoopSource?
@@ -351,10 +352,13 @@ final class KeepAwakeManager: ObservableObject {
         let observeRunningApps = available
             && UserDefaults.standard.bool(forKey: DefaultsKey.keepAwakeRunningApps)
             && !runningAppBundleIDs.isEmpty
+        let observeAIAgents = available
+            && UserDefaults.standard.bool(forKey: DefaultsKey.keepAwakeAIAgents)
 
         setScreenMonitoringEnabled(observeScreens)
         setPowerMonitoringEnabled(observePower)
         setRunningAppsMonitoringEnabled(observeRunningApps)
+        setAIAgentsMonitoringEnabled(observeAIAgents)
         evaluateAutomation()
     }
 
@@ -496,12 +500,32 @@ final class KeepAwakeManager: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
+    private func setAIAgentsMonitoringEnabled(_ enabled: Bool) {
+        if enabled {
+            AgentUsageService.shared.syncWithPreferences()
+            guard agentUsageObserver == nil else { return }
+            agentUsageObserver = AgentUsageService.shared.$snapshot
+                .map { !$0.live.isEmpty }
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.scheduleAutomationEvaluation(after: 0.1)
+                }
+        } else {
+            agentUsageObserver = nil
+            if !AgentUsageService.isNeeded() {
+                AgentUsageService.shared.stop()
+            }
+        }
+    }
+
     private func stopAutomationMonitoring() {
         automationEvaluationWorkItem?.cancel()
         automationEvaluationWorkItem = nil
         setScreenMonitoringEnabled(false)
         setPowerMonitoringEnabled(false)
         setRunningAppsMonitoringEnabled(false)
+        setAIAgentsMonitoringEnabled(false)
         let center = DistributedNotificationCenter.default()
         for observer in screenLockObservers { center.removeObserver(observer) }
         screenLockObservers.removeAll()
@@ -566,7 +590,8 @@ final class KeepAwakeManager: ObservableObject {
             externalDisplayEnabled: UserDefaults.standard.bool(forKey: DefaultsKey.keepAwakeExternalDisplay),
             powerEnabled: UserDefaults.standard.bool(forKey: DefaultsKey.keepAwakeConnectedToPower),
             runningAppsEnabled: UserDefaults.standard.bool(forKey: DefaultsKey.keepAwakeRunningApps),
-            hasSelectedApps: !runningAppBundleIDs.isEmpty
+            hasSelectedApps: !runningAppBundleIDs.isEmpty,
+            aiAgentsEnabled: UserDefaults.standard.bool(forKey: DefaultsKey.keepAwakeAIAgents)
         )
     }
 
@@ -609,13 +634,18 @@ final class KeepAwakeManager: ObservableObject {
             selectedAppsRunning = false
         }
 
+        let aiAgentsEnabled = UserDefaults.standard.bool(forKey: DefaultsKey.keepAwakeAIAgents)
+        let aiAgentsRunning = aiAgentsEnabled && !AgentUsageService.shared.snapshot.live.isEmpty
+
         return KeepAwakeAutomationSupport.matchingConditions(
             externalDisplayEnabled: externalDisplayEnabled,
             externalDisplayConnected: externalDisplayConnected,
             powerEnabled: powerEnabled,
             connectedToPower: connectedToPower,
             runningAppsEnabled: runningAppsEnabled,
-            selectedAppsRunning: selectedAppsRunning
+            selectedAppsRunning: selectedAppsRunning,
+            aiAgentsEnabled: aiAgentsEnabled,
+            aiAgentsRunning: aiAgentsRunning
         )
     }
 

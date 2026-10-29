@@ -311,6 +311,7 @@ final class FeatureRuntime: ObservableObject {
         .keepAwake: {
             KeepAwakeManager.shared.syncWithFeatures()
             HotkeyManager.shared.syncWithPreferences()
+            AgentUsageService.shared.syncWithPreferences()
         },
         .brightness: { BrightnessService.shared.syncWithPreferences() },
         .extraBrightness: { ExtraBrightnessService.shared.syncWithPreferences() },
@@ -371,7 +372,7 @@ final class FeatureRuntime: ObservableObject {
         },
         .notchAgents: {
             if AppFeature.notch.isAvailable { NotchService.shared.syncWithPreferences() }
-            else { AgentUsageService.shared.stop() }
+            else if !AgentUsageService.isNeeded() { AgentUsageService.shared.stop() }
         },
         .notchWatch: {
             if AppFeature.notch.isAvailable { NotchService.shared.syncWithPreferences() }

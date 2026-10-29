@@ -11,7 +11,7 @@ struct NotchNoticeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var wingWidth: CGFloat { geometry.noticeWingWidth(preferred: notice.preferredWingWidth) }
-    private var inset: CGFloat { min(16, wingWidth / 6) }
+    private var inset: CGFloat { min(16, wingWidth / 6) + notice.additionalOuterPadding }
     private var tint: Color {
         switch notice.event {
         // A warning reads as one in any agent's color; other AI notices wear it.
@@ -132,7 +132,7 @@ private struct NotchUnderCameraLevelView: View {
                 .frame(width: 38, alignment: .trailing)
         }
         .frame(height: 22)
-        .padding(.horizontal, 22)
+        .padding(.horizontal, NotchLayout.horizontalInset)
         .padding(.top, geometry.underNotchLevelTop)
         .padding(.bottom, 12)
         .frame(width: geometry.underNotchLevelSize.width, height: geometry.underNotchLevelSize.height, alignment: .top)

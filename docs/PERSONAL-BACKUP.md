@@ -33,7 +33,9 @@ and download/select a model when using a fresh installation.
 The October 30 snapshot (`personal-backup-2026-10-30`) includes the current
 personal tree: Antigravity activity from T3 Code and the local hub, the AI Agents
 Controls shortcut, the updated agent layout and icons, media paging and timelines,
-expanded island sizing, and the volume/brightness and lock-screen refinements.
+expanded island sizing, consistent expanded-state padding, the charging indicator
+clearance, automatic Stay Awake for active AI agents, sleep prevention during
+dictation, and the volume/brightness and lock-screen refinements.
 Its release keeps the DMG, this recovery guide and `SHA256SUMS` together.
 The older October 27 installer remains available in its original release, with
 source preserved by `bde80cb6`.

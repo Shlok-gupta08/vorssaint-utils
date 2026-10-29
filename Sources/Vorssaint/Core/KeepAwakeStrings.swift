@@ -23,6 +23,52 @@ struct KeepAwakeAutomationStrings {
     let matchAny: String
     let matchAll: String
     let automationCaptionAll: String
+    var aiAgentsToggle: String = "AI agents"
+    var aiAgentsActive: String = "Active while an AI agent is running"
+
+    init(automationSection: String,
+         automationCaption: String,
+         automationOff: String,
+         externalDisplayToggle: String,
+         externalDisplayActive: String,
+         powerToggle: String,
+         powerActive: String,
+         runningAppsToggle: String,
+         runningAppsActive: String,
+         runningAppsListTitle: String,
+         runningAppsAddButton: String,
+         runningAppsRemoveButton: String,
+         runningAppsListCaption: String,
+         automationActive: String,
+         pauseWhenLockedToggle: String,
+         pauseWhenLockedCaption: String,
+         matchAny: String,
+         matchAll: String,
+         automationCaptionAll: String,
+         aiAgentsToggle: String = "AI agents",
+         aiAgentsActive: String = "Active while an AI agent is running") {
+        self.automationSection = automationSection
+        self.automationCaption = automationCaption
+        self.automationOff = automationOff
+        self.externalDisplayToggle = externalDisplayToggle
+        self.externalDisplayActive = externalDisplayActive
+        self.powerToggle = powerToggle
+        self.powerActive = powerActive
+        self.runningAppsToggle = runningAppsToggle
+        self.runningAppsActive = runningAppsActive
+        self.runningAppsListTitle = runningAppsListTitle
+        self.runningAppsAddButton = runningAppsAddButton
+        self.runningAppsRemoveButton = runningAppsRemoveButton
+        self.runningAppsListCaption = runningAppsListCaption
+        self.automationActive = automationActive
+        self.pauseWhenLockedToggle = pauseWhenLockedToggle
+        self.pauseWhenLockedCaption = pauseWhenLockedCaption
+        self.matchAny = matchAny
+        self.matchAll = matchAll
+        self.automationCaptionAll = automationCaptionAll
+        self.aiAgentsToggle = aiAgentsToggle
+        self.aiAgentsActive = aiAgentsActive
+    }
 
     /// The caption under the condition tiles. The Any wording predates the
     /// match mode and would lie about an All setup, so it is chosen here
@@ -35,6 +81,7 @@ struct KeepAwakeAutomationStrings {
         if conditions == [.externalDisplay] { return externalDisplayActive }
         if conditions == [.power] { return powerActive }
         if conditions == [.runningApps] { return runningAppsActive }
+        if conditions == [.aiAgents] { return aiAgentsActive }
         return automationActive
     }
 }
@@ -182,7 +229,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "Follows normal sleep rules while locked and resumes the remaining session after you unlock.",
         matchAny: "Any",
         matchAll: "All",
-        automationCaptionAll: "Starts only when every selected condition is active."
+        automationCaptionAll: "Starts only when every selected condition is active.",
+        aiAgentsToggle: "AI agents",
+        aiAgentsActive: "Active while an AI agent is running"
     )
 
     static let ptBR = KeepAwakeAutomationStrings(
@@ -204,7 +253,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "Segue as regras normais de repouso enquanto estiver bloqueado e retoma o tempo restante após o desbloqueio.",
         matchAny: "Qualquer",
         matchAll: "Todas",
-        automationCaptionAll: "Inicia somente quando todas as condições selecionadas estiverem ativas."
+        automationCaptionAll: "Inicia somente quando todas as condições selecionadas estiverem ativas.",
+        aiAgentsToggle: "Agentes de IA",
+        aiAgentsActive: "Ativo enquanto um agente de IA estiver em execução"
     )
 
     static let tr = KeepAwakeAutomationStrings(
@@ -226,7 +277,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "Kilitliyken normal uyku kurallarını izler ve kilidi açtığınızda kalan oturumu sürdürür.",
         matchAny: "Herhangi",
         matchAll: "Tümü",
-        automationCaptionAll: "Yalnızca seçili tüm koşullar etkinken başlar."
+        automationCaptionAll: "Yalnızca seçili tüm koşullar etkinken başlar.",
+        aiAgentsToggle: "Yapay zeka aracıları",
+        aiAgentsActive: "Bir yapay zeka aracı çalışırken etkin"
     )
 
     static let ru = KeepAwakeAutomationStrings(
@@ -248,7 +301,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "Пока Mac заблокирован, действуют обычные правила сна, а после разблокировки продолжается оставшееся время сеанса.",
         matchAny: "Любое",
         matchAll: "Все",
-        automationCaptionAll: "Запускается только когда активны все выбранные условия."
+        automationCaptionAll: "Запускается только когда активны все выбранные условия.",
+        aiAgentsToggle: "ИИ-агенты",
+        aiAgentsActive: "Активно, пока работает ИИ-агент"
     )
 
     static let es = KeepAwakeAutomationStrings(
@@ -270,7 +325,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "Sigue las reglas de reposo habituales mientras está bloqueado y reanuda el tiempo restante al desbloquearlo.",
         matchAny: "Cualquiera",
         matchAll: "Todas",
-        automationCaptionAll: "Se activa solo cuando todas las condiciones seleccionadas están activas."
+        automationCaptionAll: "Se activa solo cuando todas las condiciones seleccionadas están activas.",
+        aiAgentsToggle: "Agentes de IA",
+        aiAgentsActive: "Activo mientras un agente de IA esté en ejecución"
     )
 
     static let sk = KeepAwakeAutomationStrings(
@@ -292,7 +349,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "Počas uzamknutia sa riadi bežnými pravidlami uspávania a po odomknutí pokračuje zvyšná časť relácie.",
         matchAny: "Ktorákoľvek",
         matchAll: "Všetky",
-        automationCaptionAll: "Spustí sa iba vtedy, keď sú aktívne všetky vybrané podmienky."
+        automationCaptionAll: "Spustí sa iba vtedy, keď sú aktívne všetky vybrané podmienky.",
+        aiAgentsToggle: "AI agenti",
+        aiAgentsActive: "Aktívne, kým beží AI agent"
     )
 
     static let de = KeepAwakeAutomationStrings(
@@ -314,7 +373,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "Im Sperrzustand gelten die normalen Ruhezustandsregeln. Nach dem Entsperren läuft die verbleibende Sitzung weiter.",
         matchAny: "Eine",
         matchAll: "Alle",
-        automationCaptionAll: "Startet nur, wenn alle ausgewählten Bedingungen erfüllt sind."
+        automationCaptionAll: "Startet nur, wenn alle ausgewählten Bedingungen erfüllt sind.",
+        aiAgentsToggle: "KI-Agenten",
+        aiAgentsActive: "Aktiv, während ein KI-Agent läuft"
     )
 
     static let fr = KeepAwakeAutomationStrings(
@@ -336,7 +397,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "Suit les règles de veille habituelles pendant le verrouillage et reprend le temps restant après le déverrouillage.",
         matchAny: "L’une",
         matchAll: "Toutes",
-        automationCaptionAll: "Démarre uniquement lorsque toutes les conditions sélectionnées sont actives."
+        automationCaptionAll: "Démarre uniquement lorsque toutes les conditions sélectionnées sont actives.",
+        aiAgentsToggle: "Agents d'IA",
+        aiAgentsActive: "Actif pendant qu'un agent d'IA est en cours d'exécution"
     )
 
     static let it = KeepAwakeAutomationStrings(
@@ -358,7 +421,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "Segue le normali regole di stop quando è bloccato e riprende il tempo rimanente dopo lo sblocco.",
         matchAny: "Qualsiasi",
         matchAll: "Tutte",
-        automationCaptionAll: "Si avvia solo quando tutte le condizioni selezionate sono attive."
+        automationCaptionAll: "Si avvia solo quando tutte le condizioni selezionate sono attive.",
+        aiAgentsToggle: "Agenti IA",
+        aiAgentsActive: "Attivo mentre un agente IA è in esecuzione"
     )
 
     static let ja = KeepAwakeAutomationStrings(
@@ -380,7 +445,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "ロック中は通常のスリープ設定に従い、ロック解除後に残りのセッションを再開します。",
         matchAny: "いずれか",
         matchAll: "すべて",
-        automationCaptionAll: "選択したすべての条件が満たされているときだけ開始します。"
+        automationCaptionAll: "選択したすべての条件が満たされているときだけ開始します。",
+        aiAgentsToggle: "AIエージェント",
+        aiAgentsActive: "AIエージェントの実行中に有効"
     )
 
     static let ko = KeepAwakeAutomationStrings(
@@ -402,7 +469,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "잠겨 있는 동안 일반 잠자기 설정을 따르고 잠금 해제 후 남은 세션을 다시 시작합니다.",
         matchAny: "하나",
         matchAll: "모두",
-        automationCaptionAll: "선택한 모든 조건이 충족될 때만 시작합니다."
+        automationCaptionAll: "선택한 모든 조건이 충족될 때만 시작합니다.",
+        aiAgentsToggle: "AI 에이전트",
+        aiAgentsActive: "AI 에이전트가 실행 중일 때 활성화"
     )
 
     static let zhHans = KeepAwakeAutomationStrings(
@@ -424,7 +493,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "锁定期间遵循正常的睡眠设置，解锁后继续剩余时段。",
         matchAny: "任一",
         matchAll: "所有",
-        automationCaptionAll: "仅当所有选定条件都满足时才启动。"
+        automationCaptionAll: "仅当所有选定条件都满足时才启动。",
+        aiAgentsToggle: "AI 代理",
+        aiAgentsActive: "在 AI 代理运行时保持唤醒"
     )
 
     static let zhTW = KeepAwakeAutomationStrings(
@@ -446,7 +517,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "鎖定期間會依照正常的睡眠設定，解鎖後繼續剩餘時段。",
         matchAny: "任一",
         matchAll: "所有",
-        automationCaptionAll: "僅當所有選定條件都符合時才啟動。"
+        automationCaptionAll: "僅當所有選定條件都符合時才啟動。",
+        aiAgentsToggle: "AI 代理",
+        aiAgentsActive: "在 AI 代理執行時保持喚醒"
     )
 
     static let zhHK = KeepAwakeAutomationStrings(
@@ -468,7 +541,9 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "鎖定期間會按正常睡眠設定運作，解鎖後繼續餘下時段。",
         matchAny: "任一",
         matchAll: "所有",
-        automationCaptionAll: "只有當所有已選條件都符合時才啟動。"
+        automationCaptionAll: "只有當所有已選條件都符合時才啟動。",
+        aiAgentsToggle: "AI 代理",
+        aiAgentsActive: "在 AI 代理運行時保持喚醒"
     )
     static let uk = KeepAwakeAutomationStrings(
         automationSection: "Автоматизація",
@@ -489,6 +564,8 @@ extension KeepAwakeAutomationStrings {
         pauseWhenLockedCaption: "Під час блокування діють звичайні правила сну; після розблокування сеанс продовжується.",
         matchAny: "Будь-яка",
         matchAll: "Усі",
-        automationCaptionAll: "Запускається лише коли всі обрані умови активні."
+        automationCaptionAll: "Запускається лише коли всі обрані умови активні.",
+        aiAgentsToggle: "ШІ-агенти",
+        aiAgentsActive: "Активно, поки працює ШІ-агент"
     )
 }

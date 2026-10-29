@@ -197,13 +197,15 @@ enum NotchAgentSupport {
         return count * (stripMarkSize(height: height) * 1.45 + 1) + (count - 1) * stripMarkSpacing
     }
     static func stripMarksWing(working: Int, geometry: NotchGeometry) -> CGFloat {
+        stripMarksWidth(working: working, height: geometry.compactActivityContentHeight)
+            + stripMarkOuterInset(geometry: geometry) + stripCameraGap
+    }
+    static func stripMarkOuterInset(geometry: NotchGeometry) -> CGFloat {
         let side = stripMarkSize(height: geometry.compactActivityContentHeight)
         let inset = geometry.compactActivityEdgeInset(boxHeight: side * 1.45 + 1, radius: side / 2)
-        // Center the marks in a wing with clearance on BOTH sides. A single
-        // inset split across the centered group lets its outside mark graze
-        // the curved edge, even when its frame fits the wing mathematically.
-        return stripMarksWidth(working: working, height: geometry.compactActivityContentHeight)
-            + 2 * (inset + stripMarkEdgePadding)
+        // Only the outer edge curves. Beside the physical camera, the small
+        // camera gap is enough; mirroring this inset leaves a conspicuous void.
+        return inset + stripMarkEdgePadding
     }
     /// Air between the camera and what sits beside it.
     static let stripCameraGap: CGFloat = 6

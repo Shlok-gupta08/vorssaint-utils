@@ -87,6 +87,10 @@ enum PreferencesFeatureTests {
                "power-connected Keep Awake is opt-in")
         suite.expect(registeredDefaults[DefaultsKey.keepAwakeRunningApps] as? Bool == false,
                "running-apps Keep Awake is opt-in")
+        suite.expect(registeredDefaults[DefaultsKey.keepAwakeAIAgents] as? Bool == false,
+               "ai-agents Keep Awake is opt-in")
+        suite.expect(SettingsBackupSupport.exportKeys().contains(DefaultsKey.keepAwakeAIAgents),
+               "the Keep Awake AI agents preference follows settings backups")
         suite.expect(registeredDefaults[DefaultsKey.keepAwakeRunningAppBundleIDs] as? [String] == [],
                "running-apps Keep Awake starts with an empty app list")
         suite.expect(registeredDefaults[DefaultsKey.keepAwakeAutomationRequireAll] as? Bool == false,
@@ -210,6 +214,40 @@ enum PreferencesFeatureTests {
             sessionActive: true,
             automaticSessionActive: false
         ) == .none, "clearing automatic conditions does not end a manual session")
+        suite.expect(KeepAwakeAutomationSupport.matchingConditions(
+            externalDisplayEnabled: false,
+            externalDisplayConnected: false,
+            powerEnabled: false,
+            connectedToPower: false,
+            runningAppsEnabled: false,
+            selectedAppsRunning: false,
+            aiAgentsEnabled: true,
+            aiAgentsRunning: true
+        ) == [.aiAgents], "running AI agent matches the AI agents condition")
+        suite.expect(KeepAwakeAutomationSupport.action(
+            featureAvailable: true,
+            matchingConditions: [.aiAgents],
+            sessionActive: false,
+            automaticSessionActive: false
+        ) == .activate, "an active AI agent starts the automatic session when stay awake was off")
+        suite.expect(KeepAwakeAutomationSupport.action(
+            featureAvailable: true,
+            matchingConditions: [.aiAgents],
+            sessionActive: true,
+            automaticSessionActive: false
+        ) == .none, "an active AI agent does not override an already active manual session")
+        suite.expect(KeepAwakeAutomationSupport.action(
+            featureAvailable: true,
+            matchingConditions: [],
+            sessionActive: true,
+            automaticSessionActive: true
+        ) == .deactivate, "finishing the AI agent task deactivates an automatic session")
+        suite.expect(KeepAwakeAutomationSupport.action(
+            featureAvailable: true,
+            matchingConditions: [],
+            sessionActive: true,
+            automaticSessionActive: false
+        ) == .none, "finishing the AI agent task does not deactivate a manual session")
         let bothDockConditions = KeepAwakeAutomationSupport.enabledConditions(
             externalDisplayEnabled: true, powerEnabled: true, runningAppsEnabled: false)
         suite.expect(bothDockConditions == [.externalDisplay, .power],

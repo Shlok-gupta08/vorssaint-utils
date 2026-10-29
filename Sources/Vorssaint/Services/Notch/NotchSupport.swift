@@ -199,6 +199,7 @@ struct NotchCapsuleFit: Equatable {
 enum NotchLayout {
     static let shoulder: CGFloat = 14
     static let horizontalInset: CGFloat = 28
+    static let cameraClearance: CGFloat = 8
     static let headerHeight: CGFloat = 36
     /// The open header's title, and a detail's beside its back button. The
     /// island is laid out from their widths and the header draws them.
@@ -966,7 +967,7 @@ struct NotchCaptureControlsLayout {
     /// The repeat key, collapse and close at their narrowest, as squares.
     static let narrowButtonsWidth: CGFloat = 28 * 3 + buttonSpacing * 2
     /// Room the title and the buttons keep from the camera.
-    static let cameraClearance: CGFloat = 8
+    static let cameraClearance: CGFloat = NotchLayout.cameraClearance
     /// The title's font: the window is sized from it and the view draws it.
     static let titleFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
 
@@ -1822,7 +1823,7 @@ struct NotchGeometry: Equatable {
     /// longer titles keep a full row below the camera.
     var headerCameraGap: CGFloat {
         isNotched && !requiresFullWidthHeader && contentWidth >= cameraWidth + 200
-            && headerTitleWidth <= (contentWidth - cameraWidth) / 2 ? cameraWidth : 0
+            && headerTitleWidth + NotchLayout.cameraClearance <= (contentWidth - cameraWidth) / 2 ? cameraWidth : 0
     }
     /// A capsule's header keeps clear of its rounded top corners, its
     /// 28-point buttons as far from the top edge as the page is from the bottom.

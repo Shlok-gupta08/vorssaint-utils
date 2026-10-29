@@ -281,10 +281,10 @@ enum NotchPresentationRefreshContract {
         suite.expect(toolbar.expandedGeometry.headerCameraGap == 210,
                      "leaving capture editing restores the compact header layout")
         let titled = Service()
-        titled.headerTitleWidth = 108
+        titled.headerTitleWidth = 108 - NotchLayout.cameraClearance
         suite.expect(titled.expandedGeometry.headerCameraGap == 0 && titled.expandedGeometry.headerTopInset == 42,
                      "a page title wider than the camera's side takes the full row below it")
-        titled.headerTitleWidth = 107
+        titled.headerTitleWidth = 107 - NotchLayout.cameraClearance
         suite.expect(titled.expandedGeometry.headerCameraGap == 210 && titled.expandedGeometry.headerTopInset == 0,
                      "a page title that fits keeps its place beside the camera")
         captureControlsChecks(suite)

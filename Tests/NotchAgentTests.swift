@@ -21,6 +21,7 @@ enum NotchAgentTests {
         antigravityParsing(suite)
         antigravityLiveActivity(suite)
         antigravityT3Activity(suite)
+        automationLifecycle(suite)
         timestamps(suite)
         summary(suite)
         AgentUsageSummaryCacheTests.run(suite)
@@ -41,6 +42,26 @@ enum NotchAgentTests {
     }
 
     private static func line(_ json: String) -> Data { Data(json.utf8) }
+
+    private static func automationLifecycle(_ suite: TestSuite) {
+        let name = "vorssaint-agent-lifecycle-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(false, forKey: DefaultsKey.notchEnabled)
+        defaults.set(true, forKey: AppFeature.keepAwake.availabilityKey)
+        defaults.set(true, forKey: DefaultsKey.keepAwakeAIAgents)
+        suite.expect(AgentUsageLifecyclePolicy.isNeeded(in: defaults)
+                     && !AgentUsageLifecyclePolicy.canPauseForVisibility(in: defaults),
+                     "AI Stay Awake keeps agent monitoring alive while the island is disabled, hidden or locked")
+        defaults.set(false, forKey: DefaultsKey.keepAwakeAIAgents)
+        suite.expect(!AgentUsageLifecyclePolicy.isNeeded(in: defaults)
+                     && AgentUsageLifecyclePolicy.canPauseForVisibility(in: defaults),
+                     "turning AI automation off restores the visibility-based reader lifecycle")
+        defaults.set(true, forKey: DefaultsKey.keepAwakeAIAgents)
+        defaults.set(false, forKey: AppFeature.keepAwake.availabilityKey)
+        suite.expect(!AgentUsageLifecyclePolicy.needsAutomation(in: defaults),
+                     "an unavailable Stay Awake feature never keeps the agent reader alive")
+    }
 
     private static func antigravityT3Activity(_ suite: TestSuite) {
         let file = FileManager.default.temporaryDirectory.appending(path: "vorssaint-t3-\(UUID().uuidString).sqlite")
@@ -2155,8 +2176,9 @@ enum NotchAgentTests {
         let pairWing = NotchAgentSupport.stripMarksWing(working: 2, geometry: geometry)
         let inset = geometry.compactActivityEdgeInset(boxHeight: NotchAgentSupport.stripMarkSize(height: markHeight) * 1.45 + 1,
                                                      radius: NotchAgentSupport.stripMarkSize(height: markHeight) / 2)
-        suite.expect((pairWing - pair) / 2 >= inset + NotchAgentSupport.stripMarkEdgePadding - 0.001,
-                     "centered full-size agent marks keep padding beyond the curved outer edge")
+        suite.expect(abs(pairWing - pair - inset - NotchAgentSupport.stripMarkEdgePadding
+                         - NotchAgentSupport.stripCameraGap) < 0.001,
+                     "agent marks keep outer curve clearance and only a small gap beside the physical camera")
         var crowded = geometry
         crowded.compactSideRoom = 30
         suite.expect(crowded.compactAgentGeometry(wing: 57).compactActivityWingWidth == 0

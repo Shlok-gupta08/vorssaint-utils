@@ -93,7 +93,7 @@ struct NotchView: View {
                                       style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
                         .allowsHitTesting(false)
                 }
-                .padding(.horizontal, 18)
+                .padding(.horizontal, NotchLayout.horizontalInset)
                 .padding(.top, service.geometry.safeContentTop)
         } else if let notice = service.notice ?? (service.peeking ? nil : service.departingNotice) {
             if service.noticeExpanded, let content = notice.notification {
@@ -321,7 +321,6 @@ struct NotchView: View {
                     // stopping a little short of the cutout.
                     NotchSectionSearch(service: service,
                                        maximumFieldWidth: service.expandedGeometry.headerCameraGap > 0 ? .infinity : 150)
-                        .padding(.trailing, service.expandedGeometry.headerCameraGap > 0 ? 6 : 0)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else if showsDetail || service.modules.isEmpty {
                     if showsDetail {
@@ -341,6 +340,7 @@ struct NotchView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .padding(.trailing, service.expandedGeometry.headerCameraGap > 0 ? NotchLayout.cameraClearance : 0)
             .frame(width: service.expandedGeometry.headerCameraGap > 0 ? (service.contentSize.width - service.expandedGeometry.headerCameraGap) / 2 : nil)
             .frame(maxWidth: .infinity, alignment: .leading)
             // Keep search mounted so a media key never discards its focus.
@@ -348,7 +348,10 @@ struct NotchView: View {
             .allowsHitTesting(headerFeedback == nil)
             .accessibilityHidden(headerFeedback != nil)
             .overlay(alignment: .leading) {
-                if let notice = headerFeedback { NotchExpandedLevelView(notice: notice) }
+                if let notice = headerFeedback {
+                    NotchExpandedLevelView(notice: notice)
+                        .padding(.trailing, service.expandedGeometry.headerCameraGap > 0 ? NotchLayout.cameraClearance : 0)
+                }
             }
             .clipped()
             if service.expandedGeometry.headerCameraGap > 0 {
@@ -365,6 +368,7 @@ struct NotchView: View {
                     headerActions(quickActions: quickActions)
                 }
             }
+            .padding(.leading, service.expandedGeometry.headerCameraGap > 0 ? NotchLayout.cameraClearance : 0)
             .frame(width: service.expandedGeometry.headerCameraGap > 0 ? (service.contentSize.width - service.expandedGeometry.headerCameraGap) / 2 : nil,
                    alignment: .trailing)
         }

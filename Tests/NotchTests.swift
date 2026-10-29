@@ -383,12 +383,12 @@ enum NotchTests {
                     var titled = geometry
                     titled.headerTitleWidth = width
                     if titled.headerCameraGap > 0 {
-                        beside = beside && width <= side && titled.headerTopInset == 0
+                        beside = beside && width + NotchLayout.cameraClearance <= side && titled.headerTopInset == 0
                     } else {
                         below = below && titled.headerTopInset == titled.safeContentTop
                             && titled.headerRowHeight == NotchLayout.headerHeight
                     }
-                    if geometry.headerCameraGap > 0, width <= side {
+                    if geometry.headerCameraGap > 0, width + NotchLayout.cameraClearance <= side {
                         kept = kept && titled.headerCameraGap == geometry.headerCameraGap
                             && titled.expandedSize(module: module) == geometry.expandedSize(module: module)
                     }
@@ -539,6 +539,9 @@ enum NotchTests {
                && NotchNotice(event: .volume, title: "Volume", detail: "40%", symbol: "speaker", level: 0.4).cameraGap == 0
                && NotchNotice(event: .battery, title: "Charging", detail: "80%", symbol: "battery.100percent.bolt").cameraGap == 16,
                "text reads from the island's ends while levels keep hugging the camera")
+        suite.expect(NotchNotice(event: .battery, title: "Charging", detail: "80%", symbol: "battery.100percent.bolt")
+                        .additionalOuterPadding == 4 && trackpad.additionalOuterPadding == 0,
+                     "charging notices gain a small outer-edge gap without widening accessory notices")
         let narrow = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 640, height: 480),
                                    safeAreaTop: 32, cameraWidth: 210)
         let size = narrow.noticeSize(wingWidth: long.preferredWingWidth)

@@ -74,7 +74,7 @@ struct NotchDictationView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal, 24).padding(.top, topInset + 10).padding(.bottom, 16)
+        .padding(.horizontal, NotchLayout.horizontalInset).padding(.top, topInset + 10).padding(.bottom, NotchLayout.bottomInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.black).accessibilityIdentifier("notch.dictation")
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: speech.phase)
