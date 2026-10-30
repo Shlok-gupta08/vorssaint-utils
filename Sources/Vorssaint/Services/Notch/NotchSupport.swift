@@ -2060,14 +2060,18 @@ struct NotchGeometry: Equatable {
     }
     var noticeCameraGap: CGFloat { cameraWidth }
 
-    /// A short, single-row meter below the physical cutout. Its footprint is
-    /// fixed across percentages, key repeats and the expanded-page size setting.
+    /// A level meter expanding beneath and beside the physical cutout.
+    /// The logo occupies the left wing, percentage occupies the right wing,
+    /// and the slider glides directly beneath the camera.
     var underNotchLevelTop: CGFloat { stripHeight + 8 }
     var underNotchLevelSize: CGSize {
         // At full size the camera fits inside the flat bottom edge, not merely
-        // the bounding box: shoulders and lower corners consume width.
+        // the bounding box: shoulders and lower corners consume width. Wings beside
+        // the camera provide ample room for the audio/display icon and percentage.
         let corners = NotchLayout.shoulder(height: cameraHeight) + NotchLayout.surfaceRadius(height: cameraHeight)
-        return CGSize(width: min(screen.width - 24, ceil(max(264, max(cameraWidth, physicalCameraWidth) + max(32, corners * 2)))),
+        let minWing: CGFloat = 58
+        let width = max(296, max(cameraWidth, physicalCameraWidth) + max(minWing * 2, corners * 2 + 36))
+        return CGSize(width: min(screen.width - 24, ceil(width)),
                height: min(screen.height - 48, underNotchLevelTop + 22 + 12))
     }
 

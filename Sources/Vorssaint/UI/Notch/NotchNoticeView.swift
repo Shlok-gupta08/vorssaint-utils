@@ -107,41 +107,93 @@ struct NotchNoticeView: View {
 }
 
 /// A quiet extension of the black island, rather than a separate HUD. The
-/// native window host morphs the silhouette down from the camera; the row
-/// stays fixed while repeated key presses glide the fill and percentage.
+/// native window host morphs the silhouette down and wide from the camera;
+/// the logo occupies the left wing, the percentage occupies the right wing,
+/// and the slider glides directly beneath the camera.
 private struct NotchUnderCameraLevelView: View {
     let notice: NotchNotice
     let geometry: NotchGeometry
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var wingWidth: CGFloat {
+        max(0, (geometry.underNotchLevelSize.width - geometry.cameraWidth) / 2)
+    }
+
+    private var shoulderInset: CGFloat {
+        NotchLayout.shoulder(height: geometry.stripHeight)
+    }
+
+    private var sliderWidth: CGFloat {
+        max(120, min(geometry.cameraWidth - 16, geometry.underNotchLevelSize.width - 64))
+    }
+
+    private var iconSize: CGFloat {
+        min(18, max(15, geometry.stripHeight * 0.5))
+    }
+
+    private var fontSize: CGFloat {
+        min(14, max(12.5, geometry.stripHeight * 0.42))
+    }
+
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: notice.symbol)
-                .font(.system(size: 13, weight: .medium))
-                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
-                .foregroundStyle(.white.opacity(0.9))
-                .frame(width: 18)
-                .accessibilityHidden(true)
-            NotchMeter(value: notice.level ?? 0, height: 4, tint: .white.opacity(0.94))
-                .frame(maxWidth: .infinity)
-            Text(notice.detail)
-                .font(.system(size: 11, weight: .semibold))
-                .monospacedDigit()
-                .foregroundStyle(.white.opacity(0.8))
-                .contentTransition(.numericText())
-                .frame(width: 38, alignment: .trailing)
+        VStack(spacing: 0) {
+            wingsRow
+            sliderRow
         }
-        .frame(height: 22)
-        .padding(.horizontal, NotchLayout.horizontalInset)
-        .padding(.top, geometry.underNotchLevelTop)
-        .padding(.bottom, 12)
         .frame(width: geometry.underNotchLevelSize.width, height: geometry.underNotchLevelSize.height, alignment: .top)
         .foregroundStyle(.white)
         .animation(reduceMotion ? nil : .smooth(duration: 0.18), value: notice.level)
         .animation(reduceMotion ? nil : .smooth(duration: 0.18), value: notice.symbol)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.18), value: notice.detail)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(notice.accessibilityText)
         .accessibilityIdentifier("notch.level.belowCamera")
+    }
+
+    private var wingsRow: some View {
+        HStack(spacing: 0) {
+            // Left wing: prominent audio/display glyph starting from the top bezel
+            Image(systemName: notice.symbol)
+                .font(.system(size: iconSize, weight: .semibold))
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                .foregroundStyle(.white.opacity(0.95))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .padding(.leading, max(6, shoulderInset * 0.6))
+                .padding(.trailing, 4)
+                .frame(width: wingWidth, height: geometry.stripHeight)
+                .clipped()
+                .accessibilityHidden(true)
+
+            // Gap covering the physical camera cutout
+            Color.clear
+                .frame(width: geometry.cameraWidth, height: geometry.stripHeight)
+
+            // Right wing: prominent level percentage starting from the top bezel
+            Text(notice.detail)
+                .font(.system(size: fontSize, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+                .foregroundStyle(.white.opacity(0.92))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .padding(.trailing, max(6, shoulderInset * 0.6))
+                .padding(.leading, 4)
+                .frame(width: wingWidth, height: geometry.stripHeight)
+                .clipped()
+        }
+        .frame(height: geometry.stripHeight)
+        .transaction { $0.disablesAnimations = false }
+    }
+
+    private var sliderRow: some View {
+        HStack {
+            NotchMeter(value: notice.level ?? 0, height: 5, tint: .white.opacity(0.95))
+                .frame(width: sliderWidth)
+        }
+        .frame(height: 22)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .frame(width: geometry.underNotchLevelSize.width,
+               height: geometry.underNotchLevelSize.height - geometry.stripHeight)
     }
 }
 
