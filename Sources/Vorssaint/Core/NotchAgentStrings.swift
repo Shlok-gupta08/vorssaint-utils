@@ -5,7 +5,7 @@ import Foundation
 
 struct NotchAgentStrings {
     var antigravityHelp: String {
-        "Antigravity activity includes T3 Code agents and the local Antigravity hub. Transcript token counts appear when available. Plan limits and API value are unavailable."
+        "Antigravity activity includes T3 Code agents and the local Antigravity hub. Transcript token counts and account limits appear when available."
     }
     let title: String
     let hubDescription: String

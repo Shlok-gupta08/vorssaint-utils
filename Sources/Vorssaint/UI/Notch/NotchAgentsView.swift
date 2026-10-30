@@ -153,7 +153,7 @@ private struct NotchAgentLimitsCard: View {
     /// Two rows fit: the session and whichever longer window binds first.
     private var windows: [AgentLimitWindow] {
         let all = (snapshot.limits[provider]?.windows ?? []).map { AgentLimitSupport.current($0, at: now) }
-        let session = all.first { $0.kind == .session }
+        let session = all.filter { $0.kind == .session }.max { $0.usedPercent < $1.usedPercent } ?? all.first { $0.kind == .session }
         let longer = all.filter { $0.kind != .session }.max { $0.usedPercent < $1.usedPercent }
         return [session, longer].compactMap { $0 }
     }
@@ -234,7 +234,7 @@ private struct NotchAgentLimitsCard: View {
     /// What the window covers: its length, or the model it is kept for.
     private func label(_ window: AgentLimitWindow) -> String {
         switch window.kind {
-        case .session: return text.session
+        case .session: return window.scope.map { "\($0) · \(text.session)" } ?? text.session
         case .weekly: return window.scope.map { "\(text.weekly) · \($0)" } ?? text.weekly
         case .other:
             guard let minutes = window.minutes else { return window.scope ?? text.readoutLimit }

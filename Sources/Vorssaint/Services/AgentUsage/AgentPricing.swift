@@ -314,4 +314,9 @@ enum AgentPlans {
         }
         return AgentPlan(name: raw.prefix(1).uppercased() + raw.dropFirst(), monthlyPrice: nil)
     }
+
+    static func antigravity(tierName: String?) -> AgentPlan? {
+        guard let name = tierName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+        return AgentPlan(name: name, monthlyPrice: nil)
+    }
 }

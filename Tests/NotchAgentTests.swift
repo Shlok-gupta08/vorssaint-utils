@@ -120,6 +120,21 @@ enum NotchAgentTests {
         suite.expect(read("CASCADE_RUN_STATUS_BUSY", killed: true)?.isEmpty == true, "killed tasks never remain live")
         suite.expect(AgentAntigravityActivity.live(line("{}"), endpoint: endpoint, now: now) == nil,
                      "unsupported live response schemas are rejected")
+
+        let quotaJSON = """
+        {"response":{"groups":[{"displayName":"Gemini Models","buckets":[{"bucketId":"gemini-weekly","window":"weekly","remainingFraction":0.75,"resetTime":"2026-10-31T03:18:03Z"},{"bucketId":"gemini-5h","window":"5h","remainingFraction":0.90,"resetTime":"2026-10-30T10:23:40Z"}]},{"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-weekly","window":"weekly","remainingFraction":0.50,"resetTime":"2026-11-02T17:52:01Z"}]}]}}
+        """
+        let parsedLimits = AgentAntigravityActivity.limits(line(quotaJSON), observed: now)
+        suite.expect(parsedLimits?.windows.count == 2, "Antigravity tracks only Gemini models (5h and weekly)")
+        suite.expect(parsedLimits?.windows.first?.kind == .session, "5h window mapped to session and ordered first")
+        suite.expect(parsedLimits?.windows.first(where: { $0.id == "antigravity.gemini-weekly" })?.usedPercent == 25.0, "remainingFraction mapped to usedPercent")
+        suite.expect(parsedLimits?.windows.first?.scope == nil, "scope is nil for clean layout like Codex")
+
+        let statusJSON = """
+        {"userTier":{"id":"g1-pro-tier","name":"Google AI Pro"}}
+        """
+        let parsedPlan = AgentAntigravityActivity.plan(line(statusJSON))
+        suite.expect(parsedPlan?.name == "Google AI Pro", "Antigravity parses tier name from GetUserStatus")
     }
 
     private static func antigravityParsing(_ suite: TestSuite) {
@@ -2524,12 +2539,15 @@ enum NotchAgentTests {
         suite.expect(NotchAgentSupport.tiles(cards: [.limits, .trend], providers: [.claude, .codex]) == [limits, codex, trend],
                      "each agent gets its own limits card")
         let live = NotchAgentTile(card: .live, provider: nil)
-        let supported = NotchAgentSupport.tiles(cards: [.limits, .spend, .live, .trend], providers: [.codex, .antigravity])
-        suite.expect(supported == [codex, spend, live, trend], "Antigravity keeps live activity without an unsupported limits placeholder")
-        let activeRows = NotchAgentSupport.rows(supported, width: 600)
+        let codexSupported = NotchAgentSupport.tiles(cards: [.limits, .spend, .live, .trend], providers: [.codex])
+        suite.expect(codexSupported == [codex, spend, live, trend], "single agent keeps pair with spend")
+        let activeRows = NotchAgentSupport.rows(codexSupported, width: 600)
         suite.expect(NotchAgentSupport.liveColumn(at: 0, rows: activeRows)
-                     && !NotchAgentSupport.liveColumn(at: 0, rows: NotchAgentSupport.rows(supported, width: 330)),
+                     && !NotchAgentSupport.liveColumn(at: 0, rows: NotchAgentSupport.rows(codexSupported, width: 330)),
                      "active threads gain a tall column beside the limits and spending cards, while narrow layouts stack")
+        let antigravityLimits = NotchAgentTile(card: .limits, provider: .antigravity)
+        let supported = NotchAgentSupport.tiles(cards: [.limits, .spend, .live, .trend], providers: [.codex, .antigravity])
+        suite.expect(supported == [codex, antigravityLimits, spend, live, trend], "Antigravity now gets its own limits card")
         let resets = NotchAgentTile(card: .resets, provider: .codex)
         suite.expect(NotchAgentSupport.tiles(cards: [.resets, .spend], providers: [.claude, .codex]) == [resets, spend]
                         && NotchAgentSupport.tiles(cards: [.resets, .spend], providers: [.claude]) == [spend],

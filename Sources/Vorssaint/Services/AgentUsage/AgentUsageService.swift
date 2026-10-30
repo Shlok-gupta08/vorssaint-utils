@@ -96,6 +96,7 @@ final class AgentUsageService: ObservableObject {
     private var lastSave = Date.distantPast
     private var antigravityActivity: AgentAntigravityActivity?
     private var antigravityLive: [AgentLiveSession] = []
+    private var antigravityPlan: AgentPlan?
 
     private init() {}
 
@@ -144,6 +145,7 @@ final class AgentUsageService: ObservableObject {
             poller = nil
             antigravityActivity?.stop()
             antigravityActivity = nil
+            antigravityPlan = nil
             watcher?.stop()
             saveProgress()
         }
@@ -184,6 +186,7 @@ final class AgentUsageService: ObservableObject {
             antigravityActivity?.stop()
             antigravityActivity = nil
             antigravityLive = []
+            antigravityPlan = nil
             readerCancellation = nil
             poller?.cancel()
             poller = nil
@@ -224,6 +227,7 @@ final class AgentUsageService: ObservableObject {
         queue.async { [self] in
             guard readerSession >= 0 else { return }
             readClaudeApp(now: Date())
+            antigravityActivity?.refreshLimits()
             checkLimits()
             publish()
         }
@@ -331,11 +335,17 @@ final class AgentUsageService: ObservableObject {
         antigravityActivity?.stop()
         antigravityActivity = nil
         if enabled.contains(.antigravity) {
-            let reader = AgentAntigravityActivity(queue: queue) { [weak self] live in
+            let reader = AgentAntigravityActivity(queue: queue, changed: { [weak self] live in
                 guard let self, self.readerSession >= 0 else { return }
                 self.antigravityLive = live
                 self.schedulePublish()
-            }
+            }, limitsChanged: { [weak self] limits in
+                self?.noteLimits(limits)
+            }, planChanged: { [weak self] plan in
+                guard let self, self.readerSession >= 0 else { return }
+                self.antigravityPlan = plan
+                self.schedulePublish()
+            })
             antigravityActivity = reader
             reader.start()
         }
@@ -549,6 +559,7 @@ final class AgentUsageService: ObservableObject {
         var plans: [AgentProvider: AgentPlan] = [:]
         if let claudePlan { plans[.claude] = claudePlan }
         if let codex = AgentPlans.codex(planType: store.codexPlan) { plans[.codex] = codex }
+        if let antigravityPlan { plans[.antigravity] = antigravityPlan }
         var next = store.snapshot(plans: plans, providers: enabled, now: Date())
         // Transcripts remain a source of historical counters, never a live
         // signal. Their last step can stay RUNNING long after the server stops.

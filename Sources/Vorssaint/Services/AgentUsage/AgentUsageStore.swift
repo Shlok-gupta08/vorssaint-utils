@@ -414,7 +414,7 @@ struct AgentLogRoot: Equatable {
     /// Canonical, because file events report real paths: a folder kept as a
     /// link elsewhere, as dotfile setups do, would otherwise never match.
     static func all(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [AgentLogRoot] {
-        [(AgentProvider.claude, ".claude/projects"), (.claude, ".config/claude/projects"),
+        var roots = [(AgentProvider.claude, ".claude/projects"), (.claude, ".config/claude/projects"),
          (.codex, ".codex/sessions"), (.codex, ".codex/archived_sessions"),
          (.opencode, ".local/share/opencode"),
          (.antigravity, ".gemini/antigravity/brain"),
@@ -422,6 +422,17 @@ struct AgentLogRoot: Equatable {
          (.antigravity, ".gemini/antigravity-cli/brain")].map { provider, path in
             AgentLogRoot(provider: provider, url: canonical(home.appending(path: path, directoryHint: .isDirectory)))
         }
+        let t3Antigravity = home.appending(path: ".t3/userdata/providers/antigravity", directoryHint: .isDirectory)
+        if let instances = try? FileManager.default.contentsOfDirectory(at: t3Antigravity, includingPropertiesForKeys: nil) {
+            for instance in instances {
+                let brain = instance.appending(path: "antigravity-acp/brain", directoryHint: .isDirectory)
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: brain.path, isDirectory: &isDir), isDir.boolValue {
+                    roots.append(AgentLogRoot(provider: .antigravity, url: canonical(brain)))
+                }
+            }
+        }
+        return roots
     }
 
     /// The path the file system reports for `url`; the path as given while

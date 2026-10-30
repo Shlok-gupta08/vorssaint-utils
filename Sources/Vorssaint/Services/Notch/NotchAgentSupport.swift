@@ -132,7 +132,10 @@ enum NotchAgentSupport {
         case .session: kind = .session
         case .weekly: kind = .weekly
         }
-        return limits?.windows.first { $0.kind == kind && $0.scope == nil }.map { AgentLimitSupport.current($0, at: now) }
+        if let unscoped = limits?.windows.first(where: { $0.kind == kind && $0.scope == nil }) {
+            return AgentLimitSupport.current(unscoped, at: now)
+        }
+        return limits?.windows.filter { $0.kind == kind }.max { $0.usedPercent < $1.usedPercent }.map { AgentLimitSupport.current($0, at: now) }
     }
 
     /// The resting island's allowance across every account: the most spent
@@ -259,7 +262,7 @@ enum NotchAgentSupport {
     static func tiles(cards: [NotchAgentCard], providers: [AgentProvider]) -> [NotchAgentTile] {
         cards.flatMap { card -> [NotchAgentTile] in
             switch card {
-            case .limits: return providers.filter { $0 != .antigravity }.map { NotchAgentTile(card: .limits, provider: $0) }
+            case .limits: return providers.map { NotchAgentTile(card: .limits, provider: $0) }
             // Banked resets belong to a Codex account.
             case .resets: return providers.contains(.codex) ? [NotchAgentTile(card: .resets, provider: .codex)] : []
             default: return [NotchAgentTile(card: card, provider: nil)]

@@ -15,19 +15,31 @@ final class AgentAntigravityActivity {
 
     private let queue: DispatchQueue
     private let changed: ([AgentLiveSession]) -> Void
+    private let limitsChanged: ((AgentLimits) -> Void)?
+    private let planChanged: ((AgentPlan) -> Void)?
     private let session: URLSession
     private var timer: DispatchSourceTimer?
     private var endpoints: [Endpoint] = []
     private var hasT3Adapter = false
     private var lastDiscovery = Date.distantPast
+    private var lastLimitsPoll = Date.distantPast
+    private var lastStatusPoll = Date.distantPast
     private var generation = 0
     private var inFlight = false
+    private var limitsInFlight = false
     private var stopped = false
     private var previous: [AgentLiveSession] = []
+    private var previousLimits: AgentLimits?
+    private var previousPlan: AgentPlan?
 
-    init(queue: DispatchQueue, changed: @escaping ([AgentLiveSession]) -> Void) {
+    init(queue: DispatchQueue,
+         changed: @escaping ([AgentLiveSession]) -> Void,
+         limitsChanged: ((AgentLimits) -> Void)? = nil,
+         planChanged: ((AgentPlan) -> Void)? = nil) {
         self.queue = queue
         self.changed = changed
+        self.limitsChanged = limitsChanged
+        self.planChanged = planChanged
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 2
         config.timeoutIntervalForResource = 3
@@ -115,6 +127,66 @@ final class AgentAntigravityActivity {
         }.sorted { $0.id < $1.id }
     }
 
+    /// Quota buckets and reset windows from RetrieveUserQuotaSummary.
+    static func limits(_ data: Data, observed: Date) -> AgentLimits? {
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let response = json["response"] as? [String: Any],
+              let groups = response["groups"] as? [[String: Any]] else { return nil }
+        var windows: [AgentLimitWindow] = []
+        for group in groups {
+            let groupName = group["displayName"] as? String ?? ""
+            // Only track Gemini models: ignore Claude, GPT, and 3rd-party models.
+            guard groupName.localizedCaseInsensitiveContains("gemini") else { continue }
+            let buckets = group["buckets"] as? [[String: Any]] ?? []
+            for bucket in buckets {
+                let bucketId = bucket["bucketId"] as? String ?? ""
+                let rawWindow = bucket["window"] as? String ?? ""
+                let remainingFraction = (bucket["remainingFraction"] as? NSNumber)?.doubleValue ?? 1.0
+                let usedPercent = min(100.0, max(0.0, (1.0 - remainingFraction) * 100.0))
+                let resetsAt = (bucket["resetTime"] as? String).flatMap(AgentTimestamp.parse)
+
+                let kind: AgentLimitWindow.Kind
+                let minutes: Int?
+                if rawWindow == "5h" {
+                    kind = .session
+                    minutes = 300
+                } else if rawWindow == "weekly" {
+                    kind = .weekly
+                    minutes = 10080
+                } else {
+                    kind = .other
+                    minutes = nil
+                }
+
+                let windowId = "antigravity.\(bucketId.isEmpty ? rawWindow : bucketId)"
+                windows.append(AgentLimitWindow(
+                    id: windowId,
+                    kind: kind,
+                    minutes: minutes,
+                    scope: nil,
+                    usedPercent: usedPercent,
+                    resetsAt: resetsAt
+                ))
+            }
+        }
+        guard !windows.isEmpty else { return nil }
+        windows.sort { ($0.minutes ?? .max) < ($1.minutes ?? .max) }
+        return AgentLimits(provider: .antigravity, windows: windows, observedAt: observed, source: .account)
+    }
+
+    /// User subscription tier from GetUserStatus.
+    static func plan(_ data: Data) -> AgentPlan? {
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let userTier = json["userTier"] as? [String: Any],
+              let name = userTier["name"] as? String, !name.isEmpty else { return nil }
+        return AgentPlan(name: name, monthlyPrice: nil)
+    }
+
+    func refreshLimits() {
+        lastLimitsPoll = .distantPast
+        poll()
+    }
+
     private func poll() {
         guard !stopped, !inFlight else { return }
         let now = Date()
@@ -123,6 +195,10 @@ final class AgentAntigravityActivity {
             endpoints = found.endpoints
             hasT3Adapter = found.t3
             lastDiscovery = now
+        }
+        if let primary = endpoints.first, !limitsInFlight,
+           (lastLimitsPoll == .distantPast || now.timeIntervalSince(lastLimitsPoll) >= 15) {
+            pollLimits(endpoint: primary, now: now)
         }
         var live = hasT3Adapter ? AgentT3AntigravityReader.read(now: now) : []
         guard !endpoints.isEmpty else { deliver(live); return }
@@ -151,6 +227,61 @@ final class AgentAntigravityActivity {
                 }
             }.resume()
         }
+    }
+
+    private func pollLimits(endpoint: Endpoint, now: Date) {
+        guard !limitsInFlight else { return }
+        limitsInFlight = true
+        lastLimitsPoll = now
+        let quotaURL = URL(string: "http://127.0.0.1:\(endpoint.port)/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary")!
+        var quotaReq = URLRequest(url: quotaURL)
+        quotaReq.httpMethod = "POST"
+        quotaReq.httpBody = Data("{}".utf8)
+        quotaReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        quotaReq.setValue(endpoint.token, forHTTPHeaderField: "X-Codeium-Csrf-Token")
+
+        let generation = generation
+        session.dataTask(with: quotaReq) { [weak self] data, response, _ in
+            guard let self else { return }
+            let reading = (response as? HTTPURLResponse)?.statusCode == 200
+                ? data.flatMap { Self.limits($0, observed: now) } : nil
+            self.queue.async { [weak self] in
+                guard let self, !self.stopped, self.generation == generation else { return }
+                self.limitsInFlight = false
+                if let reading {
+                    self.deliverLimits(reading)
+                }
+            }
+        }.resume()
+
+        if previousPlan == nil || now.timeIntervalSince(lastStatusPoll) >= 300 {
+            lastStatusPoll = now
+            let statusURL = URL(string: "http://127.0.0.1:\(endpoint.port)/exa.language_server_pb.LanguageServerService/GetUserStatus")!
+            var statusReq = URLRequest(url: statusURL)
+            statusReq.httpMethod = "POST"
+            statusReq.httpBody = Data("{}".utf8)
+            statusReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            statusReq.setValue(endpoint.token, forHTTPHeaderField: "X-Codeium-Csrf-Token")
+
+            session.dataTask(with: statusReq) { [weak self] data, response, _ in
+                guard let self else { return }
+                let plan = (response as? HTTPURLResponse)?.statusCode == 200
+                    ? data.flatMap { Self.plan($0) } : nil
+                self.queue.async { [weak self] in
+                    guard let self, !self.stopped, self.generation == generation else { return }
+                    if let plan, plan != self.previousPlan {
+                        self.previousPlan = plan
+                        self.planChanged?(plan)
+                    }
+                }
+            }.resume()
+        }
+    }
+
+    private func deliverLimits(_ limits: AgentLimits) {
+        guard previousLimits?.windows != limits.windows else { return }
+        previousLimits = limits
+        limitsChanged?(limits)
     }
 
     private func deliver(_ live: [AgentLiveSession]) {
