@@ -191,7 +191,7 @@ enum NotchAgentSupport {
     /// still bounds the wings on each display.
     static let stripWingRange: ClosedRange<CGFloat> = 44...220
     static let stripMarkSpacing: CGFloat = 10
-    static let stripMarkEdgePadding: CGFloat = 8
+    static let stripMarkEdgePadding: CGFloat = 5
     static func stripMarkSize(height: CGFloat) -> CGFloat {
         min(18, max(8, height - NotchLayout.compactEdgeGap * 2 - 4))
     }
@@ -214,7 +214,7 @@ enum NotchAgentSupport {
     static let stripCameraGap: CGFloat = 6
 
     static func stripTextSize(height: CGFloat) -> CGFloat { min(15, height - 7) }
-    static let stripTextEdgePadding: CGFloat = 12
+    static let stripTextEdgePadding: CGFloat = 8
     static func stripTextOuterInset(geometry: NotchGeometry) -> CGFloat {
         let size = stripTextSize(height: geometry.compactActivityContentHeight)
         let inset = !geometry.compactActivityUsesFooter
