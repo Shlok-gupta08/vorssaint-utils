@@ -789,7 +789,8 @@ enum NotchPresentationProbe {
                             }
                         }
                         .modifier(NotchActivityViewport(size: item.size, x: item.x, geometry: item.activity == .music ? geometry : satellite,
-                                                       focused: item.activity == .music))
+                                                       focused: item.activity == .music,
+                                                       cameraLevel: physical && item.activity == .music && state == "centre-alert"))
                     }
                     if physical {
                         // The actual hardware obscures this region; reproducing

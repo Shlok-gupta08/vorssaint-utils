@@ -301,7 +301,8 @@ struct NotchView: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.28),
                    value: service.expanded && activity == service.expandedPillActivity)
         .modifier(NotchActivityViewport(size: size, x: x,
-            geometry: focused ? service.geometry : service.activitySatelliteGeometry, focused: focused))
+            geometry: focused ? service.geometry : service.activitySatelliteGeometry, focused: focused,
+            cameraLevel: focused && !service.expanded && service.notice?.isLevelFeedback == true))
     }
 
     /// Reuse the camera-fitted strips, including their measured insets and
@@ -819,8 +820,10 @@ struct NotchShape: Shape {
     }
 
     /// The island's outline at a surface of `height`, as its display draws it.
-    static func island(height: CGFloat, geometry: NotchGeometry) -> NotchShape {
-        NotchShape(attached: true, radius: NotchLayout.surfaceRadius(height: height), floatingGap: geometry.floatingGap)
+    static func island(height: CGFloat, geometry: NotchGeometry, cameraLevel: Bool = false) -> NotchShape {
+        let profile = cameraLevel && geometry.isNotched ? geometry.cameraHeight : nil
+        return NotchShape(attached: true, radius: NotchLayout.surfaceRadius(height: profile ?? height),
+            floatingGap: geometry.floatingGap, profileHeight: profile)
     }
 
     func path(in rect: CGRect) -> Path {
@@ -980,6 +983,7 @@ struct NotchActivityViewport: ViewModifier {
     let targetSize: CGSize
     let geometry: NotchGeometry
     let focused: Bool
+    let cameraLevel: Bool
     let targetX: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var widthMotion: NotchSpringChannel
@@ -987,13 +991,14 @@ struct NotchActivityViewport: ViewModifier {
     @State private var positionMotion: NotchSpringChannel
     @State private var started: Date = .distantPast
     @State private var moving = false
+    @State private var retainsCameraProfile: Bool
 #if VORSSAINT_DEVELOPMENT
     /// Observe the painted viewport inside its offset, not the unshifted
     /// layout bounds SwiftUI reports outside an offset modifier.
     var motionProbe: ((CGRect) -> Void)? = nil
 #endif
 
-    init(size: CGSize, x: CGFloat = 0, geometry: NotchGeometry, focused: Bool = false) {
+    init(size: CGSize, x: CGFloat = 0, geometry: NotchGeometry, focused: Bool = false, cameraLevel: Bool = false) {
         targetSize = size
         targetX = x
         _widthMotion = State(initialValue: NotchSpringChannel(size.width))
@@ -1001,6 +1006,8 @@ struct NotchActivityViewport: ViewModifier {
         _positionMotion = State(initialValue: NotchSpringChannel(x))
         self.geometry = geometry
         self.focused = focused
+        self.cameraLevel = cameraLevel
+        _retainsCameraProfile = State(initialValue: cameraLevel)
     }
 
     private func pose(at date: Date) -> (size: CGSize, x: CGFloat) {
@@ -1011,7 +1018,8 @@ struct NotchActivityViewport: ViewModifier {
     }
 
     private func outline(height: CGFloat) -> NotchShape {
-        var shape = NotchShape.island(height: height, geometry: geometry)
+        var shape = NotchShape.island(height: height, geometry: geometry,
+                                     cameraLevel: cameraLevel || (retainsCameraProfile && targetSize.height <= geometry.stripHeight))
         if focused && geometry.isNotched { shape.minimumBodyWidth = geometry.physicalCameraWidth }
         return shape
     }
@@ -1046,6 +1054,9 @@ struct NotchActivityViewport: ViewModifier {
             // to each interpolated viewport, without starting another spring.
             .transaction { $0.animation = nil }
         }
+        .onChange(of: cameraLevel) {
+            if cameraLevel { retainsCameraProfile = true }
+        }
         .onChange(of: CGRect(x: targetX, y: 0, width: targetSize.width, height: targetSize.height)) {
 #if VORSSAINT_DEVELOPMENT
             NotchHoverTrace.mark("viewport motion started")
@@ -1072,6 +1083,7 @@ struct NotchActivityViewport: ViewModifier {
             DispatchQueue.main.asyncAfter(deadline: .now() + settling) {
                 guard started == token else { return }
                 moving = false
+                if !cameraLevel { retainsCameraProfile = false }
             }
         }
     }

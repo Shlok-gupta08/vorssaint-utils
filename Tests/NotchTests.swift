@@ -427,6 +427,10 @@ enum NotchTests {
                                              safeAreaTop: cameraHeight, cameraWidth: camera)
                 let rest = geometry.restingSize(showsContent: false)
                 let open = geometry.underNotchLevelSize
+                let levelOutline = NotchShape.island(height: open.height, geometry: geometry, cameraLevel: true)
+                suite.expect(levelOutline.radius == NotchLayout.surfaceRadius(height: geometry.cameraHeight)
+                             && levelOutline.profileHeight == geometry.cameraHeight,
+                             "the extended volume and brightness display retains the physical cutout's smaller corner profile")
                 for pair in [(rest, open), (open, rest)] {
                     for time in stride(from: 0.0, through: 0.4, by: 1.0 / 120) {
                         let size = NotchLevelMotion.size(at: time, from: pair.0, to: pair.1)
