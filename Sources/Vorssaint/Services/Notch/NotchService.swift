@@ -331,7 +331,7 @@ final class NotchService: ObservableObject {
         NotchKeepAwakeSupport.showsActivity() && KeepAwakeManager.shared.isActive
     }
 
-    var hasCallActivity: Bool { NotchCallService.shared.primary != nil }
+    var hasCallActivity: Bool { NotchCallSupport.isAvailable && NotchCallService.shared.primary != nil }
 
     var compactActivity: NotchCompactActivity? {
         // A new song waiting for its notice is not drawn yet.

@@ -251,6 +251,36 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         targetSize = size
         currentGeometry = geometry
         resizeCount += 1
+        if canAnimate, sameScreen, canvas.backdropPresentation.separatesPills,
+           !revealing, !restoringVisibility, !hideWhenSettled {
+            // Independent cards already animate their own stable viewports.
+            // A second native path animation/display link only redraws an
+            // invisible backdrop and competes with the foreground animation.
+            isAnimating = false
+            canvas.stopMotion()
+            let envelope = NotchMotion.reservation(
+                CGSize(width: max(canvas.bounds.width, size.width), height: max(canvas.bounds.height, size.height)),
+                centring: size)
+            let concealed = concealForFrameChange(to: reservedFrame(mainSize: envelope, gutter: gutter, bottom: bottom),
+                                                  generation: generation)
+            defer { if concealed { reinstateAfterFrameChange() } }
+            guard generation == animationGeneration else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            canvas.setContentSize(size)
+            setFrame(mainSize: envelope, gutter: gutter, bottom: bottom)
+            configureQuickAccess()
+            canvas.layoutSubtreeIfNeeded()
+            CATransaction.commit()
+            guard generation == animationGeneration else { return }
+            isAnimating = true
+            CATransaction.flush()
+            DispatchQueue.main.asyncAfter(deadline: .now() + NotchActivityDeckPresentation.duration + 0.04) { [weak self] in
+                guard let self, self.animationGeneration == generation, self.isAnimating else { return }
+                self.settle()
+            }
+            return
+        }
         guard canAnimate, sameScreen || revealing, let previousPath else {
             settle()
             return

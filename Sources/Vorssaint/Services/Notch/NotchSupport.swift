@@ -670,6 +670,39 @@ enum NotchPillSide: Equatable {
     case left, right
 }
 
+/// One stable identity tree and one animation clock for all live activities.
+struct NotchActivityDeckPresentation: Equatable {
+    struct Item: Equatable, Identifiable {
+        let activity: NotchCompactActivity
+        let size: CGSize
+        let x: CGFloat
+        var id: NotchCompactActivity { activity }
+    }
+    static let duration: TimeInterval = 0.24
+    let items: [Item]
+    let size: CGSize
+
+    init(primary: NotchCompactActivity, primarySize: CGSize,
+         left: [(NotchCompactActivity, CGSize)], right: [(NotchCompactActivity, CGSize)]) {
+        var result = [Item(activity: primary, size: primarySize, x: 0)]
+        var leftEdge = primarySize.width / 2
+        var rightEdge = leftEdge
+        for (activity, size) in left.reversed() {
+            leftEdge += NotchPillActivityLayout.spacing
+            result.append(Item(activity: activity, size: size, x: -leftEdge - size.width / 2))
+            leftEdge += size.width
+        }
+        for (activity, size) in right {
+            rightEdge += NotchPillActivityLayout.spacing
+            result.append(Item(activity: activity, size: size, x: rightEdge + size.width / 2))
+            rightEdge += size.width
+        }
+        items = result
+        self.size = CGSize(width: (max(leftEdge, rightEdge) * 2).rounded(.up),
+                           height: result.map(\.size.height).max() ?? primarySize.height)
+    }
+}
+
 /// Two activities sharing the closed island: the primary keeps its reading
 /// right of the camera and the companion's mark takes the left.
 struct NotchActivityCombination: Hashable, Identifiable {

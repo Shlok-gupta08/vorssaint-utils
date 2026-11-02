@@ -675,6 +675,7 @@ enum NotchPresentationProbe {
         host.present(size: compact, geometry: geometry, animated: false)
         host.panel.orderFrontRegardless()
         for target in [expanded, compact, expanded, compact] {
+            let backdropTicks = host.backdropProbeTicks
             host.setSeparatesPills(true)
             host.present(size: target, geometry: geometry, animated: true)
             RunLoop.current.run(until: Date().addingTimeInterval(0.06))
@@ -684,6 +685,9 @@ enum NotchPresentationProbe {
             RunLoop.current.run(until: Date().addingTimeInterval(0.7))
             if !host.independentSurfaceProbe {
                 failures.append("settling an individual activity merged the side pills")
+            }
+            if host.backdropProbeTicks != backdropTicks || host.backdropProbeScheduled {
+                failures.append("independent card resizing scheduled an unnecessary native backdrop redraw")
             }
         }
         host.close()

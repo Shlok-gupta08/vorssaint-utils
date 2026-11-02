@@ -22,7 +22,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchCalendarCountdown) private var calendarCountdown = false
     @AppStorage(DefaultsKey.notchCalendarTimeLeft) private var calendarTimeLeft = false
     @AppStorage(DefaultsKey.notchAgentsEnabled) private var agentsEnabled = true
-    @AppStorage(DefaultsKey.notchCallsEnabled) private var callsEnabled = true
+    @AppStorage(DefaultsKey.notchCallsEnabled) private var callsEnabled = false
     @AppStorage(DefaultsKey.notchWatchEnabled) private var watchEnabled = true
     @AppStorage(DefaultsKey.notchLyricsEnabled) private var lyricsEnabled = true
     @AppStorage(DefaultsKey.notchLyricsOnline) private var lyricsOnline = false
@@ -373,7 +373,8 @@ struct NotchSettings: View {
             Divider()
             let activities = FeatureStrings.notchActivities(l10n.language)
             switchRow("phone.fill", "Call live activity",
-                      caption: "Detect call controls in supported calling apps using Accessibility. Calls always take the centre while active; no audio or conversation content is recorded.", isOn: $callsEnabled)
+                      caption: "Paused while macOS provides its persistent call notification. The implementation is retained for future use.", isOn: $callsEnabled)
+                .disabled(!NotchCallSupport.isAvailable)
             switchRow(NotchControlItem.keepAwake.symbol, activities.keepAwakeActivity,
                       caption: activities.keepAwakeActivityHint, isOn: $keepAwakeActivity)
                 .disabled(!AppFeature.keepAwake.isAvailable)

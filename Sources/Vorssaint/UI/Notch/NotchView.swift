@@ -15,7 +15,6 @@ struct NotchView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var headerHovered = false
-    @Namespace private var pillMotion
     private var text: NotchStrings { FeatureStrings.notch(l10n.language) }
 
     var body: some View {
@@ -39,6 +38,9 @@ struct NotchView: View {
                 DispatchQueue.main.async { service.refreshPresentation(animated: false) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            // The native stage reserves the envelope once. Only individual
+            // card viewports animate, never the whole hosting surface.
+            .transaction { if service.usesPillActivityDeck { $0.animation = nil } }
             .environment(\.colorScheme, .dark)
             .environment(\.notchPresentation, true)
             .environment(\.notchGlassSurface, usesGlassSurface)
@@ -218,29 +220,20 @@ struct NotchView: View {
     /// either side. Their transparent gaps are supplied by the native host,
     /// so this remains one coordinated, fluidly resizing island window.
     private func pillActivityDeck(primary: NotchCompactActivity) -> some View {
-        let primarySize = service.pillSize(for: primary)
-        return NotchPillDeckRow(size: service.pillActivityDeckSize, primaryWidth: primarySize.width) {
-            HStack(alignment: .top, spacing: NotchPillActivityLayout.spacing) {
-                ForEach(service.leftPillActivities) { activity in pill(activity) }
-            }
-        } primary: {
-            pill(primary)
-        } right: {
-            HStack(alignment: .top, spacing: NotchPillActivityLayout.spacing) {
-                ForEach(service.rightPillActivities) { activity in pill(activity) }
+        let layout = NotchActivityDeckPresentation(primary: primary, primarySize: service.pillSize(for: primary),
+            left: service.leftPillActivities.map { ($0, service.pillSize(for: $0)) },
+            right: service.rightPillActivities.map { ($0, service.pillSize(for: $0)) })
+        return ZStack(alignment: .top) {
+            ForEach(layout.items) { item in
+                pill(item.activity, size: item.size)
+                    .offset(x: item.x)
             }
         }
-        .animation(reduceMotion ? nil : .smooth(duration: 0.26), value: primary)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: service.widenedPillActivities)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: service.pillActivitySides)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.26), value: service.visiblePillActivities)
-        .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.1), value: primarySize)
-        .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.08), value: service.expanded)
-        .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.08), value: service.expandedPillActivity)
+        .frame(width: layout.size.width, height: layout.size.height, alignment: .top)
+        .animation(reduceMotion ? nil : .smooth(duration: NotchActivityDeckPresentation.duration), value: layout)
     }
 
-    private func pill(_ activity: NotchCompactActivity) -> some View {
-        let size = service.pillSize(for: activity)
+    private func pill(_ activity: NotchCompactActivity, size: CGSize) -> some View {
         let focused = activity == service.pillDeckPrimaryActivity
         let widened = service.widenedPillActivities.contains(activity)
         return Group {
@@ -256,8 +249,7 @@ struct NotchView: View {
             }
         }
         .buttonStyle(.plain)
-        .matchedGeometryEffect(id: activity, in: pillMotion)
-        .transition(.scale(scale: 0.65).combined(with: .opacity))
+        .transition(.opacity)
         .onHover { service.hoverPillActivity(activity, entered: $0) }
         .contextMenu {
             if !focused {
@@ -296,6 +288,10 @@ struct NotchView: View {
                                      onReadingShapeChange: { service.refreshPresentation() })
             }
         }
+        // Lay out the page once at its destination size. The outer viewport
+        // reveals it without reflowing every control on every resize frame.
+        .frame(width: size.width, height: size.height, alignment: .top)
+        .transaction { $0.animation = nil }
         .frame(width: size.width, height: size.height, alignment: .top)
         .clipShape(NotchShape.island(height: size.height, geometry: service.geometry))
         .background { NotchShape.island(height: size.height, geometry: service.geometry).fill(.black) }

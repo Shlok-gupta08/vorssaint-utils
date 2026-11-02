@@ -5,6 +5,8 @@ import Foundation
 
 enum NotchCallTests {
     static func run(_ suite: TestSuite) {
+        suite.expect(!NotchCallSupport.isAvailable && Defaults.registeredDefaults[DefaultsKey.notchCallsEnabled] as? Bool == false,
+                     "calling is parked behind an explicit feature gate and disabled by default")
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         var state = NotchCallLifecycle()
         func observation(_ phase: NotchCallPhase, muted: Bool = false) -> NotchCallLifecycle.Observation {

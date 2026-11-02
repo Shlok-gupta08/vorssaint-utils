@@ -93,6 +93,9 @@ struct NotchCallLifecycle {
 }
 
 enum NotchCallSupport {
+    /// Parked while macOS owns the persistent calling presentation. Keeping
+    /// this gate separate from preferences makes a future revival explicit.
+    static let isAvailable = false
     enum Action: Hashable { case answer, end, mute }
 
     static let appBundleIDs: Set<String> = [

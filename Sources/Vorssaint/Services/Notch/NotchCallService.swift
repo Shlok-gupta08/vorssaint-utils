@@ -20,7 +20,8 @@ final class NotchCallService: ObservableObject {
     private init() {}
 
     func syncWithPreferences() {
-        guard UserDefaults.standard.bool(forKey: DefaultsKey.notchCallsEnabled) else { stop(); return }
+        guard NotchCallSupport.isAvailable,
+              UserDefaults.standard.bool(forKey: DefaultsKey.notchCallsEnabled) else { stop(); return }
         guard !running else { return }
         running = true
         let token = UUID(); generation = token
