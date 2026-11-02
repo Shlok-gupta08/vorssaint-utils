@@ -834,7 +834,8 @@ enum NotchPresentationProbe {
             let target: NotchCompactActivity = side == nil ? .music : .agents
             let layout = NotchActivityDeckPresentation(primary: .music,
                 primarySize: side == nil ? size : CGSize(width: 240, height: geometry.stripHeight),
-                left: side == .left ? [(.agents, size)] : [], right: side == .right ? [(.agents, size)] : [])
+                left: side == .left ? [(.agents, size)] : [],
+                right: side == .right ? [(.agents, size)] : side == nil ? [(.timer, CGSize(width: 70, height: geometry.stripHeight))] : [])
             ZStack(alignment: .top) {
                 ForEach(layout.items) { item in
                     ZStack(alignment: .top) {
@@ -896,9 +897,10 @@ enum NotchPresentationProbe {
                     model.opened = opened
                 }
                 native.present(size: CGSize(width: opened ? 1100 : 1000, height: opened ? 450 : 400),
-                    geometry: geometry, animated: true, quickAccess: opened ? .initial : nil,
+                    geometry: geometry, animated: true, quickAccess: opened
+                        ? (side == nil ? NotchQuickAccessConfiguration.initial.avoidingActivityPills(leftOccupied: false, rightOccupied: true) : .initial) : nil,
                     quickAccessFrame: opened ? CGRect(x: (side.map { ($0 == .left ? -1.0 : 1.0) * 296 } ?? 0) - 170,
-                        y: 0, width: 340, height: 260) : nil)
+                        y: 0, width: 340, height: 260) : nil, usesGlass: opened)
             }
             func advance(_ seconds: TimeInterval) {
                 let end = Date().addingTimeInterval(seconds)
@@ -925,6 +927,16 @@ enum NotchPresentationProbe {
                     if !native.quickAccessProbeInteractive || native.quickAccessProbeCenters.isEmpty
                         || native.quickAccessProbeCenters.contains(where: { abs($0.x - activityX) > 300 }) {
                         failures.append("expanded live activity lost its side buttons or placed them around the whole deck")
+                    }
+                    if side == nil {
+                        let centres = native.quickAccessProbeCenters
+                        if centres.count != 3 || !centres.contains(where: { $0.x < activityX - 170 })
+                            || centres.contains(where: { $0.x > activityX + 170 }) {
+                            failures.append("a right activity hid the free left shortcuts or retained blocked right shortcuts")
+                        }
+                        if let first = centres.first, (native.quickAccessProbeOpacity(at: first) ?? 0) < 0.5 {
+                            failures.append("the activity envelope clipped a visible free-side shortcut")
+                        }
                     }
                 }
                 let intermediate = model.frames.filter { $0.width > 91 && $0.width < 339 && $0.height > geometry.stripHeight + 1 && $0.height < 259 }

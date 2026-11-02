@@ -75,6 +75,10 @@ struct NotchQuickAccessView: View {
 
     /// Increase Contrast keeps the buttons solid beside a lip that barely opens.
     private var followsGlass: Bool {
+        // Independent activity cards paint their own black surfaces. The
+        // native contour is only their reserved envelope; cutting buttons
+        // out of that contour erases shortcuts beside the centre card.
+        guard !backdrop.separatesPills else { return false }
 #if compiler(>=6.2)
         if #available(macOS 26, *) { return glass && !reduceTransparency && contrast != .increased }
 #endif
