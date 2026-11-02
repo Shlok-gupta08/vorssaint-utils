@@ -53,6 +53,38 @@ enum NotchActivityTests {
             let width = NotchPillActivityLayout.compactWidth(bodyHeight: height, shoulder: 5)
             suite.expect(width - 10 >= height * 2, "compact pills stay elongated even with a taller custom fit")
         }
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        for physical in [false, true] {
+            let geometry = NotchGeometry(screen: screen, safeAreaTop: physical ? 32 : 0,
+                                         cameraWidth: physical ? 210 : 0, menuBarHeight: 32,
+                                         compactSideRoom: 400, silhouette: .notch)
+            let satellite = NotchAttachedActivityLayout.satelliteGeometry(geometry)
+            suite.expect(!satellite.isNotched && !satellite.floats && satellite.headerCameraGap == 0
+                         && satellite.headerTopInset == 0 && satellite.stripHeight == geometry.stripHeight,
+                         "a hanging satellite has a full header and no imaginary camera on either display")
+        }
+        for available: CGFloat in [210, 260, 377, 378, 450, 900] {
+            let width = NotchAttachedActivityLayout.primaryWidth(camera: 210, available: available, sideReservation: 200)
+            suite.expect(width >= 210 && width <= available && (width == 210 || width >= 378),
+                         "hardware keeps its camera covered and uses a footer instead of cramped wings")
+        }
+        let closed = NotchActivityDeckPresentation(primary: .music, primarySize: CGSize(width: 450, height: 32),
+            left: [(.agents, CGSize(width: 100, height: 32))], right: [(.timer, CGSize(width: 68, height: 32))])
+        let opened = NotchActivityDeckPresentation(primary: .music, primarySize: CGSize(width: 450, height: 32),
+            left: [(.agents, CGSize(width: 330, height: 280))], right: [(.timer, CGSize(width: 68, height: 32))])
+        suite.expect(closed.items.map(\.id) == opened.items.map(\.id)
+                     && opened.items[0] == closed.items[0] && opened.items[2] == closed.items[2],
+                     "opening a left tab preserves every identity and the centre and right tab positions")
+        for layout in [closed, opened] {
+            for item in layout.items {
+                suite.expect(abs(item.x) + item.size.width / 2 <= layout.size.width / 2
+                             && item.size.height <= layout.size.height,
+                             "the native reservation contains every independent activity surface")
+            }
+            suite.expect(layout.items[1].x + layout.items[1].size.width / 2
+                         == -layout.items[0].size.width / 2 - NotchPillActivityLayout.spacing,
+                         "an expanding side tab keeps a real transparent gap beside the hardware notch")
+        }
     }
 
     /// Keep Awake as an activity: off until turned on, gated like the others,

@@ -19,6 +19,7 @@ struct NotchView: View {
 
     var body: some View {
         surface
+            .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: service.fullscreenCompact)
             .frame(width: service.surfaceSize.width, height: service.surfaceSize.height, alignment: .top)
             .foregroundStyle(.white)
             // The window server leaves Liquid Glass out of its hit test, so a
@@ -101,7 +102,7 @@ struct NotchView: View {
                 .padding(.horizontal, NotchLayout.horizontalInset)
                 .padding(.top, service.geometry.safeContentTop)
         } else if service.usesPillActivityDeck {
-            floatingCompactSurface
+            activityDeckSurface
         } else if let notice = service.notice ?? (service.peeking ? nil : service.departingNotice) {
             if service.noticeExpanded, let content = notice.notification {
                 NotchNotificationPreviewView(notice: notice, content: content, service: service)
@@ -194,25 +195,28 @@ struct NotchView: View {
 
     /// Keep one compact rendering tree as activities start and finish.
     /// Individual capsules change without rebuilding the entire deck.
-    private var floatingCompactSurface: some View {
+    private var activityDeckSurface: some View {
         ZStack(alignment: .top) {
             if let activity = service.pillDeckPrimaryActivity {
                 pillActivityDeck(primary: activity)
-                    .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .top)))
+                    .transition(.opacity)
             } else if let notice = service.notice {
                 Button { service.activateNotice(notice) } label: {
-                    NotchCapsuleNoticeView(notice: notice, geometry: service.geometry, size: service.surfaceSize)
-                        .background(shape.fill(.black))
+                    Group {
+                        if !service.geometry.isNotched { NotchCapsuleNoticeView(notice: notice, geometry: service.geometry, size: service.surfaceSize) }
+                        else { NotchNoticeView(notice: notice, geometry: service.geometry, size: service.surfaceSize) }
+                    }.background(shape.fill(.black))
                 }
                 .buttonStyle(.plain)
                 .transition(.opacity)
             } else {
-                NotchCapsuleRestingView(service: service, size: service.surfaceSize)
-                    .background(shape.fill(.black))
-                    .transition(.opacity)
+                Group {
+                    if floats { NotchCapsuleRestingView(service: service, size: service.surfaceSize) }
+                    else { NotchRestingStrip(service: service).frame(width: service.surfaceSize.width, height: service.surfaceSize.height) }
+                }.background(shape.fill(.black)).transition(.opacity)
             }
         }
-        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: service.compactActivities)
+        .animation(reduceMotion ? nil : .timingCurve(0.2, 0.85, 0.2, 1, duration: NotchActivityDeckPresentation.duration), value: service.compactActivities)
         .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: service.notice?.event)
     }
 
@@ -230,31 +234,28 @@ struct NotchView: View {
             }
         }
         .frame(width: layout.size.width, height: layout.size.height, alignment: .top)
-        .animation(reduceMotion ? nil : .smooth(duration: NotchActivityDeckPresentation.duration), value: layout)
+        .animation(reduceMotion ? nil : .timingCurve(0.2, 0.85, 0.2, 1, duration: NotchActivityDeckPresentation.duration), value: layout)
     }
 
     private func pill(_ activity: NotchCompactActivity, size: CGSize) -> some View {
         let focused = activity == service.pillDeckPrimaryActivity
         let widened = service.widenedPillActivities.contains(activity)
-        return Group {
-            if (service.expanded && activity == service.expandedPillActivity) || (focused && service.noticeExpanded) {
-                pillContent(activity, size: size, focused: focused, widened: widened)
-            } else {
-                Button {
-                    if focused, let notice = service.notice { service.activateNotice(notice) }
-                    else { service.activatePillActivity(activity) }
-                } label: {
-                    pillContent(activity, size: size, focused: focused, widened: widened)
-                }
-            }
+        // The viewport keeps its identity through open and close. Swapping a
+        // Button for its label here destroys the moving frame halfway through
+        // the transition and makes the card jump to its destination size.
+        return pillContent(activity, size: size, focused: focused, widened: widened)
+        .onTapGesture {
+            guard !service.expanded, !(focused && service.noticeExpanded) else { return }
+            if focused, let notice = service.notice { service.activateNotice(notice) }
+            else { service.activatePillActivity(activity) }
         }
-        .buttonStyle(.plain)
         .transition(.opacity)
         .onHover { service.hoverPillActivity(activity, entered: $0) }
         .contextMenu {
             if !focused {
                 Button("Make Primary") { service.selectCompactActivity(activity) }
-                Button(widened ? "Use Compact Pill" : "Use Wider Pill") { service.togglePillWidth(activity) }
+                Button(widened ? (floats ? "Use Compact Pill" : "Use Compact Tab")
+                               : (floats ? "Use Wider Pill" : "Use Wider Tab")) { service.togglePillWidth(activity) }
                 Divider()
                 Button("Move to Left Side") { service.movePillActivity(activity, to: .left) }
                 Button("Move to Right Side") { service.movePillActivity(activity, to: .right) }
@@ -266,10 +267,11 @@ struct NotchView: View {
         .help(activity.title(l10n.language))
         .accessibilityLabel(activity.title(l10n.language))
         .accessibilityHint("Hover or click to open; right-click to change layout")
+        .accessibilityAction { service.activatePillActivity(activity) }
     }
 
     private func pillContent(_ activity: NotchCompactActivity, size: CGSize, focused: Bool, widened: Bool) -> some View {
-        Group {
+        ZStack(alignment: .top) {
             if service.expanded && activity == service.expandedPillActivity {
                 if service.showingCall { NotchCallPanel(service: service) }
                 else { expanded }
@@ -279,8 +281,12 @@ struct NotchView: View {
                     .padding(.top, service.geometry.safeContentTop)
                     .padding(.bottom, NotchLayout.bottomInset)
             } else if focused, let notice = service.notice {
-                NotchCapsuleNoticeView(notice: notice, geometry: service.geometry, size: size)
-                    .id(notice.event).transition(.opacity)
+                Group {
+                    if !service.geometry.isNotched { NotchCapsuleNoticeView(notice: notice, geometry: service.geometry, size: size) }
+                    else { NotchNoticeView(notice: notice, geometry: service.geometry, size: size) }
+                }.id(notice.event).transition(.opacity)
+            } else if focused && service.geometry.isNotched {
+                NotchAttachedActivityStrip(activity: activity, geometry: service.geometry, size: size)
             } else if focused || widened {
                 activityStrip(activity, size: size)
             } else {
@@ -288,32 +294,22 @@ struct NotchView: View {
                                      onReadingShapeChange: { service.refreshPresentation() })
             }
         }
-        // Lay out the page once at its destination size. The outer viewport
-        // reveals it without reflowing every control on every resize frame.
-        .frame(width: size.width, height: size.height, alignment: .top)
-        .transaction { $0.animation = nil }
-        .frame(width: size.width, height: size.height, alignment: .top)
-        .clipShape(NotchShape.island(height: size.height, geometry: service.geometry))
-        .background { NotchShape.island(height: size.height, geometry: service.geometry).fill(.black) }
-        .overlay {
-            NotchShape.island(height: size.height, geometry: service.geometry)
-                .stroke(.white.opacity(focused ? 0.13 : 0.08), lineWidth: 0.5)
-        }
-        .contentShape(NotchShape.island(height: size.height, geometry: service.geometry))
+        .modifier(NotchActivityViewport(size: size,
+            geometry: focused ? service.geometry : service.activitySatelliteGeometry, focused: focused))
     }
 
     /// `size` is the capsule's; a hanging strip keeps the camera's geometry.
     @ViewBuilder private func activityStrip(_ activity: NotchCompactActivity, size: CGSize) -> some View {
-        if floats {
+        if floats || service.usesPillActivityDeck {
             switch activity {
-            case .call: NotchCallStrip(geometry: service.geometry, size: size)
-            case .timer: NotchCapsuleTimerStrip(service: service, size: size)
-            case .watch: NotchCapsuleWatchStrip(service: service, size: size)
-            case .downloads: NotchCapsuleDownloadStrip(service: service, size: size)
-            case .agents: NotchCapsuleAgentStrip(service: service, size: size)
-            case .calendar: NotchCapsuleCalendarStrip(service: service, size: size)
-            case .music: NotchCapsuleMusicStrip(service: service, size: size)
-            case .keepAwake: NotchCapsuleKeepAwakeStrip(service: service, size: size)
+            case .call: NotchCallStrip(geometry: service.activitySatelliteGeometry, size: size)
+            case .timer: NotchCapsuleTimerStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
+            case .watch: NotchCapsuleWatchStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
+            case .downloads: NotchCapsuleDownloadStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
+            case .agents: NotchCapsuleAgentStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
+            case .calendar: NotchCapsuleCalendarStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
+            case .music: NotchCapsuleMusicStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
+            case .keepAwake: NotchCapsuleKeepAwakeStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
             }
         } else {
             switch activity {
@@ -956,8 +952,49 @@ struct NotchActivityPicker: View {
     }
 }
 
-/// The smallest live-activity state: an identifying mark and one changing
-/// signal. It stays legible at 42 points and never pretends to be a full row.
+/// A stable card viewport reveals a page already laid out at its destination
+/// size, keeping expensive page layout out of the animation's frame loop.
+struct NotchActivityViewport: AnimatableModifier {
+    let targetSize: CGSize
+    let geometry: NotchGeometry
+    let focused: Bool
+    var viewportSize: CGSize
+
+    init(size: CGSize, geometry: NotchGeometry, focused: Bool = false) {
+        targetSize = size
+        viewportSize = size
+        self.geometry = geometry
+        self.focused = focused
+    }
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(viewportSize.width, viewportSize.height) }
+        set { viewportSize = CGSize(width: newValue.first, height: newValue.second) }
+    }
+
+    private var outline: NotchShape {
+        var shape = NotchShape.island(height: viewportSize.height, geometry: geometry)
+        if focused && geometry.isNotched { shape.minimumBodyWidth = geometry.physicalCameraWidth }
+        return shape
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: targetSize.width, height: targetSize.height, alignment: .top)
+            .transaction { $0.animation = nil }
+            .frame(width: viewportSize.width, height: viewportSize.height, alignment: .top)
+            .clipShape(outline)
+            .background { outline.fill(.black) }
+            .overlay {
+                outline.stroke(.white.opacity(focused ? 0.13 : 0.08), lineWidth: 0.5)
+            }
+            .contentShape(outline)
+            // Interpolation belongs to this modifier. Its child frames snap
+            // to each interpolated viewport, without starting another spring.
+            .transaction { $0.animation = nil }
+    }
+}
+
 struct NotchPillDeckRow<Left: View, Primary: View, Right: View>: View {
     let size: CGSize
     let primaryWidth: CGFloat

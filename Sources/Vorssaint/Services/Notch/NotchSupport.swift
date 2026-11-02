@@ -666,6 +666,25 @@ enum NotchPillActivityLayout {
     }
 }
 
+enum NotchAttachedActivityLayout {
+    static let desiredWing: CGFloat = 120
+    static let minimumWing: CGFloat = 84
+
+    static func primaryWidth(camera: CGFloat, available: CGFloat, sideReservation: CGFloat) -> CGFloat {
+        guard available >= camera + minimumWing * 2 else { return camera }
+        return min(camera + desiredWing * 2, max(camera + minimumWing * 2, available - sideReservation))
+    }
+
+    /// Satellite headers never reserve a second, imaginary camera.
+    static func satelliteGeometry(_ geometry: NotchGeometry) -> NotchGeometry {
+        NotchGeometry(screen: geometry.screen, safeAreaTop: 0, cameraWidth: 0,
+                      layout: geometry.layout, menuBarHeight: geometry.stripHeight,
+                      compactSideRoom: geometry.compactSideRoom,
+                      customWidth: geometry.customWidth, customHeight: geometry.customHeight,
+                      silhouette: .notch, expandedScale: geometry.expandedScale)
+    }
+}
+
 enum NotchPillSide: Equatable {
     case left, right
 }

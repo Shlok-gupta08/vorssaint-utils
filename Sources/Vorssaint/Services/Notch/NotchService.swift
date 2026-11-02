@@ -337,9 +337,7 @@ final class NotchService: ObservableObject {
         // A new song waiting for its notice is not drawn yet.
         let available = awaitsTrackNotice ? compactActivities.filter { $0 != .music } : compactActivities
         if available.contains(.call) { return .call }
-        return activitySelection.current(available: geometry.floats
-            ? pillActivityOrder.filter { available.contains($0) }
-            : available)
+        return activitySelection.current(available: pillActivityOrder.filter { available.contains($0) })
     }
 
     var pillActivityOrder: [NotchCompactActivity] {
@@ -359,21 +357,24 @@ final class NotchService: ObservableObject {
     }
 
     var showsCompactActivityPicker: Bool {
-        !geometry.floats && (inside || activityPickerMenuOpen) && !hiddenInFullscreen && !hiddenUntilHover && !expanded && !peeking
+        !usesPillActivityDeck && !geometry.floats && (inside || activityPickerMenuOpen) && !hiddenInFullscreen && !hiddenUntilHover && !expanded && !peeking
             && !dragPlaceholder && notice == nil && captureControls == nil
             && compactActivities.count > 1
     }
 
-    /// A floating island presents simultaneous work as independent pills.
-    /// A physical notch keeps the established wing layout until the same
-    /// interaction has been refined for its constrained camera geometry.
+    /// Every silhouette keeps independent activity surfaces. The hardware
+    /// notch reserves its camera in the primary; satellites have no camera.
     var usesPillActivityDeck: Bool {
-        geometry.floats && !fullscreenCompact && !showsDictation
+        !fullscreenCompact && !showsDictation
             && (!expanded || (expandedPillActivity != nil && !showingSections && !showingAppPanel && selectedMetric == nil))
             && !peeking && !dragPlaceholder && captureControls == nil
     }
 
     var pillDeckPrimaryActivity: NotchCompactActivity? { compactActivity ?? (expanded ? expandedPillActivity : nil) }
+
+    var activitySatelliteGeometry: NotchGeometry {
+        geometry.floats ? geometry : NotchAttachedActivityLayout.satelliteGeometry(geometry)
+    }
 
     private var pillDeckCandidates: [NotchCompactActivity] {
         var result = Array(pillActivityOrder.prefix(NotchPillActivityLayout.maximumVisible))
@@ -471,7 +472,8 @@ final class NotchService: ObservableObject {
 
     func togglePillWidth(_ activity: NotchCompactActivity) {
         guard activity != compactActivity, visiblePillActivities.contains(activity) else { return }
-        withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .smooth(duration: 0.24)) {
+        withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil
+            : .timingCurve(0.2, 0.85, 0.2, 1, duration: NotchActivityDeckPresentation.duration)) {
             if widenedPillActivities.contains(activity) { widenedPillActivities.remove(activity) }
             else {
                 widenedPillActivities.insert(activity)
@@ -486,7 +488,8 @@ final class NotchService: ObservableObject {
     func movePillActivity(_ activity: NotchCompactActivity, to side: NotchPillSide) {
         guard activity != compactActivity, visiblePillActivities.contains(activity) else { return }
         let previous = pillActivitySides[activity]
-        withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .smooth(duration: 0.24)) {
+        withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil
+            : .timingCurve(0.2, 0.85, 0.2, 1, duration: NotchActivityDeckPresentation.duration)) {
             pillActivitySides[activity] = side
             // An overfull side would clip the very control that moved it.
             if !visiblePillActivities.contains(activity) { pillActivitySides[activity] = previous }
@@ -752,8 +755,8 @@ final class NotchService: ObservableObject {
                             && NotchFileToolsService.shared.mediaPresented ? NotchFileToolsService.shared.mediaContentHeight : nil,
                         toolCount: launcher.isEditing || launcher.activeUtility != nil ? nil : launcher.visibleItems.count,
                         capturePreviewHeight: captureContent == nil ? nil : captureContentHeight)
-        if geometry.floats, expandedPillActivity != nil, expandedPillActivity != compactActivity {
-            let primaryWidth = compactActivity.map { min(300, capsuleStripSize(for: $0, companion: nil).width) } ?? 160
+        if expandedPillActivity != nil, expandedPillActivity != compactActivity {
+            let primaryWidth = compactActivity.map { pillSize(for: $0).width } ?? 160
             result.width = min(result.width, max(220, (geometry.screen.width - 32) / 2 - primaryWidth / 2 - 170))
         }
         return result
@@ -831,7 +834,8 @@ final class NotchService: ObservableObject {
             NotchAgentSupport.tiles(cards: NotchAgentSupport.cards(), providers: providers), width: width))
     }
     var expandedGeometry: NotchGeometry {
-        var result = geometry
+        var result = expandedPillActivity != nil && expandedPillActivity != pillDeckPrimaryActivity
+            ? activitySatelliteGeometry : geometry
         // Capture editing has a full toolbar whose actions must stay reachable.
         result.requiresFullWidthHeader = selected == .captures && captureActions != nil
             && !showingSections && !showingAppPanel && selectedMetric == nil
@@ -877,6 +881,7 @@ final class NotchService: ObservableObject {
             return CGSize(width: min(geometry.screen.width - 32, max(380, geometry.cameraWidth + 144)),
                           height: geometry.safeContentTop + (dictationPhase == .failed ? 156 : dictationPhase == .completed ? 122 : 118))
         }
+        if usesPillActivityDeck && (expanded || compactActivity != nil) { return pillActivityDeckSize }
         if let capsule = capsuleSurfaceSize { return capsule }
         if fullscreenCompact { return geometry.bareCutout }
         if captureControls != nil {
@@ -959,9 +964,14 @@ final class NotchService: ObservableObject {
         }
         let full: CGSize
         if activity == compactActivity, let notice {
-            full = noticeExpanded ? geometry.notificationPreviewSize(contentHeight: 0) : capsuleNoticeSurface(notice)
+            if noticeExpanded { full = geometry.notificationPreviewSize(contentHeight: 0) }
+            else if geometry.isNotched {
+                full = notice.isLevelFeedback ? geometry.underNotchLevelSize : geometry.noticeSize(wingWidth: notice.preferredWingWidth)
+            } else { full = capsuleNoticeSurface(notice) }
         } else {
-            full = capsuleStripSize(for: activity, companion: nil)
+            full = geometry.isNotched
+                ? CGSize(width: geometry.cameraWidth + NotchAttachedActivityLayout.desiredWing * 2, height: geometry.stripHeight)
+                : capsuleStripSize(for: activity, companion: nil)
         }
         if activity == pillDeckPrimaryActivity {
             let sides = pillActivityOrder.prefix(NotchPillActivityLayout.maximumVisible).filter { $0 != activity }
@@ -975,13 +985,21 @@ final class NotchService: ObservableObject {
                 }
             }
             let reserve = sides.isEmpty ? 0 : (max(left, right) + NotchPillActivityLayout.spacing) * 2
-            let width = min(full.width, max(80, min(noticeExpanded ? 420 : 300,
-                                                    pillAvailableWidth - reserve)))
+            let width: CGFloat
+            if geometry.isNotched && notice == nil {
+                width = NotchAttachedActivityLayout.primaryWidth(camera: geometry.cameraWidth,
+                                                                 available: pillAvailableWidth, sideReservation: reserve)
+            } else {
+                width = min(full.width, max(geometry.isNotched ? geometry.cameraWidth : 80,
+                                           min(noticeExpanded ? 420 : 300, pillAvailableWidth - reserve)))
+            }
             let height: CGFloat
             if noticeExpanded, let notice {
                 height = geometry.notificationPreviewSize(contentHeight: notice.previewContentHeight(
                     width: max(40, width - NotchLayout.horizontalInset * 2))).height
-            } else { height = geometry.stripHeight }
+            } else if geometry.isNotched && notice == nil && width <= geometry.cameraWidth + 1 {
+                height = geometry.stripHeight + 32
+            } else { height = full.height }
             return CGSize(width: width, height: height)
         }
         return CGSize(width: pillSecondaryWidth(for: activity), height: geometry.stripHeight)
@@ -1387,9 +1405,9 @@ final class NotchService: ObservableObject {
         // An open page is followed again only from an exit report.
         if !expanded { removeHoverExitMonitors() }
         mutatePresentation(transitionContent: changesPresentation ? (expanded ? .replace : .reveal) : .none,
-                           animatesPills: geometry.floats && (activity != nil || expandedPillActivity != nil)) {
-            expandedPillActivity = geometry.floats ? activity
-                ?? (compactActivity?.module == destination && !appPanel && !sections && metric == nil ? compactActivity : nil) : nil
+                           animatesPills: activity != nil || expandedPillActivity != nil) {
+            expandedPillActivity = activity
+                ?? (compactActivity?.module == destination && !appPanel && !sections && metric == nil ? compactActivity : nil)
             showingCall = activity == .call || (module == nil && compactActivity == .call && destination == .controls)
             showingAppPanel = appPanel
             showingSections = sections
@@ -1417,14 +1435,15 @@ final class NotchService: ObservableObject {
         pinned = false
         hoverWork?.cancel(); hoverWork = nil
         if noticeExpanded { noticeWork?.cancel(); noticeWork = nil }
-        if geometry.floats {
+        let releasesFocusBeforeMotion = geometry.floats || usesPillActivityDeck
+        if releasesFocusBeforeMotion {
             // AppKit can cancel layer animations while the panel resigns key.
             // Release focus before starting the floating pill's closing motion.
             panel?.acceptsKeyFocus = false
             panel?.resignKey()
         }
         mutatePresentation(transitionContent: expanded || peeking || noticeExpanded ? .dismiss : .none,
-                           animatesPills: usesPillActivityDeck) {
+                           animatesPills: usesPillActivityDeck || fullscreenCompact) {
             if noticeExpanded { notice = nil; noticeExpanded = false }
             expanded = false
             showingCall = false
@@ -1437,7 +1456,7 @@ final class NotchService: ObservableObject {
             highlightedSection = nil
             sectionRow = 0
         }
-        if !geometry.floats {
+        if !releasesFocusBeforeMotion {
             panel?.acceptsKeyFocus = false
             panel?.resignKey()
         }
@@ -2409,7 +2428,8 @@ final class NotchService: ObservableObject {
     private func mutatePresentation(transitionContent: NotchContentTransition = .none,
                                     animatesPills: Bool = false, _ change: () -> Void) {
         let motion = animatesPills && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        var transaction = Transaction(animation: motion ? .spring(duration: 0.28, bounce: 0.1) : nil)
+        var transaction = Transaction(animation: motion
+            ? .timingCurve(0.2, 0.85, 0.2, 1, duration: NotchActivityDeckPresentation.duration) : nil)
         transaction.disablesAnimations = !motion
         withTransaction(transaction, change)
         refreshPresentation(transitionContent: transitionContent)
@@ -2553,9 +2573,6 @@ final class NotchService: ObservableObject {
 
     func refreshPresentation(animated: Bool = true, transitionContent: NotchContentTransition = .none) {
         activitySelection.reconcile(available: compactActivities)
-        if geometry.floats, let preferred = activitySelection.preferred, !compactActivities.contains(preferred) {
-            activitySelection = NotchActivitySelection()
-        }
         if fullscreenCompact {
             finishMusicDeparture()
             presentedMusic = nil
@@ -2590,7 +2607,7 @@ final class NotchService: ObservableObject {
         }
         let access = NotchQuickAccessConfiguration.current()
         let size = surfaceSize
-        let contentTransition = usesPillActivityDeck ? NotchContentTransition.none
+        let contentTransition = usesPillActivityDeck || fullscreenCompact ? NotchContentTransition.none
             : compactMusicTransition(transitionContent, animated: animated)
         windowHost?.animatesContentArrival = !noticeCanPresent || !geometry.isNotched || notice?.isLevelFeedback != true
         if captureControls == nil {
@@ -2601,7 +2618,7 @@ final class NotchService: ObservableObject {
         // Preferences can change computed dimensions without publishing a
         // service property. Update SwiftUI's layout along with the native host.
         if let windowHost, windowHost.targetSize != size { objectWillChange.send() }
-        windowHost?.setSeparatesPills(usesPillActivityDeck)
+        windowHost?.setSeparatesPills(usesPillActivityDeck || fullscreenCompact)
         windowHost?.setOutline(enabled: !usesPillActivityDeck && !fullscreenCompact
                                && UserDefaults.standard.bool(forKey: DefaultsKey.notchOutlineEnabled),
                                color: compactActivityIsVisible && compactActivity == .timer ? .systemOrange : .white)

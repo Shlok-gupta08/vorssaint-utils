@@ -665,7 +665,9 @@ enum NotchPresentationProbe {
 
     private static func checkIndependentPillResize(screen: NSScreen) -> [String] {
         var failures: [String] = []
-        let geometry = NotchGeometry(screen: screen.frame, safeAreaTop: 0, cameraWidth: 0, silhouette: .capsule)
+        for (safeArea, silhouette): (CGFloat, NotchSilhouette) in [(0, .capsule), (0, .notch), (32, .notch)] {
+        let geometry = NotchGeometry(screen: screen.frame, safeAreaTop: safeArea,
+                                     cameraWidth: safeArea > 0 ? 210 : 0, silhouette: silhouette)
         let compact = CGSize(width: 400, height: geometry.stripHeight)
         let expanded = CGSize(width: min(screen.frame.width - 24, 1040), height: 280)
         let host = NotchWindowHost(content: AnyView(Color.clear), geometry: geometry, size: compact, background: surface)
@@ -691,6 +693,175 @@ enum NotchPresentationProbe {
             }
         }
         host.close()
+        }
+        return failures
+    }
+
+    /// Camera and simulated-notch fixtures use the same deck layout, viewport
+    /// and compact content as the running island, with deterministic readings.
+    private static func runAttachedActivitiesAndExit() -> Never {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("build/notch-previews")
+        try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for physical in [true, false] {
+            let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                safeAreaTop: physical ? 32 : 0, cameraWidth: physical ? 210 : 0, menuBarHeight: 32,
+                compactSideRoom: 600, silhouette: .notch)
+            let satellite = NotchAttachedActivityLayout.satelliteGeometry(geometry)
+            for state in ["two", "three", "four", "wide-secondary", "centre-alert", "left-expanded", "centre-expanded", "footer"] {
+                let primary = CGSize(width: state == "footer" && physical ? 210 : physical ? 450 : 200,
+                    height: state == "centre-expanded" ? 260 : state == "centre-alert" ? geometry.underNotchLevelSize.height
+                        : state == "footer" && physical ? 64 : 32)
+                let agentSize = CGSize(width: state == "left-expanded" ? 340 : state == "wide-secondary" ? 180 : 110,
+                                       height: state == "left-expanded" ? 260 : 32)
+                let layout = NotchActivityDeckPresentation(primary: .music, primarySize: primary,
+                    left: state == "two" || state == "footer" ? [] : [(.agents, agentSize)],
+                    right: state == "footer" ? [] : state == "four"
+                        ? [(.timer, CGSize(width: 76, height: 32)), (.downloads, CGSize(width: 68, height: 32))]
+                        : [(.timer, CGSize(width: 76, height: 32))])
+                let deck = ZStack(alignment: .top) {
+                    ForEach(layout.items) { item in
+                        Group {
+                            if item.activity == .music && state == "centre-alert" {
+                                NotchNoticeView(notice: .init(event: .volume, title: "Volume", detail: "50%",
+                                    symbol: "speaker.wave.2.fill", level: 0.5), geometry: geometry, size: item.size)
+                            } else if item.size.height > 100 {
+                                VStack(alignment: .leading, spacing: 18) {
+                                    Text(item.activity == .agents ? "AI agents" : "Now playing").font(.headline)
+                                    Text(item.activity == .agents ? "Claude    Codex        12:34" : "A song title    •    Album")
+                                    Text("This tab expands and closes independently.").font(.caption)
+                                }
+                                .padding(24).padding(.top, item.activity == .music && physical ? 32 : 8)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            } else if item.activity == .music && physical {
+                                NotchAttachedActivityStrip(activity: .music, geometry: geometry, size: item.size,
+                                    fixtureTitle: "A song title", fixtureReading: "▥")
+                            } else if item.activity == .agents {
+                                NotchPillAgentCompactContent(providers: [.claude, .codex], reading: "12:34", geometry: satellite)
+                            } else {
+                                HStack(spacing: 7) {
+                                    if item.activity == .music {
+                                        RoundedRectangle(cornerRadius: 4).fill(.pink.gradient).frame(width: 22, height: 22)
+                                        Text("A song title").lineLimit(1)
+                                        Spacer(minLength: 3)
+                                        Text("▥")
+                                    } else {
+                                        Image(systemName: item.activity.symbol)
+                                        Text(item.activity == .timer ? "12:34" : "52%")
+                                    }
+                                }.font(.system(size: 11, weight: .medium)).padding(.horizontal, 12)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
+                        }
+                        .modifier(NotchActivityViewport(size: item.size, geometry: item.activity == .music ? geometry : satellite,
+                                                       focused: item.activity == .music))
+                        .offset(x: item.x)
+                    }
+                    if physical {
+                        // The actual hardware obscures this region; reproducing
+                        // it makes any foreground crossing the camera visible.
+                        RoundedRectangle(cornerRadius: 10).fill(.black).frame(width: 210, height: 32)
+                            .overlay(alignment: .top) { Circle().fill(.white.opacity(0.12)).frame(width: 5, height: 5).offset(y: 12) }
+                    }
+                }
+                .frame(width: layout.size.width, height: layout.size.height, alignment: .top)
+                .foregroundStyle(.white).environment(\.colorScheme, .dark)
+                let view = deck.padding(20).background(Color(red: 0.2, green: 0.25, blue: 0.3))
+                let host = NSHostingView(rootView: view)
+                let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: layout.size.width + 40, height: layout.size.height + 40),
+                    styleMask: .borderless, backing: .buffered, defer: false)
+                window.contentView = host
+                window.alphaValue = 0
+                window.orderFrontRegardless()
+                host.layoutSubtreeIfNeeded()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.12))
+                guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { exit(1) }
+                host.cacheDisplay(in: host.bounds, to: bitmap)
+                try! bitmap.representation(using: .png, properties: [:])!.write(to:
+                    directory.appendingPathComponent((physical ? "hardware-" : "simulated-") + state + ".png"))
+                window.orderOut(nil)
+            }
+        }
+        print("ATTACHED ACTIVITY SNAPSHOTS OK: \(directory.path)")
+        exit(0)
+    }
+
+    private final class ActivityMotionModel: ObservableObject {
+        @Published var opened = false
+        var frames: [CGSize] = []
+    }
+
+    private struct ActivityMotionFixture: View {
+        @ObservedObject var model: ActivityMotionModel
+        let geometry: NotchGeometry
+        var body: some View {
+            ZStack(alignment: .top) {
+                if model.opened {
+                    VStack(spacing: 12) {
+                        Text("AI agents").font(.headline)
+                        Text("Claude    Codex        12:34")
+                        Text("Expanded activity content").font(.caption)
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Text("◷ 12:34").frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .modifier(NotchActivityViewport(size: CGSize(width: model.opened ? 340 : 90,
+                height: model.opened ? 260 : geometry.stripHeight), geometry: geometry))
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { model.frames.append($0) }
+            .animation(.timingCurve(0.2, 0.85, 0.2, 1, duration: NotchActivityDeckPresentation.duration), value: model.opened)
+            .frame(width: 600, height: 400, alignment: .top)
+        }
+    }
+
+    /// Measure the real shared SwiftUI viewport, including its closing frames;
+    /// a native-host-only probe cannot catch a view identity replacement.
+    private static func checkActivityViewportMotion() -> [String] {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return [] }
+        var failures: [String] = []
+        for silhouette: NotchSilhouette in [.capsule, .notch] {
+            let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                safeAreaTop: 0, cameraWidth: 0, menuBarHeight: 32, silhouette: silhouette)
+            let model = ActivityMotionModel()
+            let host = NSHostingView(rootView: ActivityMotionFixture(model: model, geometry: geometry))
+            let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 400),
+                styleMask: .borderless, backing: .buffered, defer: false)
+            window.contentView = host
+            window.alphaValue = 0.01
+            window.ignoresMouseEvents = true
+            window.orderFrontRegardless()
+            host.layoutSubtreeIfNeeded()
+            let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)
+            func advance(_ seconds: TimeInterval) {
+                let end = Date().addingTimeInterval(seconds)
+                repeat {
+                    host.layoutSubtreeIfNeeded()
+                    window.display()
+                    if let bitmap { host.cacheDisplay(in: host.bounds, to: bitmap) }
+                    RunLoop.current.run(until: min(end, Date().addingTimeInterval(1.0 / 120)))
+                } while Date() < end
+            }
+            advance(0.1)
+            for opened in [true, false, true, false] {
+                model.frames.removeAll()
+                model.opened = opened
+                advance(0.4)
+                let intermediate = model.frames.filter { $0.width > 91 && $0.width < 339 && $0.height > geometry.stripHeight + 1 && $0.height < 259 }
+                let final = CGSize(width: opened ? 340 : 90, height: opened ? 260 : geometry.stripHeight)
+                if intermediate.count < 3 || model.frames.last.map({ abs($0.width - final.width) < 0.5 && abs($0.height - final.height) < 0.5 }) != true {
+                    failures.append("\(silhouette.rawValue) viewport \(opened ? "opening" : "closing") skipped intermediate layout frames (\(intermediate.count), last \(String(describing: model.frames.last)))")
+                }
+            }
+            model.opened = true
+            advance(0.08)
+            model.opened = false
+            advance(0.4)
+            if model.frames.last.map({ abs($0.width - 90) < 0.5 && abs($0.height - geometry.stripHeight) < 0.5 }) != true {
+                failures.append("a rapidly reversed viewport failed to settle at its compact size")
+            }
+            window.orderOut(nil)
+        }
         return failures
     }
 
@@ -783,6 +954,7 @@ enum NotchPresentationProbe {
     static func runAndExit() -> Never {
         if CommandLine.arguments.contains("--call-reader") { runCallReaderAndExit() }
         if CommandLine.arguments.contains("--split-pills") { runSplitPillsAndExit() }
+        if CommandLine.arguments.contains("--attached-activities") { runAttachedActivitiesAndExit() }
         if CommandLine.arguments.contains("--camera-transitions") { runCameraTransitionsAndExit() }
         if CommandLine.arguments.contains("--media-layout") { NotchMediaPresentationProbe.runAndExit() }
         if CommandLine.arguments.contains("--mission-control") { runMissionControlAndExit() }
@@ -800,9 +972,15 @@ enum NotchPresentationProbe {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         guard let screen = NSScreen.main else { print("NOTCH PROBE FAILED: no display"); exit(1) }
+        if CommandLine.arguments.contains("--viewport-motion") {
+            app.finishLaunching()
+            let failures = checkActivityViewportMotion()
+            print(failures.isEmpty ? "ACTIVITY VIEWPORT MOTION OK" : "ACTIVITY VIEWPORT MOTION FAILED\n" + failures.joined(separator: "\n"))
+            exit(failures.isEmpty ? 0 : 1)
+        }
         if CommandLine.arguments.contains("--pill-lifecycle") {
             let failures = checkPillCollapse(screen: screen) + checkPillVisibility(screen: screen)
-                + checkIndependentPillResize(screen: screen)
+                + checkIndependentPillResize(screen: screen) + checkActivityViewportMotion()
             print(failures.isEmpty ? "PILL LIFECYCLE OK" : "PILL LIFECYCLE FAILED\n" + failures.joined(separator: "\n"))
             exit(failures.isEmpty ? 0 : 1)
         }

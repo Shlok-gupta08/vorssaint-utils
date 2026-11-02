@@ -147,6 +147,9 @@ enum NotchPresentationRefreshContract {
     }
     class State: ObservableObject {
         var hasCallActivity = false
+        var expandedPillActivity: NotchCompactActivity?
+        var pillDeckPrimaryActivity: NotchCompactActivity? { compactActivities.first }
+        var activitySatelliteGeometry: NotchGeometry { NotchAttachedActivityLayout.satelliteGeometry(geometry) }
         var showsDictation = false
         var activitySelection = NotchActivitySelection()
         var compactActivities: [NotchCompactActivity] = []

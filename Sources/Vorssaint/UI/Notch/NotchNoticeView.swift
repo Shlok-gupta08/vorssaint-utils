@@ -8,9 +8,13 @@ import SwiftUI
 struct NotchNoticeView: View {
     let notice: NotchNotice
     let geometry: NotchGeometry
+    var size: CGSize? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var wingWidth: CGFloat { geometry.noticeWingWidth(preferred: notice.preferredWingWidth) }
+    private var wingWidth: CGFloat {
+        if let size { return max(0, (size.width - geometry.noticeCameraGap) / 2) }
+        return geometry.noticeWingWidth(preferred: notice.preferredWingWidth)
+    }
     private var inset: CGFloat { min(16, wingWidth / 6) + notice.additionalOuterPadding }
     private var tint: Color {
         switch notice.event {

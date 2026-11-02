@@ -59,6 +59,7 @@ enum NotchMusicVisibilityTests {
         }
         var showsCompactActivityPicker = false
         var usesPillActivityDeck = false
+        var pillActivityDeckSize: CGSize { geometry.restingSize(showsContent: false) }
         var widenedPillActivities = Set<NotchCompactActivity>()
         var userHiddenUntilHover: Bool { NotchSupport.hidesUntilHover(in: ReviewDefaults.current) }
         var automaticallyHiddenWithoutNotch: Bool {
@@ -361,7 +362,8 @@ enum NotchMusicVisibilityTests {
         service.collapse()
         service.hasTimerActivity = true
         service.hasDownloadActivity = true
-        suite.expect(service.compactActivity == .timer, "Nothing for resting music preserves a running timer")
+        suite.expect(service.compactActivities.contains(.timer) && service.compactActivity == .downloads,
+                     "resting-music hiding preserves the timer while an active download has automatic priority")
         service.timerCompanions = [.downloads]
         service.activitySelection.select(.timer, available: service.compactActivities)
         suite.expect(service.compactCompanion == nil,
