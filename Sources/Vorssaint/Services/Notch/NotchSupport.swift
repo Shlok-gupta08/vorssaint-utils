@@ -689,9 +689,9 @@ struct NotchActivityDeckPresentation: Equatable {
         let x: CGFloat
         var id: NotchCompactActivity { activity }
     }
-    static let duration: TimeInterval = 0.5
+    static let duration: TimeInterval = 0.72
     /// Let the gently damped spring finish before releasing native bounds.
-    static let settlingDuration: TimeInterval = 0.85
+    static let settlingDuration: TimeInterval = 1.2
     let items: [Item]
     let size: CGSize
 

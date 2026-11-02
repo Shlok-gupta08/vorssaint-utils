@@ -294,6 +294,8 @@ struct NotchView: View {
                                      onReadingShapeChange: { service.refreshPresentation() })
             }
         }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.28),
+                   value: service.expanded && activity == service.expandedPillActivity)
         .modifier(NotchActivityViewport(size: size, x: x,
             geometry: focused ? service.geometry : service.activitySatelliteGeometry, focused: focused))
     }

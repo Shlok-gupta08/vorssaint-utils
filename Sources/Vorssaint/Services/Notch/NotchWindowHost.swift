@@ -25,6 +25,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     private let quickAccessContainer: NotchQuickAccessContainer?
     private var quickAccessConfiguration: NotchQuickAccessConfiguration?
     private var quickAccessNotchSize = CGSize.zero
+    private var quickAccessActivityFrame: CGRect?
     private var quickAccessAnimate = false
     private var currentGeometry: NotchGeometry
     private var appliedFrame = CGRect.zero
@@ -156,7 +157,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     }
 
     func present(size: CGSize, geometry: NotchGeometry, animated: Bool, transitionContent: NotchContentTransition = .none,
-                 quickAccess: NotchQuickAccessConfiguration? = nil, revealFromHidden: Bool = false,
+                 quickAccess: NotchQuickAccessConfiguration? = nil, quickAccessFrame: CGRect? = nil, revealFromHidden: Bool = false,
                  hideWhenSettled: Bool = false, usesGlass: Bool = false) {
         let size = geometry.coveringPhysicalCamera(size)
         canvas.minimumSurfaceWidth = geometry.physicalCameraWidth
@@ -196,6 +197,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         let withdrawing = !revealing && quickAccessConfiguration != nil && quickAccess == nil
         if revealing { quickAccessContainer?.motion.setVisible(false, animated: false) }
         quickAccessConfiguration = quickAccessContainer == nil ? nil : quickAccess
+        quickAccessActivityFrame = quickAccessFrame
         quickAccessAnimate = canAnimate
         if quickAccessConfiguration != nil { quickAccessNotchSize = size }
         if withdrawing { quickAccessContainer?.motion.setVisible(false, animated: canAnimate) }
@@ -261,18 +263,21 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             let envelope = NotchMotion.reservation(
                 CGSize(width: max(canvas.bounds.width, size.width), height: max(canvas.bounds.height, size.height)),
                 centring: size)
-            let concealed = concealForFrameChange(to: reservedFrame(mainSize: envelope, gutter: gutter, bottom: bottom),
+            let reservedGutter = max(previousGutter, gutter)
+            let reservedBottom = max(previousBottom, bottom)
+            let concealed = concealForFrameChange(to: reservedFrame(mainSize: envelope, gutter: reservedGutter, bottom: reservedBottom),
                                                   generation: generation)
             defer { if concealed { reinstateAfterFrameChange() } }
             guard generation == animationGeneration else { return }
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             canvas.setContentSize(size)
-            setFrame(mainSize: envelope, gutter: gutter, bottom: bottom)
+            setFrame(mainSize: envelope, gutter: reservedGutter, bottom: reservedBottom)
             configureQuickAccess()
             canvas.layoutSubtreeIfNeeded()
             CATransaction.commit()
             guard generation == animationGeneration else { return }
+            quickAccessContainer?.motion.setVisible(quickAccessConfiguration != nil, animated: canAnimate)
             isAnimating = true
             CATransaction.flush()
             DispatchQueue.main.asyncAfter(deadline: .now() + NotchActivityDeckPresentation.settlingDuration) { [weak self] in
@@ -487,11 +492,13 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             return
         }
         // The silhouette's shoulders sit outside its vertical body.
-        let shoulder = NotchLayout.shoulder(height: targetSize.height)
+        let activity = quickAccessActivityFrame ?? CGRect(x: -quickAccessNotchSize.width / 2, y: 0,
+            width: quickAccessNotchSize.width, height: quickAccessNotchSize.height)
+        let shoulder = NotchLayout.shoulder(height: activity.height)
         // Placed on the controls' own stage, so a resized window leaves them be.
         let islandX = canvas.convert(CGPoint(x: islandMinX(quickAccessNotchSize), y: 0), to: container.quickView).x
-        let body = CGRect(x: islandX + shoulder, y: 0,
-                          width: quickAccessNotchSize.width - shoulder * 2, height: quickAccessNotchSize.height)
+        let body = CGRect(x: islandX + quickAccessNotchSize.width / 2 + activity.minX + shoulder, y: 0,
+                          width: activity.width - shoulder * 2, height: activity.height)
         container.motion.configure(configuration, body: body,
                                    headerTop: currentGeometry.quickAccessCenterY,
                                    animated: quickAccessAnimate)

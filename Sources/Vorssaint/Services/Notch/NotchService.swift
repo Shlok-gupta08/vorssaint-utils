@@ -376,6 +376,16 @@ final class NotchService: ObservableObject {
         geometry.floats ? geometry : NotchAttachedActivityLayout.satelliteGeometry(geometry)
     }
 
+    var expandedActivityFrame: CGRect? {
+        guard expanded, usesPillActivityDeck, let activity = expandedPillActivity,
+              let primary = pillDeckPrimaryActivity else { return nil }
+        let layout = NotchActivityDeckPresentation(primary: primary, primarySize: pillSize(for: primary),
+            left: leftPillActivities.map { ($0, pillSize(for: $0)) },
+            right: rightPillActivities.map { ($0, pillSize(for: $0)) })
+        guard let item = layout.items.first(where: { $0.activity == activity }) else { return nil }
+        return CGRect(x: item.x - item.size.width / 2, y: 0, width: item.size.width, height: item.size.height)
+    }
+
     private var pillDeckCandidates: [NotchCompactActivity] {
         var result = Array(pillActivityOrder.prefix(NotchPillActivityLayout.maximumVisible))
         if expanded, let activity = expandedPillActivity, !result.contains(activity) {
@@ -2618,7 +2628,8 @@ final class NotchService: ObservableObject {
                                color: compactActivityIsVisible && compactActivity == .timer ? .systemOrange : .white)
         windowHost?.present(size: size, geometry: expanded ? expandedGeometry : geometry, animated: animated,
                             transitionContent: contentTransition,
-                            quickAccess: expanded && !usesPillActivityDeck && captureControls == nil && !access.buttons.isEmpty ? access : nil,
+                            quickAccess: expanded && captureControls == nil && !access.buttons.isEmpty ? access : nil,
+                            quickAccessFrame: expandedActivityFrame,
                             revealFromHidden: captureControls == nil
                                 && (geometry.floats || userHiddenUntilHover || automaticallyHiddenWithoutNotch
                                     || (hiddenInFullscreen && !geometry.isNotched)),

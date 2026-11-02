@@ -842,28 +842,38 @@ enum NotchPresentationProbe {
             let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
                 safeAreaTop: 0, cameraWidth: 0, menuBarHeight: 32, silhouette: silhouette)
             let model = ActivityMotionModel()
-            let host = NSHostingView(rootView: ActivityMotionFixture(model: model, geometry: geometry, side: side))
-            let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1000, height: 400),
-                styleMask: .borderless, backing: .buffered, defer: false)
-            window.contentView = host
+            let content = ActivityMotionFixture(model: model, geometry: geometry, side: side)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            let native = NotchWindowHost(content: AnyView(content), geometry: geometry,
+                size: CGSize(width: 1000, height: 400), background: surface, quickAccess: quickAccess)
+            native.setSeparatesPills(true)
+            let window = native.panel
             window.alphaValue = 0.01
             window.ignoresMouseEvents = true
             window.orderFrontRegardless()
-            host.layoutSubtreeIfNeeded()
-            let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)
+            window.contentView?.layoutSubtreeIfNeeded()
+            native.present(size: CGSize(width: 1000, height: 400), geometry: geometry, animated: false)
+            func present(_ opened: Bool) {
+                withTransaction(Transaction(animation: .spring(response: NotchActivityDeckPresentation.duration, dampingFraction: 0.9))) {
+                    model.opened = opened
+                }
+                native.present(size: CGSize(width: opened ? 1100 : 1000, height: opened ? 450 : 400),
+                    geometry: geometry, animated: true, quickAccess: opened ? .initial : nil,
+                    quickAccessFrame: opened ? CGRect(x: (side.map { ($0 == .left ? -1.0 : 1.0) * 296 } ?? 0) - 170,
+                        y: 0, width: 340, height: 260) : nil)
+            }
             func advance(_ seconds: TimeInterval) {
                 let end = Date().addingTimeInterval(seconds)
                 repeat {
-                    host.layoutSubtreeIfNeeded()
+                    window.contentView?.layoutSubtreeIfNeeded()
                     window.display()
-                    if let bitmap { host.cacheDisplay(in: host.bounds, to: bitmap) }
                     RunLoop.current.run(until: min(end, Date().addingTimeInterval(1.0 / 120)))
                 } while Date() < end
             }
             advance(0.1)
             for opened in [true, false, true, false] {
                 model.frames.removeAll()
-                model.opened = opened
+                present(opened)
                 advance(0.12)
                 if let early = model.frames.last {
                     let progress = opened ? (early.width - 90) / 250 : (340 - early.width) / 250
@@ -872,6 +882,13 @@ enum NotchPresentationProbe {
                     }
                 }
                 advance(NotchActivityDeckPresentation.settlingDuration - 0.12 + 0.05)
+                if opened {
+                    let activityX = geometry.screen.midX + (side.map { ($0 == .left ? -1.0 : 1.0) * 296 } ?? 0)
+                    if !native.quickAccessProbeInteractive || native.quickAccessProbeCenters.isEmpty
+                        || native.quickAccessProbeCenters.contains(where: { abs($0.x - activityX) > 300 }) {
+                        failures.append("expanded live activity lost its side buttons or placed them around the whole deck")
+                    }
+                }
                 let intermediate = model.frames.filter { $0.width > 91 && $0.width < 339 && $0.height > geometry.stripHeight + 1 && $0.height < 259 }
                 let final = CGSize(width: opened ? 340 : 90, height: opened ? 260 : geometry.stripHeight)
                 if intermediate.count < 3 || model.frames.last.map({ abs($0.width - final.width) < 0.5 && abs($0.height - final.height) < 0.5 }) != true {
@@ -887,14 +904,14 @@ enum NotchPresentationProbe {
                     failures.append("a \(String(describing: side)) activity left its own anchor during \(opened ? "opening" : "closing"): first \(String(describing: model.frames.first)), last \(String(describing: model.frames.last))")
                 }
             }
-            model.opened = true
+            present(true)
             advance(0.08)
-            model.opened = false
+            present(false)
             advance(NotchActivityDeckPresentation.settlingDuration + 0.05)
             if model.frames.last.map({ abs($0.width - 90) < 0.5 && abs($0.height - geometry.stripHeight) < 0.5 }) != true {
                 failures.append("a rapidly reversed viewport failed to settle at its compact size")
             }
-            window.orderOut(nil)
+            native.close()
           }
         }
         return failures

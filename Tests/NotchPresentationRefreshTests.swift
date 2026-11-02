@@ -64,8 +64,9 @@ enum NotchPresentationRefreshContract {
         }
     }
     struct NotchQuickAccessConfiguration {
-        let buttons: [Int] = []
-        static func current() -> Self { Self() }
+        let buttons: [Int]
+        static var enabled = false
+        static func current() -> Self { Self(buttons: enabled ? [1] : []) }
     }
     enum FeatureStrings {
         static func notch(_ language: Int) -> (collapse: String, open: String) { ("Close", "Open") }
@@ -123,6 +124,7 @@ enum NotchPresentationRefreshContract {
         var outlineEnabled = false
         var outlineColor = NSColor.white
         var separatesPills = false
+        var presentedQuickAccess: NotchQuickAccessConfiguration?
         var transitions: [NotchContentTransition] = []
         func setOutline(enabled: Bool, color: NSColor) {
             outlineEnabled = enabled
@@ -130,9 +132,10 @@ enum NotchPresentationRefreshContract {
         }
         func setSeparatesPills(_ enabled: Bool) { separatesPills = enabled }
         func present(size: CGSize, geometry: NotchGeometry, animated: Bool,
-                     transitionContent: NotchContentTransition, quickAccess: NotchQuickAccessConfiguration?,
+                     transitionContent: NotchContentTransition, quickAccess: NotchQuickAccessConfiguration?, quickAccessFrame: CGRect?,
                      revealFromHidden: Bool, usesGlass: Bool) {
             transitions.append(transitionContent)
+            presentedQuickAccess = quickAccess
             departsContent = transitionContent == .depart
             self.usesGlass = usesGlass
             self.revealFromHidden = revealFromHidden
@@ -148,6 +151,7 @@ enum NotchPresentationRefreshContract {
     class State: ObservableObject {
         var hasCallActivity = false
         var expandedPillActivity: NotchCompactActivity?
+        var expandedActivityFrame: CGRect? { nil }
         var pillDeckPrimaryActivity: NotchCompactActivity? { compactActivities.first }
         var activitySatelliteGeometry: NotchGeometry { NotchAttachedActivityLayout.satelliteGeometry(geometry) }
         var showsDictation = false
@@ -294,6 +298,13 @@ enum NotchPresentationRefreshContract {
         suite.expect(outlined.windowHost?.outlineEnabled == false,
                      "turning the outline off updates the existing island")
         let toolbar = Service()
+        toolbar.usesPillActivityDeck = true
+        NotchQuickAccessConfiguration.enabled = true
+        toolbar.refreshPresentation(animated: false)
+        suite.expect(toolbar.windowHost?.presentedQuickAccess != nil,
+                     "opening from a live activity retains the configured side buttons")
+        toolbar.usesPillActivityDeck = false
+        NotchQuickAccessConfiguration.enabled = false
         toolbar.geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
                                           safeAreaTop: 32, cameraWidth: 210, layout: .spacious)
         suite.expect(toolbar.expandedGeometry.headerCameraGap == 210,
