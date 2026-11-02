@@ -216,7 +216,7 @@ struct NotchView: View {
                 }.background(shape.fill(.black)).transition(.opacity)
             }
         }
-        .animation(reduceMotion ? nil : .timingCurve(0.2, 0.85, 0.2, 1, duration: NotchActivityDeckPresentation.duration), value: service.compactActivities)
+        .animation(reduceMotion ? nil : .spring(response: NotchActivityDeckPresentation.duration, dampingFraction: 0.9), value: service.compactActivities)
         .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: service.notice?.event)
     }
 
@@ -229,21 +229,21 @@ struct NotchView: View {
             right: service.rightPillActivities.map { ($0, service.pillSize(for: $0)) })
         return ZStack(alignment: .top) {
             ForEach(layout.items) { item in
-                pill(item.activity, size: item.size)
-                    .offset(x: item.x)
+                pill(item.activity, size: item.size, x: item.x)
             }
         }
+        .animation(reduceMotion ? nil : .spring(response: NotchActivityDeckPresentation.duration, dampingFraction: 0.9), value: layout)
         .frame(width: layout.size.width, height: layout.size.height, alignment: .top)
-        .animation(reduceMotion ? nil : .timingCurve(0.2, 0.85, 0.2, 1, duration: NotchActivityDeckPresentation.duration), value: layout)
+        .transaction { $0.animation = nil }
     }
 
-    private func pill(_ activity: NotchCompactActivity, size: CGSize) -> some View {
+    private func pill(_ activity: NotchCompactActivity, size: CGSize, x: CGFloat) -> some View {
         let focused = activity == service.pillDeckPrimaryActivity
         let widened = service.widenedPillActivities.contains(activity)
         // The viewport keeps its identity through open and close. Swapping a
         // Button for its label here destroys the moving frame halfway through
         // the transition and makes the card jump to its destination size.
-        return pillContent(activity, size: size, focused: focused, widened: widened)
+        return pillContent(activity, size: size, x: x, focused: focused, widened: widened)
         .onTapGesture {
             guard !service.expanded, !(focused && service.noticeExpanded) else { return }
             if focused, let notice = service.notice { service.activateNotice(notice) }
@@ -254,8 +254,7 @@ struct NotchView: View {
         .contextMenu {
             if !focused {
                 Button("Make Primary") { service.selectCompactActivity(activity) }
-                Button(widened ? (floats ? "Use Compact Pill" : "Use Compact Tab")
-                               : (floats ? "Use Wider Pill" : "Use Wider Tab")) { service.togglePillWidth(activity) }
+                Button(widened ? "Use Compact Pill" : "Use Wider Pill") { service.togglePillWidth(activity) }
                 Divider()
                 Button("Move to Left Side") { service.movePillActivity(activity, to: .left) }
                 Button("Move to Right Side") { service.movePillActivity(activity, to: .right) }
@@ -270,7 +269,7 @@ struct NotchView: View {
         .accessibilityAction { service.activatePillActivity(activity) }
     }
 
-    private func pillContent(_ activity: NotchCompactActivity, size: CGSize, focused: Bool, widened: Bool) -> some View {
+    private func pillContent(_ activity: NotchCompactActivity, size: CGSize, x: CGFloat, focused: Bool, widened: Bool) -> some View {
         ZStack(alignment: .top) {
             if service.expanded && activity == service.expandedPillActivity {
                 if service.showingCall { NotchCallPanel(service: service) }
@@ -286,16 +285,33 @@ struct NotchView: View {
                     else { NotchNoticeView(notice: notice, geometry: service.geometry, size: size) }
                 }.id(notice.event).transition(.opacity)
             } else if focused && service.geometry.isNotched {
-                NotchAttachedActivityStrip(activity: activity, geometry: service.geometry, size: size)
+                physicalActivityStrip(activity)
+                    .allowsHitTesting(false)
             } else if focused || widened {
                 activityStrip(activity, size: size)
             } else {
-                NotchPillCompactMark(activity: activity, geometry: service.geometry,
+                NotchPillCompactMark(activity: activity, geometry: service.activitySatelliteGeometry,
                                      onReadingShapeChange: { service.refreshPresentation() })
             }
         }
-        .modifier(NotchActivityViewport(size: size,
+        .modifier(NotchActivityViewport(size: size, x: x,
             geometry: focused ? service.geometry : service.activitySatelliteGeometry, focused: focused))
+    }
+
+    /// Reuse the camera-fitted strips, including their measured insets and
+    /// original compact marks, instead of adapting a simulated title row.
+    @ViewBuilder private func physicalActivityStrip(_ activity: NotchCompactActivity) -> some View {
+        let geometry = service.compactGeometry(for: activity)
+        switch activity {
+        case .music: NotchMusicStrip(service: service, displayGeometry: geometry)
+        case .agents: NotchAgentStrip(service: service, displayGeometry: geometry)
+        case .timer: NotchTimerStrip(service: service, displayGeometry: geometry)
+        case .downloads: NotchDownloadStrip(service: service, displayGeometry: geometry)
+        case .calendar: NotchCalendarStrip(service: service, displayGeometry: geometry)
+        case .watch: NotchWatchStrip(service: service, displayGeometry: geometry)
+        case .keepAwake: NotchKeepAwakeStrip(service: service, displayGeometry: geometry)
+        case .call: NotchCallStrip(geometry: geometry, size: geometry.compactActivitySize)
+        }
     }
 
     /// `size` is the capsule's; a hanging strip keeps the camera's geometry.
@@ -959,17 +975,27 @@ struct NotchActivityViewport: AnimatableModifier {
     let geometry: NotchGeometry
     let focused: Bool
     var viewportSize: CGSize
+    var viewportX: CGFloat
+#if VORSSAINT_DEVELOPMENT
+    /// Observe the painted viewport inside its offset, not the unshifted
+    /// layout bounds SwiftUI reports outside an offset modifier.
+    var motionProbe: ((CGRect) -> Void)? = nil
+#endif
 
-    init(size: CGSize, geometry: NotchGeometry, focused: Bool = false) {
+    init(size: CGSize, x: CGFloat = 0, geometry: NotchGeometry, focused: Bool = false) {
         targetSize = size
         viewportSize = size
+        viewportX = x
         self.geometry = geometry
         self.focused = focused
     }
 
-    var animatableData: AnimatablePair<CGFloat, CGFloat> {
-        get { AnimatablePair(viewportSize.width, viewportSize.height) }
-        set { viewportSize = CGSize(width: newValue.first, height: newValue.second) }
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
+        get { AnimatablePair(AnimatablePair(viewportSize.width, viewportSize.height), viewportX) }
+        set {
+            viewportSize = CGSize(width: newValue.first.first, height: newValue.first.second)
+            viewportX = newValue.second
+        }
     }
 
     private var outline: NotchShape {
@@ -984,11 +1010,23 @@ struct NotchActivityViewport: AnimatableModifier {
             .transaction { $0.animation = nil }
             .frame(width: viewportSize.width, height: viewportSize.height, alignment: .top)
             .clipShape(outline)
-            .background { outline.fill(.black) }
+            .background {
+#if VORSSAINT_DEVELOPMENT
+                if let motionProbe {
+                    outline.fill(.black)
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("activityMotionStage")) } action: { motionProbe($0) }
+                } else { outline.fill(.black) }
+#else
+                outline.fill(.black)
+#endif
+            }
             .overlay {
                 outline.stroke(.white.opacity(focused ? 0.13 : 0.08), lineWidth: 0.5)
             }
             .contentShape(outline)
+            // Position and dimensions travel in the same animatable value.
+            // A side card cannot snap to its closed centre before it shrinks.
+            .offset(x: viewportX)
             // Interpolation belongs to this modifier. Its child frames snap
             // to each interpolated viewport, without starting another spring.
             .transaction { $0.animation = nil }

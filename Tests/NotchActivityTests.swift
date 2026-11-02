@@ -59,14 +59,19 @@ enum NotchActivityTests {
                                          cameraWidth: physical ? 210 : 0, menuBarHeight: 32,
                                          compactSideRoom: 400, silhouette: .notch)
             let satellite = NotchAttachedActivityLayout.satelliteGeometry(geometry)
-            suite.expect(!satellite.isNotched && !satellite.floats && satellite.headerCameraGap == 0
-                         && satellite.headerTopInset == 0 && satellite.stripHeight == geometry.stripHeight,
-                         "a hanging satellite has a full header and no imaginary camera on either display")
+            suite.expect(!satellite.isNotched && satellite.floats && satellite.headerCameraGap == 0
+                         && satellite.headerTopInset > 0 && satellite.stripHeight == geometry.stripHeight,
+                         "side activities are floating pills with safe header padding on either notch display")
         }
-        for available: CGFloat in [210, 260, 377, 378, 450, 900] {
-            let width = NotchAttachedActivityLayout.primaryWidth(camera: 210, available: available, sideReservation: 200)
-            suite.expect(width >= 210 && width <= available && (width == 210 || width >= 378),
-                         "hardware keeps its camera covered and uses a footer instead of cramped wings")
+        for camera: CGFloat in [180, 210, 250] {
+            let hardware = NotchGeometry(screen: screen, safeAreaTop: 32, cameraWidth: camera,
+                                         menuBarHeight: 32, compactSideRoom: 400)
+            suite.expect(hardware.compactMusicGeometry.compactActivitySize.width < camera + 120
+                         && hardware.compactMusicGeometry.compactActivitySize.height == 32,
+                         "physical music uses only its artwork and waveform wings, with no title-sized expansion")
+            suite.expect(hardware.compactTimerGeometry(showsDownloads: false, wing: 52).compactActivitySize.width <= camera + 104
+                         && hardware.compactAgentGeometry(wing: 64).compactActivitySize.width <= camera + 128,
+                         "physical timer and agent activity widths follow their measured compact readouts")
         }
         let closed = NotchActivityDeckPresentation(primary: .music, primarySize: CGSize(width: 450, height: 32),
             left: [(.agents, CGSize(width: 100, height: 32))], right: [(.timer, CGSize(width: 68, height: 32))])

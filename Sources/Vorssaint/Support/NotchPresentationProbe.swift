@@ -710,7 +710,8 @@ enum NotchPresentationProbe {
                 compactSideRoom: 600, silhouette: .notch)
             let satellite = NotchAttachedActivityLayout.satelliteGeometry(geometry)
             for state in ["two", "three", "four", "wide-secondary", "centre-alert", "left-expanded", "centre-expanded", "footer"] {
-                let primary = CGSize(width: state == "footer" && physical ? 210 : physical ? 450 : 200,
+                let musicGeometry = geometry.compactMusicGeometry
+                let primary = CGSize(width: physical ? musicGeometry.compactActivitySize.width : 200,
                     height: state == "centre-expanded" ? 260 : state == "centre-alert" ? geometry.underNotchLevelSize.height
                         : state == "footer" && physical ? 64 : 32)
                 let agentSize = CGSize(width: state == "left-expanded" ? 340 : state == "wide-secondary" ? 180 : 110,
@@ -735,8 +736,7 @@ enum NotchPresentationProbe {
                                 .padding(24).padding(.top, item.activity == .music && physical ? 32 : 8)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                             } else if item.activity == .music && physical {
-                                NotchAttachedActivityStrip(activity: .music, geometry: geometry, size: item.size,
-                                    fixtureTitle: "A song title", fixtureReading: "▥")
+                                NotchMusicStrip(service: .shared, displayGeometry: musicGeometry)
                             } else if item.activity == .agents {
                                 NotchPillAgentCompactContent(providers: [.claude, .codex], reading: "12:34", geometry: satellite)
                             } else {
@@ -754,9 +754,8 @@ enum NotchPresentationProbe {
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
                         }
-                        .modifier(NotchActivityViewport(size: item.size, geometry: item.activity == .music ? geometry : satellite,
+                        .modifier(NotchActivityViewport(size: item.size, x: item.x, geometry: item.activity == .music ? geometry : satellite,
                                                        focused: item.activity == .music))
-                        .offset(x: item.x)
                     }
                     if physical {
                         // The actual hardware obscures this region; reproducing
@@ -789,29 +788,47 @@ enum NotchPresentationProbe {
 
     private final class ActivityMotionModel: ObservableObject {
         @Published var opened = false
-        var frames: [CGSize] = []
+        var frames: [CGRect] = []
     }
 
     private struct ActivityMotionFixture: View {
         @ObservedObject var model: ActivityMotionModel
         let geometry: NotchGeometry
+        let side: NotchPillSide?
         var body: some View {
+            let size = CGSize(width: model.opened ? 340 : 90, height: model.opened ? 260 : geometry.stripHeight)
+            let target: NotchCompactActivity = side == nil ? .music : .agents
+            let layout = NotchActivityDeckPresentation(primary: .music,
+                primarySize: side == nil ? size : CGSize(width: 240, height: geometry.stripHeight),
+                left: side == .left ? [(.agents, size)] : [], right: side == .right ? [(.agents, size)] : [])
             ZStack(alignment: .top) {
-                if model.opened {
-                    VStack(spacing: 12) {
-                        Text("AI agents").font(.headline)
-                        Text("Claude    Codex        12:34")
-                        Text("Expanded activity content").font(.caption)
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    Text("◷ 12:34").frame(maxWidth: .infinity, maxHeight: .infinity)
+                ForEach(layout.items) { item in
+                    ZStack(alignment: .top) {
+                        if item.activity == target && model.opened {
+                            VStack(spacing: 12) {
+                                Text("AI agents").font(.headline)
+                                Text("Claude    Codex        12:34")
+                                Text("Expanded activity content").font(.caption)
+                            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            Text("◷ 12:34").frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                    .modifier(viewport(item: item, target: target))
                 }
             }
-            .modifier(NotchActivityViewport(size: CGSize(width: model.opened ? 340 : 90,
-                height: model.opened ? 260 : geometry.stripHeight), geometry: geometry))
-            .onGeometryChange(for: CGSize.self) { $0.size } action: { model.frames.append($0) }
-            .animation(.timingCurve(0.2, 0.85, 0.2, 1, duration: NotchActivityDeckPresentation.duration), value: model.opened)
-            .frame(width: 600, height: 400, alignment: .top)
+            .animation(.spring(response: NotchActivityDeckPresentation.duration, dampingFraction: 0.9), value: layout)
+            .frame(width: layout.size.width, height: layout.size.height, alignment: .top)
+            .transaction { $0.animation = nil }
+            .frame(width: 1000, height: 400, alignment: .top)
+            .coordinateSpace(name: "activityMotionStage")
+        }
+
+        private func viewport(item: NotchActivityDeckPresentation.Item, target: NotchCompactActivity) -> NotchActivityViewport {
+            var viewport = NotchActivityViewport(size: item.size, x: item.x,
+                geometry: item.activity == .music ? geometry : NotchAttachedActivityLayout.satelliteGeometry(geometry))
+            if item.activity == target { viewport.motionProbe = { model.frames.append($0) } }
+            return viewport
         }
     }
 
@@ -821,11 +838,12 @@ enum NotchPresentationProbe {
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return [] }
         var failures: [String] = []
         for silhouette: NotchSilhouette in [.capsule, .notch] {
+          for side: NotchPillSide? in [nil, .left, .right] {
             let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
                 safeAreaTop: 0, cameraWidth: 0, menuBarHeight: 32, silhouette: silhouette)
             let model = ActivityMotionModel()
-            let host = NSHostingView(rootView: ActivityMotionFixture(model: model, geometry: geometry))
-            let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 400),
+            let host = NSHostingView(rootView: ActivityMotionFixture(model: model, geometry: geometry, side: side))
+            let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1000, height: 400),
                 styleMask: .borderless, backing: .buffered, defer: false)
             window.contentView = host
             window.alphaValue = 0.01
@@ -846,21 +864,38 @@ enum NotchPresentationProbe {
             for opened in [true, false, true, false] {
                 model.frames.removeAll()
                 model.opened = opened
-                advance(0.4)
+                advance(0.12)
+                if let early = model.frames.last {
+                    let progress = opened ? (early.width - 90) / 250 : (340 - early.width) / 250
+                    if progress < 0.03 || progress > 0.85 {
+                        failures.append("live activity motion stalled or rushed through its opening/closing at 120 ms")
+                    }
+                }
+                advance(NotchActivityDeckPresentation.settlingDuration - 0.12 + 0.05)
                 let intermediate = model.frames.filter { $0.width > 91 && $0.width < 339 && $0.height > geometry.stripHeight + 1 && $0.height < 259 }
                 let final = CGSize(width: opened ? 340 : 90, height: opened ? 260 : geometry.stripHeight)
                 if intermediate.count < 3 || model.frames.last.map({ abs($0.width - final.width) < 0.5 && abs($0.height - final.height) < 0.5 }) != true {
                     failures.append("\(silhouette.rawValue) viewport \(opened ? "opening" : "closing") skipped intermediate layout frames (\(intermediate.count), last \(String(describing: model.frames.last)))")
                 }
+                if model.frames.contains(where: { frame in
+                    switch side {
+                    case .left: return abs(frame.maxX - (500 - 120 - NotchPillActivityLayout.spacing)) > 0.75
+                    case .right: return abs(frame.minX - (500 + 120 + NotchPillActivityLayout.spacing)) > 0.75
+                    case nil: return abs(frame.midX - 500) > 0.75
+                    }
+                }) {
+                    failures.append("a \(String(describing: side)) activity left its own anchor during \(opened ? "opening" : "closing"): first \(String(describing: model.frames.first)), last \(String(describing: model.frames.last))")
+                }
             }
             model.opened = true
             advance(0.08)
             model.opened = false
-            advance(0.4)
+            advance(NotchActivityDeckPresentation.settlingDuration + 0.05)
             if model.frames.last.map({ abs($0.width - 90) < 0.5 && abs($0.height - geometry.stripHeight) < 0.5 }) != true {
                 failures.append("a rapidly reversed viewport failed to settle at its compact size")
             }
             window.orderOut(nil)
+          }
         }
         return failures
     }

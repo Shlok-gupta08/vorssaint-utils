@@ -236,7 +236,7 @@ struct NotchSettings: View {
             // Camera fitting is meaningful only around a physical housing.
             if NotchSupport.hasNotchedDisplay {
                 displayGroupHeader("Displays with a notch", symbol: "laptopcomputer",
-                                   caption: "The primary activity stays around the camera. Independent tabs on either side keep other live activities visible; hover a tab to open it in place.")
+                                   caption: "Compact activity marks and readouts fit beside the camera. Other activities appear as separate side pills; hover a pill to open it in place.")
                 SettingsCard(title: text.cameraFit) {
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
                         // Whole points keep the island centred on the camera's pixels.

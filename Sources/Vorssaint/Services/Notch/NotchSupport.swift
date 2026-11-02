@@ -667,21 +667,13 @@ enum NotchPillActivityLayout {
 }
 
 enum NotchAttachedActivityLayout {
-    static let desiredWing: CGFloat = 120
-    static let minimumWing: CGFloat = 84
-
-    static func primaryWidth(camera: CGFloat, available: CGFloat, sideReservation: CGFloat) -> CGFloat {
-        guard available >= camera + minimumWing * 2 else { return camera }
-        return min(camera + desiredWing * 2, max(camera + minimumWing * 2, available - sideReservation))
-    }
-
-    /// Satellite headers never reserve a second, imaginary camera.
+    /// Side activities float as pills even when the primary is a notch.
     static func satelliteGeometry(_ geometry: NotchGeometry) -> NotchGeometry {
         NotchGeometry(screen: geometry.screen, safeAreaTop: 0, cameraWidth: 0,
                       layout: geometry.layout, menuBarHeight: geometry.stripHeight,
                       compactSideRoom: geometry.compactSideRoom,
                       customWidth: geometry.customWidth, customHeight: geometry.customHeight,
-                      silhouette: .notch, expandedScale: geometry.expandedScale)
+                      silhouette: .capsule, expandedScale: geometry.expandedScale)
     }
 }
 
@@ -697,7 +689,9 @@ struct NotchActivityDeckPresentation: Equatable {
         let x: CGFloat
         var id: NotchCompactActivity { activity }
     }
-    static let duration: TimeInterval = 0.24
+    static let duration: TimeInterval = 0.5
+    /// Let the gently damped spring finish before releasing native bounds.
+    static let settlingDuration: TimeInterval = 0.85
     let items: [Item]
     let size: CGSize
 

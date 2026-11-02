@@ -275,7 +275,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             guard generation == animationGeneration else { return }
             isAnimating = true
             CATransaction.flush()
-            DispatchQueue.main.asyncAfter(deadline: .now() + NotchActivityDeckPresentation.duration + 0.04) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + NotchActivityDeckPresentation.settlingDuration) { [weak self] in
                 guard let self, self.animationGeneration == generation, self.isAnimating else { return }
                 self.settle()
             }
