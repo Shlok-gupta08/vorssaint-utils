@@ -523,7 +523,7 @@ final class NotchService: ObservableObject {
     /// central when the pointer entered the overall island window.
     func hoverPillActivity(_ activity: NotchCompactActivity, entered: Bool) {
         if !entered {
-            if hoveredPillActivity == activity {
+            if hoveredPillActivity == activity, pillActivityUnderPointer() != activity {
                 hoveredPillActivity = nil
                 pillHoverWork?.cancel(); pillHoverWork = nil
             }
@@ -1569,16 +1569,26 @@ final class NotchService: ObservableObject {
             if !inside { releaseNotification() }
             return
         }
+        // Start activity hover from the same native entry/move events as the
+        // resting island. SwiftUI tracking can arrive later after layout or
+        // context-menu updates; it remains a fallback, not the start clock.
+        if usesPillActivityDeck, !expanded, compactActivity != nil, !hiddenUntilHover {
+            hoverWork?.cancel(); hoverWork = nil
+            if inside, let activity = pillActivityUnderPointer() {
+                hoverPillActivity(activity, entered: true)
+            } else if let activity = hoveredPillActivity {
+                hoverPillActivity(activity, entered: false)
+            }
+            if !inside { releaseNotification() }
+            return
+        }
         // Overlapping tracking areas can report the same presence repeatedly.
         // Keep the first deadline until the pointer actually crosses the boundary.
         if inside == wasInside, let hoverWork, !hoverWork.isCancelled { return }
         hoverWork?.cancel(); hoverWork = nil
-        // The visible choices replace automatic opening while several
-        // activities compete. Clicking the strip still opens its full page.
-        // A visible deck lets each pill decide what hover opens. While the
-        // deck itself is hidden, the global top-centre activation area still
-        // has to reveal it.
-        if showsCompactActivityPicker || (usesPillActivityDeck && !expanded && compactActivity != nil && !hiddenUntilHover) {
+        // The legacy picker needs an explicit choice. A hidden deck still
+        // uses the global top-centre activation area to reveal itself.
+        if showsCompactActivityPicker {
             if !inside { releaseNotification() }
             return
         }
@@ -1646,6 +1656,7 @@ final class NotchService: ObservableObject {
         // ends, and each followed move would tell it the pointer left, which
         // restarts its dismissal under a pointer that came back to reopen it.
         let watching = (hoverEmphasized && captureHover == nil
+                || usesPillActivityDeck && !expanded && compactActivity != nil && inside
                 || !entered && NotchSupport.closesOnPointerExit(expanded: expanded, peeking: peeking, openedByHover: openedByHover))
             && captureControls == nil && !pinned && !heldDrag && !hiddenUntilHover && !keepsWorkingSurface
             // Once watching, a pointer that leaves and slips back unreported is still seen.

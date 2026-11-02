@@ -204,6 +204,7 @@ enum NotchHoverTests {
         cancelledPill.usesPillActivityDeck = true
         cancelledPill.compactActivities = [.music, .agents]
         cancelledPill.hoverPillActivity(.agents, entered: true)
+        cancelledPill.pointerPill = nil
         cancelledPill.hoverPillActivity(.agents, entered: false)
         DispatchQueue.main.advance(0.1)
         expect(cancelledPill.openings == 0, "leaving a split pill cancels its pending expansion")
@@ -222,6 +223,36 @@ enum NotchHoverTests {
         movedPointer.pointerPill = .music
         DispatchQueue.main.advance(0.1)
         expect(movedPointer.openings == 0, "a pending side hover cannot open after the pointer moves to centre")
+
+        for physical in [false, true] {
+            let nativeEntry = fixture(physical: physical)
+            nativeEntry.usesPillActivityDeck = true
+            nativeEntry.compactActivity = .music
+            nativeEntry.compactActivities = [.music, .agents]
+            nativeEntry.pointerPill = .music
+            UserDefaults.standard.delay = 1
+            nativeEntry.hover(true) // No SwiftUI hover callback has arrived.
+            DispatchQueue.main.advance(0.04)
+            nativeEntry.hoverPillActivity(.music, entered: false) // Stale view exit after layout.
+            DispatchQueue.main.advance(0.021)
+            expect(nativeEntry.openings == 1 && nativeEntry.requestedModule == .music,
+                   "native activity entry starts the short hover deadline without waiting for SwiftUI tracking on either display")
+
+            let crossing = fixture(physical: physical)
+            crossing.usesPillActivityDeck = true
+            crossing.compactActivity = .music
+            crossing.compactActivities = [.music, .agents]
+            crossing.pointerPill = .agents
+            crossing.hover(true)
+            DispatchQueue.main.advance(0.03)
+            crossing.pointerPill = .music
+            crossing.hover(false) // Native movement inside the same window.
+            DispatchQueue.main.advance(0.031)
+            expect(crossing.openings == 0, "crossing pills cancels the previous native hover target")
+            DispatchQueue.main.advance(0.03)
+            expect(crossing.openings == 1 && crossing.requestedModule == .music,
+                   "movement from a side activity opens the centre on its own short deadline")
+        }
 
         let levelTray = fixture(physical: true)
         let beforeLevel = levelTray.surfaceSize
