@@ -1701,6 +1701,10 @@ enum NotchTests {
         defaults.set(layout.encoded, forKey: DefaultsKey.notchQuickAccessLayout)
         suite.expect(NotchQuickAccessConfiguration.stored(in: defaults) == layout,
                "the visual layout stores all three edges and direct actions together")
+        let freeLeft = layout.avoidingActivityPills(leftOccupied: false, rightOccupied: true)
+        suite.expect(freeLeft.buttons.map(\.id) == [placements[0].id, placements[2].id]
+                     && NotchQuickAccessConfiguration.stored(in: defaults) == layout,
+                     "temporary side activity occupancy keeps shortcut identities and the saved layout intact")
         layout.move(placements[0].id, to: .bottom, before: placements[2].id)
         suite.expect(layout.buttons.first(where: { $0.id == placements[0].id })?.side == .bottom
                && layout.buttons.filter { $0.side == .bottom }.map(\.id) == [placements[0].id, placements[2].id],

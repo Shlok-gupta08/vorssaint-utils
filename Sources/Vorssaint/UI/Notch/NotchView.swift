@@ -445,7 +445,7 @@ struct NotchView: View {
 
     private var header: some View {
         HStack(spacing: service.expandedGeometry.headerCameraGap > 0 ? 0 : 6) {
-            let quickActions = NotchQuickAccessConfiguration.current().actions
+            let quickActions = service.expandedQuickAccess.actions
             HStack(spacing: 6) {
                 if service.showingSections {
                     NotchIconButton(symbol: "chevron.left", title: l10n.s.obBack, action: service.toggleSections)

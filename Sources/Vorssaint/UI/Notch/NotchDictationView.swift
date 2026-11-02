@@ -3,7 +3,7 @@
 
 import SwiftUI
 
-/// An opaque recording surface. The island's native host owns its geometry;
+/// Recording content. The island's native host owns its contour and backdrop;
 /// fixed frequency bars respond in place to microphone audio.
 struct NotchDictationView: View {
     let topInset: CGFloat
@@ -76,7 +76,7 @@ struct NotchDictationView: View {
         }
         .padding(.horizontal, NotchLayout.horizontalInset).padding(.top, topInset + 10).padding(.bottom, NotchLayout.bottomInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color.black).accessibilityIdentifier("notch.dictation")
+        .accessibilityIdentifier("notch.dictation")
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: speech.phase)
     }
 

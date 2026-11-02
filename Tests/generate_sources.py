@@ -486,6 +486,10 @@ def main():
           + declaration(shelf, "    func completeInternalDrag(")
           + "}\n}\n")
     notch = "Sources/Vorssaint/Services/Notch/NotchService.swift"
+    write("NotchQuickAccessOccupancy.swift", "extension NotchPresentationRefreshContract.NotchQuickAccessConfiguration {\n"
+          + declaration("Sources/Vorssaint/Services/Notch/NotchSupport.swift", "    func avoidingActivityPills(",
+                        scope="struct NotchQuickAccessConfiguration:")
+          + "}\n")
     write("NotchNotificationSizing.swift", "import AppKit\nextension NotchNotificationTests {\nfinal class SizingService: SizingState {\n"
           + "".join(declaration(notch, prefix) for prefix in ["    func pillSize(",
               "    private func capsuleNoticeSize(", "    func capsuleNoticeSurface("])
@@ -674,6 +678,7 @@ def main():
           + "}\n}\n")
     write("NotchPresentationRefresh.swift", "import AppKit\nimport Foundation\nimport Combine\nimport SwiftUI\n"
           + "extension NotchPresentationRefreshContract {\nfinal class Service: State {\n"
+          + declaration(notch, "    var expandedQuickAccess:")
           + "func hover(_ entered: Bool) {\nlet wasInside = inside\n"
           + "inside = windowHost?.containsHover(NSEvent.mouseLocation) == true\n"
           + "hoverState.update(pointerInside: inside)\nupdateCaptureControlsHover(wasInside: wasInside)\n}\n"
@@ -725,6 +730,7 @@ def main():
           + "final class Service: State {\n"
           + "func syncWithPreferences() { presentationSyncs += 1; refreshModules(); syncVisibleConsumers(); NotchTimerService.shared.syncWithPreferences() }\n"
           + declaration(notch, "    var usesPillActivityDeck:")
+          + declaration(notch, "    private func receiveDictationPhase(").replace("    private ", "    ", 1)
           + availability_declaration(notch, "    private func metricIsAvailable(")
           + declaration(notch, "    private func refreshModules(")
               .replace("NotchSupport.modules()", "NotchSupport.modules(in: ReviewDefaults.current)")

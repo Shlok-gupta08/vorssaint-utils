@@ -173,10 +173,9 @@ final class NotchService: ObservableObject {
     private var pageLayers: [NotchModule: () -> Void] = [:]
     private var trackingMenu = false
     private var fileInteractionActive = false
-    /// A section's title follows the sections button unless the same action
-    /// floats beside the island. Read with the floating buttons rather than on
-    /// every layout pass, which would decode them each time.
-    private var headerShowsSectionsButton = false
+    /// Decode the saved layout once per presentation update, rather than
+    /// repeatedly while measuring headers and activity viewports.
+    private var configuredQuickAccess = NotchQuickAccessConfiguration.current()
     private var keepsWorkingSurface: Bool {
         pinned || trackingMenu || NSApp.modalWindow != nil || panel?.attachedSheet != nil
             || NotchLyricsService.shared.isImporting
@@ -385,6 +384,14 @@ final class NotchService: ObservableObject {
             right: rightPillActivities.map { ($0, pillSize(for: $0)) })
         guard let item = layout.items.first(where: { $0.activity == activity }) else { return nil }
         return CGRect(x: item.x - item.size.width / 2, y: 0, width: item.size.width, height: item.size.height)
+    }
+
+    var expandedQuickAccess: NotchQuickAccessConfiguration {
+        let configuration = configuredQuickAccess
+        guard expanded, usesPillActivityDeck, let primary = pillDeckPrimaryActivity,
+              expandedPillActivity == primary else { return configuration }
+        return configuration.avoidingActivityPills(leftOccupied: !leftPillActivities.isEmpty,
+                                                   rightOccupied: !rightPillActivities.isEmpty)
     }
 
     private var pillDeckCandidates: [NotchCompactActivity] {
@@ -882,7 +889,7 @@ final class NotchService: ObservableObject {
         guard !showingSections else { return 0 }
         let detail = showingAppPanel || selectedMetric != nil
         guard detail || modules.isEmpty else {
-            return NotchLayout.headerTitleWidth(selected.title(L10n.shared.language), button: headerShowsSectionsButton)
+            return NotchLayout.headerTitleWidth(selected.title(L10n.shared.language), button: !expandedQuickAccess.actions.contains(.explore))
         }
         return NotchLayout.headerTitleWidth(detailTitle, font: NotchLayout.detailTitleFont, button: detail)
     }
@@ -1489,14 +1496,14 @@ final class NotchService: ObservableObject {
         pinned = false
         hoverWork?.cancel(); hoverWork = nil
         if noticeExpanded { noticeWork?.cancel(); noticeWork = nil }
-        let releasesFocusBeforeMotion = geometry.floats || usesPillActivityDeck
+        let releasesFocusBeforeMotion = geometry.floats || usesPillActivityDeck || showsDictation
         if releasesFocusBeforeMotion {
             // AppKit can cancel layer animations while the panel resigns key.
             // Release focus before starting the floating pill's closing motion.
             panel?.acceptsKeyFocus = false
             panel?.resignKey()
         }
-        mutatePresentation(transitionContent: expanded || peeking || noticeExpanded ? .dismiss : .none,
+        mutatePresentation(transitionContent: showsDictation ? .replace : expanded || peeking || noticeExpanded ? .dismiss : .none,
                            animatesPills: usesPillActivityDeck || fullscreenCompact) {
             if noticeExpanded { notice = nil; noticeExpanded = false }
             expanded = false
@@ -2625,6 +2632,11 @@ final class NotchService: ObservableObject {
     }
 
     func refreshPresentation(animated: Bool = true, transitionContent: NotchContentTransition = .none) {
+        let configuration = NotchQuickAccessConfiguration.current()
+        if configuredQuickAccess != configuration {
+            objectWillChange.send()
+            configuredQuickAccess = configuration
+        }
         activitySelection.reconcile(available: compactActivities)
         if fullscreenCompact {
             finishMusicDeparture()
@@ -2658,7 +2670,7 @@ final class NotchService: ObservableObject {
             removeScreenEdgeClickMonitors()
             return
         }
-        let access = NotchQuickAccessConfiguration.current()
+        let access = expandedQuickAccess
         let size = surfaceSize
         let contentTransition = usesPillActivityDeck || fullscreenCompact ? NotchContentTransition.none
             : compactMusicTransition(transitionContent, animated: animated)
@@ -3214,7 +3226,6 @@ final class NotchService: ObservableObject {
         if sameMenuBar { next.compactSideRoom = geometry.compactSideRoom }
         let access = NotchQuickAccessConfiguration.current()
         next.quickAccessBottomInset = access.hasBottom ? NotchQuickAccessLayout.gutter : 0
-        headerShowsSectionsButton = !access.actions.contains(.explore)
         if next != geometry { menuSpaceGeneration += 1; geometry = next }
         // A new camera or bar, such as a notch fit being adjusted, measures the
         // menus again at once rather than leaving the wings off until the timer.
@@ -3632,6 +3643,27 @@ final class NotchService: ObservableObject {
         appDelegate()?.showUpdatePreview()
     }
 
+    private func receiveDictationPhase(_ phase: DictationPhase) {
+        guard phase != dictationPhase else { return }
+        let wasPresenting = dictationPhase.presentsIsland
+        if phase.presentsIsland {
+            noticeWork?.cancel(); noticeWork = nil
+            notice = nil
+            departingNotice = nil
+            peeking = false
+        }
+        // Resolve the incoming surface before closing a page. Closing first
+        // sent a resize to the compact activity deck, immediately reversed by
+        // a second resize to dictation, with two different backdrop modes.
+        dictationPhase = phase
+        if phase.presentsIsland, expanded, captureControls == nil, !heldDrag {
+            collapse()
+            return
+        }
+        refreshPresentation(transitionContent: !wasPresenting && phase.presentsIsland ? .reveal
+                            : wasPresenting && !phase.presentsIsland ? .dismiss : .none)
+    }
+
     private func bindEvents() {
         subscriptions.removeAll()
         NotchCallService.shared.$sessions.removeDuplicates().receive(on: DispatchQueue.main)
@@ -3648,16 +3680,7 @@ final class NotchService: ObservableObject {
         if AppFeature.dictation.isAvailable {
             DictationService.shared.$phase.removeDuplicates().receive(on: DispatchQueue.main)
                 .sink { [weak self] phase in
-                    guard let self else { return }
-                    if phase.presentsIsland {
-                        self.noticeWork?.cancel()
-                        self.notice = nil
-                        self.departingNotice = nil
-                        if self.expanded { self.collapse() }
-                        self.peeking = false
-                    }
-                    self.dictationPhase = phase
-                    self.refreshPresentation()
+                    self?.receiveDictationPhase(phase)
                 }.store(in: &subscriptions)
         } else { dictationPhase = .idle }
         if modules.contains(.timer) {

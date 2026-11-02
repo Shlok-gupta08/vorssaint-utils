@@ -1326,6 +1326,14 @@ struct NotchQuickAccessConfiguration: Equatable, Codable {
     var actions: [NotchQuickAction] { buttons.compactMap(\.action) }
     var hasBottom: Bool { buttons.contains { $0.side == .bottom } }
 
+    /// Activity pills occupy only their own side. Keep the person's other
+    /// shortcuts in place without changing their saved layout or IDs.
+    func avoidingActivityPills(leftOccupied: Bool, rightOccupied: Bool) -> Self {
+        Self(buttons: buttons.filter {
+            !($0.side == .left && leftOccupied) && !($0.side == .right && rightOccupied)
+        })
+    }
+
     init(buttons: [NotchQuickButton]) { self.buttons = buttons }
 
     /// Stable IDs allow the previous single-side preferences to remain live

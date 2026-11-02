@@ -63,10 +63,12 @@ enum NotchPresentationRefreshContract {
             self.playback = playback; self.artwork = artwork; self.tint = tint
         }
     }
-    struct NotchQuickAccessConfiguration {
-        let buttons: [Int]
+    struct NotchQuickAccessConfiguration: Equatable {
+        let buttons: [NotchQuickButton]
         static var enabled = false
-        static func current() -> Self { Self(buttons: enabled ? [1] : []) }
+        static func current() -> Self { Self(buttons: enabled ? [
+            .init(action: .explore, side: .left), .init(action: .settings, side: .right),
+            .init(action: .module(.music), side: .bottom)] : []) }
     }
     enum FeatureStrings {
         static func notch(_ language: Int) -> (collapse: String, open: String) { ("Close", "Open") }
@@ -150,6 +152,7 @@ enum NotchPresentationRefreshContract {
     }
     class State: ObservableObject {
         var hasCallActivity = false
+        var configuredQuickAccess = NotchQuickAccessConfiguration.current()
         var expandedPillActivity: NotchCompactActivity?
         var expandedActivityFrame: CGRect? { nil }
         var pillDeckPrimaryActivity: NotchCompactActivity? { compactActivities.first }
@@ -160,6 +163,8 @@ enum NotchPresentationRefreshContract {
         func compactCompanions(of primary: NotchCompactActivity) -> [NotchCompactActivity] { [] }
         var showsCompactActivityPicker = false
         var usesPillActivityDeck = false
+        var leftPillActivities: [NotchCompactActivity] = []
+        var rightPillActivities: [NotchCompactActivity] = []
         var widenedPillActivities = Set<NotchCompactActivity>()
         var userHiddenUntilHover: Bool {
             UserDefaults.standard.hides && UserDefaults.standard.bool(forKey: DefaultsKey.notchOpenOnHover)
@@ -303,6 +308,24 @@ enum NotchPresentationRefreshContract {
         toolbar.refreshPresentation(animated: false)
         suite.expect(toolbar.windowHost?.presentedQuickAccess != nil,
                      "opening from a live activity retains the configured side buttons")
+        toolbar.compactActivities = [.music, .timer, .agents]
+        toolbar.expandedPillActivity = .music
+        toolbar.rightPillActivities = [.timer]
+        toolbar.refreshPresentation(animated: false)
+        suite.expect(toolbar.windowHost?.presentedQuickAccess?.buttons.map(\.side) == [.left, .bottom],
+                     "a centre and right activity leave the left shortcuts and bottom shortcut available")
+        toolbar.leftPillActivities = [.agents]
+        toolbar.refreshPresentation(animated: false)
+        suite.expect(toolbar.windowHost?.presentedQuickAccess?.buttons.map(\.side) == [.bottom],
+                     "a third activity on the left keeps its pill and hides only the occupied side shortcuts")
+        toolbar.rightPillActivities = []
+        toolbar.refreshPresentation(animated: false)
+        suite.expect(toolbar.windowHost?.presentedQuickAccess?.buttons.map(\.side) == [.right, .bottom],
+                     "a free right side restores its own shortcuts independently of the left activity")
+        toolbar.leftPillActivities = []
+        toolbar.refreshPresentation(animated: false)
+        suite.expect(toolbar.windowHost?.presentedQuickAccess?.buttons.count == 3,
+                     "finishing the side activities restores every configured shortcut")
         toolbar.usesPillActivityDeck = false
         NotchQuickAccessConfiguration.enabled = false
         toolbar.geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),

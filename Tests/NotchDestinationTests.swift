@@ -8,7 +8,7 @@ import Carbon.HIToolbox
 /// doubles. Feature choices live only in a disposable test preferences domain.
 enum NotchDestinationContract {
     enum ReviewDefaults { static var current: UserDefaults! }
-    enum NotchContentTransition { case none, reveal, replace }
+    enum NotchContentTransition { case none, reveal, replace, dismiss }
     final class Panel {
         var isKeyWindow = true
         var acceptsKeyFocus = false
@@ -66,7 +66,10 @@ enum NotchDestinationContract {
         var dictationPhase = DictationPhase.idle
         var showsDictation: Bool { dictationPhase.presentsIsland }
         var acceptsUserInteraction = true
-        func collapse() { expanded = false }
+        var phasesAtCollapse: [DictationPhase] = []
+        var presentationTransitions: [NotchContentTransition] = []
+        func collapse() { phasesAtCollapse.append(dictationPhase); expanded = false }
+        func refreshPresentation(transitionContent: NotchContentTransition) { presentationTransitions.append(transitionContent) }
         var hiddenInFullscreen = false
         var running = true
         var session = NotchSessionState()
@@ -87,6 +90,7 @@ enum NotchDestinationContract {
         var openedByHover = false
         var inside = false
         var notice: NotchNotice?
+        var departingNotice: NotchNotice?
         var noticeExpanded = false
         var noticeWork: DispatchWorkItem?
         var compactActivity: NotchCompactActivity?
@@ -127,6 +131,24 @@ enum NotchDestinationContract {
         for (key, value) in Defaults.registeredDefaults where key.hasPrefix("notch") { defaults.set(value, forKey: key) }
         for feature in AppFeature.allCases { defaults.set(true, forKey: feature.availabilityKey) }
         defaults.set(true, forKey: DefaultsKey.notchEnabled)
+        let recording = Service()
+        recording.expanded = true
+        recording.peeking = true
+        recording.receiveDictationPhase(.recording)
+        suite.expect(recording.phasesAtCollapse == [.recording] && !recording.peeking
+                     && recording.presentationTransitions.isEmpty,
+                     "dictation replaces an open page directly without first resizing back to compact activities")
+        recording.receiveDictationPhase(.processing)
+        recording.receiveDictationPhase(.processing)
+        suite.expect(recording.presentationTransitions == [.none],
+                     "dictation phase updates do not restart activation or repeat unchanged phase transitions")
+        recording.receiveDictationPhase(.idle)
+        suite.expect(recording.presentationTransitions.last == .dismiss,
+                     "dictation dismissal explicitly transitions back to the resting surface")
+        let restingRecording = Service()
+        restingRecording.receiveDictationPhase(.recording)
+        suite.expect(restingRecording.presentationTransitions == [.reveal],
+                     "dictation activation from rest uses the normal native reveal")
         let idle = Service()
         suite.expect(!idle.usesPillActivityDeck,
                      "an idle island retains the native panel motion instead of entering the independent activity renderer")

@@ -37,7 +37,7 @@ enum NotchMusicVisibilityTests {
         let selectedTool = Tool()
         var onSelectionProgressChange: ((Bool) -> Void)?
     }
-    enum NotchContentTransition { case none, dismiss }
+    enum NotchContentTransition { case none, dismiss, replace }
     struct Host { func containsHover(_ point: CGPoint) -> Bool { false } }
     struct Panel {
         var acceptsKeyFocus = false
