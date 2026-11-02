@@ -261,6 +261,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         let sameScreen = geometry.screen == currentGeometry.screen
         animationGeneration += 1
         let generation = animationGeneration
+        let previousSize = targetSize
         targetSize = size
         currentGeometry = geometry
         resizeCount += 1
@@ -272,7 +273,8 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             isAnimating = false
             canvas.stopMotion()
             let envelope = NotchMotion.reservation(
-                CGSize(width: max(canvas.bounds.width, size.width), height: max(canvas.bounds.height, size.height)),
+                CGSize(width: max(canvas.bounds.width, size.width + NotchMotion.overshootLimit * 2),
+                       height: max(canvas.bounds.height, size.height + NotchMotion.overshootLimit)),
                 centring: size)
             let reservedGutter = max(previousGutter, gutter)
             let reservedBottom = max(previousBottom, bottom)
@@ -291,7 +293,8 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             quickAccessContainer?.motion.setVisible(quickAccessConfiguration != nil, animated: canAnimate)
             isAnimating = true
             CATransaction.flush()
-            DispatchQueue.main.asyncAfter(deadline: .now() + NotchActivityDeckPresentation.settlingDuration) { [weak self] in
+            let settling = NotchMotion.settlingTime(from: previousSize, to: size) + 0.06
+            DispatchQueue.main.asyncAfter(deadline: .now() + settling) { [weak self] in
                 guard let self, self.animationGeneration == generation, self.isAnimating else { return }
                 self.settle()
             }

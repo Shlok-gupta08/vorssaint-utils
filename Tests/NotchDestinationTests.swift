@@ -60,6 +60,7 @@ enum NotchDestinationContract {
     class State {
         var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900), safeAreaTop: 0, cameraWidth: 0)
         var expandedPillActivity: NotchCompactActivity?
+        var usesPillActivityDeck = false
         var showingCall = false
         var dictationPhase = DictationPhase.idle
         var showsDictation: Bool { dictationPhase.presentsIsland }
@@ -125,6 +126,12 @@ enum NotchDestinationContract {
         for (key, value) in Defaults.registeredDefaults where key.hasPrefix("notch") { defaults.set(value, forKey: key) }
         for feature in AppFeature.allCases { defaults.set(true, forKey: feature.availabilityKey) }
         defaults.set(true, forKey: DefaultsKey.notchEnabled)
+        let activityPage = Service()
+        activityPage.open(.music, activity: .music)
+        activityPage.usesPillActivityDeck = true
+        activityPage.open(.controls)
+        suite.expect(activityPage.expandedPillActivity == .music && activityPage.selected == .controls,
+                     "music-to-controls navigation stays in its existing activity surface without a rendering-mode swap")
         scratchpadContracts(defaults: defaults, suite: suite)
         reopeningContracts(defaults: defaults, suite: suite)
         stepBackContracts(suite)

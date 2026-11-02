@@ -852,7 +852,11 @@ enum NotchPresentationProbe {
             window.contentView?.layoutSubtreeIfNeeded()
             native.present(size: CGSize(width: 1000, height: 400), geometry: geometry, animated: false)
             func present(_ opened: Bool) {
-                withTransaction(Transaction(animation: .spring(response: NotchActivityDeckPresentation.duration, dampingFraction: 0.9))) {
+                // Some normal-panel entry paths suppress SwiftUI animation.
+                // Activity motion must still use the native motion clock.
+                var transaction = Transaction(animation: nil)
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
                     model.opened = opened
                 }
                 native.present(size: CGSize(width: opened ? 1100 : 1000, height: opened ? 450 : 400),

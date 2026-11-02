@@ -233,7 +233,6 @@ struct NotchView: View {
                 pill(item.activity, size: item.size, x: item.x)
             }
         }
-        .animation(reduceMotion ? nil : .spring(response: NotchActivityDeckPresentation.duration, dampingFraction: 0.9), value: layout)
         .frame(width: layout.size.width, height: layout.size.height, alignment: .top)
         .transaction { $0.animation = nil }
     }
@@ -976,12 +975,18 @@ struct NotchActivityPicker: View {
 
 /// A stable card viewport reveals a page already laid out at its destination
 /// size, keeping expensive page layout out of the animation's frame loop.
-struct NotchActivityViewport: AnimatableModifier {
+struct NotchActivityViewport: ViewModifier {
     let targetSize: CGSize
     let geometry: NotchGeometry
     let focused: Bool
-    var viewportSize: CGSize
-    var viewportX: CGFloat
+    let targetX: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var fromSize: CGSize
+    @State private var fromX: CGFloat
+    @State private var destinationSize: CGSize
+    @State private var destinationX: CGFloat
+    @State private var started: Date = .distantPast
+    @State private var moving = false
 #if VORSSAINT_DEVELOPMENT
     /// Observe the painted viewport inside its offset, not the unshifted
     /// layout bounds SwiftUI reports outside an offset modifier.
@@ -990,31 +995,39 @@ struct NotchActivityViewport: AnimatableModifier {
 
     init(size: CGSize, x: CGFloat = 0, geometry: NotchGeometry, focused: Bool = false) {
         targetSize = size
-        viewportSize = size
-        viewportX = x
+        targetX = x
+        _fromSize = State(initialValue: size)
+        _fromX = State(initialValue: x)
+        _destinationSize = State(initialValue: size)
+        _destinationX = State(initialValue: x)
         self.geometry = geometry
         self.focused = focused
     }
 
-    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
-        get { AnimatablePair(AnimatablePair(viewportSize.width, viewportSize.height), viewportX) }
-        set {
-            viewportSize = CGSize(width: newValue.first.first, height: newValue.first.second)
-            viewportX = newValue.second
-        }
+    private func pose(at date: Date) -> (size: CGSize, x: CGFloat) {
+        guard moving else { return (destinationSize, destinationX) }
+        let elapsed = max(0, date.timeIntervalSince(started))
+        let size = NotchMotion.size(at: elapsed, from: fromSize, to: destinationSize)
+        let spring = fromSize.width != destinationSize.width
+            ? NotchMotion.spring(from: fromSize.width, to: destinationSize.width, width: true)
+            : NotchMotion.growingWidth.limited(travel: abs(destinationX - fromX), limit: NotchMotion.overshootLimit)
+        return (size, fromX + (destinationX - fromX) * CGFloat(spring.progress(at: elapsed)))
     }
 
-    private var outline: NotchShape {
-        var shape = NotchShape.island(height: viewportSize.height, geometry: geometry)
+    private func outline(height: CGFloat) -> NotchShape {
+        var shape = NotchShape.island(height: height, geometry: geometry)
         if focused && geometry.isNotched { shape.minimumBodyWidth = geometry.physicalCameraWidth }
         return shape
     }
 
     func body(content: Content) -> some View {
+        TimelineView(.animation(paused: !moving)) { clock in
+            let value = pose(at: clock.date)
+            let outline = outline(height: value.size.height)
         content
             .frame(width: targetSize.width, height: targetSize.height, alignment: .top)
             .transaction { $0.animation = nil }
-            .frame(width: viewportSize.width, height: viewportSize.height, alignment: .top)
+            .frame(width: value.size.width, height: value.size.height, alignment: .top)
             .clipShape(outline)
             .background {
 #if VORSSAINT_DEVELOPMENT
@@ -1032,10 +1045,27 @@ struct NotchActivityViewport: AnimatableModifier {
             .contentShape(outline)
             // Position and dimensions travel in the same animatable value.
             // A side card cannot snap to its closed centre before it shrinks.
-            .offset(x: viewportX)
+            .offset(x: value.x)
             // Interpolation belongs to this modifier. Its child frames snap
             // to each interpolated viewport, without starting another spring.
             .transaction { $0.animation = nil }
+        }
+        .onChange(of: CGRect(x: targetX, y: 0, width: targetSize.width, height: targetSize.height)) {
+            let now = Date()
+            let current = pose(at: now)
+            fromSize = current.size
+            fromX = current.x
+            destinationSize = targetSize
+            destinationX = targetX
+            started = now
+            moving = !reduceMotion
+            let token = now
+            let settling = max(NotchMotion.settlingTime(from: current.size, to: targetSize), 0.65) + 0.04
+            DispatchQueue.main.asyncAfter(deadline: .now() + settling) {
+                guard started == token else { return }
+                moving = false
+            }
+        }
     }
 }
 

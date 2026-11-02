@@ -1427,9 +1427,11 @@ final class NotchService: ObservableObject {
         // or a capture preview under the pointer can be told the pointer left.
         // An open page is followed again only from an exit report.
         if !expanded { removeHoverExitMonitors() }
+        let existingActivity = expanded && usesPillActivityDeck && !appPanel && !sections && metric == nil
+            ? expandedPillActivity : nil
         mutatePresentation(transitionContent: changesPresentation ? (expanded ? .replace : .reveal) : .none,
                            animatesPills: activity != nil || expandedPillActivity != nil) {
-            expandedPillActivity = activity
+            expandedPillActivity = activity ?? existingActivity
                 ?? (compactActivity?.module == destination && !appPanel && !sections && metric == nil ? compactActivity : nil)
             showingCall = activity == .call || (module == nil && compactActivity == .call && destination == .controls)
             showingAppPanel = appPanel
@@ -2451,8 +2453,7 @@ final class NotchService: ObservableObject {
     private func mutatePresentation(transitionContent: NotchContentTransition = .none,
                                     animatesPills: Bool = false, _ change: () -> Void) {
         let motion = animatesPills && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        var transaction = Transaction(animation: motion
-            ? .spring(response: NotchActivityDeckPresentation.duration, dampingFraction: 0.9) : nil)
+        var transaction = Transaction(animation: nil)
         transaction.disablesAnimations = !motion
         withTransaction(transaction, change)
         refreshPresentation(transitionContent: transitionContent)
