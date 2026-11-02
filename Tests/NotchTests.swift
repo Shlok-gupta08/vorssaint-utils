@@ -2049,6 +2049,25 @@ enum NotchTests {
                 suite.expect(tallest > to.height, "a lengthening island stretches past its size before settling")
             }
         }
+        var channel = NotchSpringChannel(90)
+        channel.retarget(340, at: 0, spring: NotchMotion.growingWidth)
+        let beforeTurn = channel.sample(at: 0.12)
+        channel.retarget(90, at: 0.12, spring: NotchMotion.shrinkingWidth)
+        let afterTurn = channel.sample(at: 0)
+        suite.expect(abs(beforeTurn.value - afterTurn.value) < 0.0001
+                     && abs(beforeTurn.velocity - afterTurn.velocity) < 0.0001,
+                     "an interrupted pill spring preserves both position and momentum")
+        suite.expect(channel.sample(at: 0.001).value > afterTurn.value,
+                     "a reversing pill decelerates before returning instead of instantly changing direction")
+        let settledChannel = channel.sample(at: channel.settlingTime)
+        suite.expect(abs(settledChannel.value - 90) < 0.11 && abs(settledChannel.velocity) < 1.01,
+                     "a retargeted spring settles by position and velocity instead of an arbitrary timeout")
+        for time in [0.0, 0.04, 0.12, 0.3, 0.6] {
+            var original = NotchSpringChannel(0)
+            original.retarget(1, at: 0, spring: NotchMotion.growingWidth)
+            suite.expect(abs(original.sample(at: time).value - NotchMotion.growingWidth.progress(at: time)) < 0.00001,
+                         "uninterrupted motion keeps the existing spring timing")
+        }
         let long = NotchMotion.envelope(from: CGSize(width: 200, height: 32), to: CGSize(width: 1_400, height: 900))
         suite.expect(long.width <= 1_400 + NotchMotion.overshootLimit && long.height <= 900 + NotchMotion.overshootLimit
                && long.width > 1_400 && long.height > 900,

@@ -1073,6 +1073,9 @@ private final class NotchCanvas: NSView {
     private var outlineEnabled = false
     private var outlineColor = NSColor.white
     private let contentVisibility = CALayer()
+    private var deckVisibility = NotchSpringChannel(1)
+    private var deckVisibilityStarted: CFTimeInterval = 0
+    private static let deckTranslationKey = "notch.deck.translation"
     private var dropActions: NotchFileDropActions?
     private var acceptingDrag = false
     private var contentSize: CGSize
@@ -1508,6 +1511,7 @@ private final class NotchCanvas: NSView {
                            animatesArrival: Bool = true, revealsHidden: Bool = false, replacementDuration: CFTimeInterval = 0.18) {
         guard kind != .none else { return }
         contentTransitionCount += 1
+        let wasDeparting = departsContent
         let currentOpacity = contentVisibility.presentation()?.opacity ?? contentVisibility.opacity
         let presentedArrival = self.presentedArrival
         contentVisibility.removeAnimation(forKey: "notch.opacity")
@@ -1515,7 +1519,10 @@ private final class NotchCanvas: NSView {
         endArrival()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        if floatingGap != nil, kind == .reveal {
+        if backdropPresentation.separatesPills,
+           kind == .depart || revealsHidden || (wasDeparting && (kind == .reveal || kind == .replace)) {
+            animateDeckVisibility(visible: kind != .depart, revealsHidden: revealsHidden)
+        } else if floatingGap != nil, kind == .reveal {
             // Floating pills already move with their contour. Start their
             // content immediately; the camera layout's delayed blur/scale
             // makes a hover feel like a second, stalled opening.
@@ -1580,6 +1587,44 @@ private final class NotchCanvas: NSView {
         CATransaction.commit()
     }
 
+    /// A split deck keeps its separate silhouettes during Space changes.
+    /// Fade and vertical travel sample one spring on the compositor, retaining
+    /// momentum on a reversal instead of stacking blur and snapshot fades.
+    private func animateDeckVisibility(visible: Bool, revealsHidden: Bool) {
+        guard let layer = host.layer else { return }
+        let now = CACurrentMediaTime()
+        if revealsHidden && deckVisibility.target != 0 { deckVisibility = NotchSpringChannel(0) }
+        deckVisibility.retarget(visible ? 1 : 0, at: max(0, now - deckVisibilityStarted),
+            spring: visible ? NotchMotion.growingHeight : NotchMotion.shrinkingHeight)
+        deckVisibilityStarted = now
+        let duration = max(1.0 / 120, deckVisibility.settlingTime)
+        let count = max(1, Int(ceil(duration * 120)))
+        let times = (0...count).map { Double($0) / Double(count) }
+        let values = times.map { $0 == 1 ? deckVisibility.target : deckVisibility.sample(at: $0 * duration).value }
+        let opacity = CAKeyframeAnimation(keyPath: "opacity")
+        opacity.values = values.map { NSNumber(value: Double(min(1, max(0, $0)))) }
+        opacity.keyTimes = times.map { NSNumber(value: $0) }
+        opacity.duration = duration
+        opacity.beginTime = contentVisibility.convertTime(now, from: nil)
+        opacity.calculationMode = .linear
+        contentVisibility.opacity = visible ? 1 : 0
+        if !visible {
+            opacity.fillMode = .forwards
+            opacity.isRemovedOnCompletion = false
+            opacity.setValue(true, forKey: Self.departureKey)
+        }
+        contentVisibility.add(opacity, forKey: "notch.opacity")
+        let travel = max(1, backdropPresentation.stripHeight / 2) * (layer.contentsAreFlipped() ? -1 : 1)
+        let movement = CAKeyframeAnimation(keyPath: "transform.translation.y")
+        movement.values = values.map { NSNumber(value: Double((1 - $0) * travel)) }
+        movement.keyTimes = opacity.keyTimes
+        movement.duration = duration
+        movement.beginTime = layer.convertTime(now, from: nil)
+        movement.calculationMode = .linear
+        layer.setValue(visible ? 0 : travel, forKeyPath: "transform.translation.y")
+        layer.add(movement, forKey: Self.deckTranslationKey)
+    }
+
     func finishDeparture() {
         guard departsContent else { return }
         CATransaction.begin()
@@ -1602,6 +1647,10 @@ private final class NotchCanvas: NSView {
         CATransaction.setDisableActions(true)
         contentVisibility.removeAnimation(forKey: "notch.opacity")
         contentVisibility.opacity = 1
+        deckVisibility = NotchSpringChannel(1)
+        deckVisibilityStarted = CACurrentMediaTime()
+        host.layer?.removeAnimation(forKey: Self.deckTranslationKey)
+        host.layer?.setValue(0, forKeyPath: "transform.translation.y")
         host.layer?.removeAnimation(forKey: kCATransition)
         CATransaction.commit()
         endArrival()

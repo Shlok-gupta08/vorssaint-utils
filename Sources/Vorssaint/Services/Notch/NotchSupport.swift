@@ -2782,7 +2782,8 @@ enum NotchHoverTrace {
     private static let enabled = CommandLine.arguments.contains("--trace-hover-latency")
     static func mark(_ stage: String) {
         guard enabled else { return }
-        let line = String(format: "HOVER %.3f %@\n", ProcessInfo.processInfo.systemUptime, stage)
+        let line = String(format: "HOVER %.3f %@\n", locale: Locale(identifier: "en_US_POSIX"),
+                          ProcessInfo.processInfo.systemUptime, stage)
         FileHandle.standardError.write(Data(line.utf8))
     }
 }
@@ -2793,4 +2794,55 @@ struct NotchExpandedViewLayout {
     let geometry: NotchGeometry
     let size: CGSize
     var contentSize: CGSize { geometry.contentSize(for: size) }
+}
+
+/// Analytic damped spring that retains momentum when its target changes.
+/// Uses the existing motion constants; retargeting never restarts at rest.
+struct NotchSpringChannel {
+    var from: CGFloat
+    var target: CGFloat
+    var initialVelocity: CGFloat = 0
+    var spring = NotchMotion.growingWidth
+
+    init(_ value: CGFloat) { from = value; target = value }
+
+    func sample(at time: TimeInterval) -> (value: CGFloat, velocity: CGFloat) {
+        let t = max(0, time)
+        let omega = 2 * Double.pi / spring.duration
+        let damping = 1 - spring.bounce
+        let displacement = Double(from - target), velocity = Double(initialVelocity)
+        let decay = exp(-damping * omega * t)
+        let position: Double, speed: Double
+        if damping >= 1 {
+            let b = velocity + omega * displacement
+            position = decay * (displacement + b * t)
+            speed = decay * (b - omega * (displacement + b * t))
+        } else {
+            let frequency = omega * sqrt(1 - damping * damping)
+            let b = (velocity + damping * omega * displacement) / frequency
+            let wave = displacement * cos(frequency * t) + b * sin(frequency * t)
+            position = decay * wave
+            speed = decay * (-displacement * frequency * sin(frequency * t)
+                + b * frequency * cos(frequency * t) - damping * omega * wave)
+        }
+        return (target + CGFloat(position), CGFloat(speed))
+    }
+
+    mutating func retarget(_ value: CGFloat, at time: TimeInterval, spring: NotchMotion.Spring) {
+        let current = sample(at: time)
+        from = current.value
+        initialVelocity = current.velocity
+        target = value
+        self.spring = spring
+    }
+
+    var settlingTime: TimeInterval {
+        var last: TimeInterval = 0
+        for step in 0...480 {
+            let time = Double(step) / 240
+            let pose = sample(at: time)
+            if abs(pose.value - target) > 0.1 || abs(pose.velocity) > 1 { last = time + 1 / 240 }
+        }
+        return last
+    }
 }

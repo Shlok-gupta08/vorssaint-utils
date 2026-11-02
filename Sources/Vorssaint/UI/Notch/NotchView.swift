@@ -19,7 +19,6 @@ struct NotchView: View {
 
     var body: some View {
         surface
-            .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: service.fullscreenCompact)
             .frame(width: service.surfaceSize.width, height: service.surfaceSize.height, alignment: .top)
             .foregroundStyle(.white)
             // The window server leaves Liquid Glass out of its hit test, so a
@@ -103,6 +102,10 @@ struct NotchView: View {
                 .padding(.top, service.geometry.safeContentTop)
         } else if service.usesPillActivityDeck {
             activityDeckSurface
+                // Physical fullscreen keeps the camera cutout. Fade only
+                // the activity content, without animating the deck envelope.
+                .transition(.opacity.animation(reduceMotion ? nil
+                    : .easeOut(duration: NotchQuickAccessLayout.withdrawalDuration)))
         } else if let notice = service.notice ?? (service.peeking ? nil : service.departingNotice) {
             if service.noticeExpanded, let content = notice.notification {
                 NotchNotificationPreviewView(notice: notice, content: content, service: service)
@@ -216,8 +219,6 @@ struct NotchView: View {
                 }.background(shape.fill(.black)).transition(.opacity)
             }
         }
-        .animation(reduceMotion ? nil : .spring(response: NotchActivityDeckPresentation.duration, dampingFraction: 0.9), value: service.compactActivities)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: service.notice?.event)
     }
 
     /// The primary activity stays centred while the smaller pills balance on
@@ -248,7 +249,7 @@ struct NotchView: View {
             if focused, let notice = service.notice { service.activateNotice(notice) }
             else { service.activatePillActivity(activity) }
         }
-        .transition(.opacity)
+        .transition(.opacity.animation(reduceMotion ? nil : .easeOut(duration: NotchQuickAccessLayout.withdrawalDuration)))
         .onHover { service.hoverPillActivity(activity, entered: $0) }
         .onContinuousHover { phase in
             if case .active = phase { service.hoverPillActivity(activity, entered: true) }
@@ -981,10 +982,9 @@ struct NotchActivityViewport: ViewModifier {
     let focused: Bool
     let targetX: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var fromSize: CGSize
-    @State private var fromX: CGFloat
-    @State private var destinationSize: CGSize
-    @State private var destinationX: CGFloat
+    @State private var widthMotion: NotchSpringChannel
+    @State private var heightMotion: NotchSpringChannel
+    @State private var positionMotion: NotchSpringChannel
     @State private var started: Date = .distantPast
     @State private var moving = false
 #if VORSSAINT_DEVELOPMENT
@@ -996,22 +996,18 @@ struct NotchActivityViewport: ViewModifier {
     init(size: CGSize, x: CGFloat = 0, geometry: NotchGeometry, focused: Bool = false) {
         targetSize = size
         targetX = x
-        _fromSize = State(initialValue: size)
-        _fromX = State(initialValue: x)
-        _destinationSize = State(initialValue: size)
-        _destinationX = State(initialValue: x)
+        _widthMotion = State(initialValue: NotchSpringChannel(size.width))
+        _heightMotion = State(initialValue: NotchSpringChannel(size.height))
+        _positionMotion = State(initialValue: NotchSpringChannel(x))
         self.geometry = geometry
         self.focused = focused
     }
 
     private func pose(at date: Date) -> (size: CGSize, x: CGFloat) {
-        guard moving else { return (destinationSize, destinationX) }
+        guard moving else { return (CGSize(width: widthMotion.target, height: heightMotion.target), positionMotion.target) }
         let elapsed = max(0, date.timeIntervalSince(started))
-        let size = NotchMotion.size(at: elapsed, from: fromSize, to: destinationSize)
-        let spring = fromSize.width != destinationSize.width
-            ? NotchMotion.spring(from: fromSize.width, to: destinationSize.width, width: true)
-            : NotchMotion.growingWidth.limited(travel: abs(destinationX - fromX), limit: NotchMotion.overshootLimit)
-        return (size, fromX + (destinationX - fromX) * CGFloat(spring.progress(at: elapsed)))
+        return (CGSize(width: max(0, widthMotion.sample(at: elapsed).value),
+                       height: max(0, heightMotion.sample(at: elapsed).value)), positionMotion.sample(at: elapsed).value)
     }
 
     private func outline(height: CGFloat) -> NotchShape {
@@ -1043,7 +1039,7 @@ struct NotchActivityViewport: ViewModifier {
                 outline.stroke(.white.opacity(focused ? 0.13 : 0.08), lineWidth: 0.5)
             }
             .contentShape(outline)
-            // Position and dimensions travel in the same animatable value.
+            // Position and dimensions share one clock and spring state.
             // A side card cannot snap to its closed centre before it shrinks.
             .offset(x: value.x)
             // Interpolation belongs to this modifier. Its child frames snap
@@ -1055,15 +1051,24 @@ struct NotchActivityViewport: ViewModifier {
             NotchHoverTrace.mark("viewport motion started")
 #endif
             let now = Date()
+            let elapsed = moving ? max(0, now.timeIntervalSince(started)) : 2
             let current = pose(at: now)
-            fromSize = current.size
-            fromX = current.x
-            destinationSize = targetSize
-            destinationX = targetX
+            let widthSpring = NotchMotion.spring(from: current.size.width, to: targetSize.width, width: true)
+            widthMotion.retarget(targetSize.width, at: elapsed, spring: widthSpring)
+            heightMotion.retarget(targetSize.height, at: elapsed,
+                                  spring: NotchMotion.spring(from: current.size.height, to: targetSize.height, width: false))
+            // Shared width/position spring preserves a side pill's inner edge.
+            positionMotion.retarget(targetX, at: elapsed, spring: current.size.width != targetSize.width
+                ? widthSpring : NotchMotion.spring(from: abs(current.x), to: abs(targetX), width: true))
             started = now
             moving = !reduceMotion
+            if reduceMotion {
+                widthMotion = NotchSpringChannel(targetSize.width)
+                heightMotion = NotchSpringChannel(targetSize.height)
+                positionMotion = NotchSpringChannel(targetX)
+            }
             let token = now
-            let settling = max(NotchMotion.settlingTime(from: current.size, to: targetSize), 0.65) + 0.04
+            let settling = max(widthMotion.settlingTime, heightMotion.settlingTime, positionMotion.settlingTime)
             DispatchQueue.main.asyncAfter(deadline: .now() + settling) {
                 guard started == token else { return }
                 moving = false
