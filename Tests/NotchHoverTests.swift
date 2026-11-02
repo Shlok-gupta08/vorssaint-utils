@@ -93,6 +93,8 @@ enum NotchHoverTests {
         var usesPillActivityDeck = false
         var pillHoverWork: DispatchWorkItem?
         var hoveredPillActivity: NotchCompactActivity?
+        var pointerPill: NotchCompactActivity? = .agents
+        func pillActivityUnderPointer() -> NotchCompactActivity? { pointerPill }
         var visiblePillActivities: [NotchCompactActivity] { compactActivities }
         var userHiddenUntilHover: Bool { UserDefaults.standard.hides && UserDefaults.standard.enabled }
         var automaticallyHiddenWithoutNotch: Bool {
@@ -205,6 +207,21 @@ enum NotchHoverTests {
         cancelledPill.hoverPillActivity(.agents, entered: false)
         DispatchQueue.main.advance(0.1)
         expect(cancelledPill.openings == 0, "leaving a split pill cancels its pending expansion")
+        let staleSide = fixture()
+        staleSide.usesPillActivityDeck = true
+        staleSide.compactActivities = [.music, .agents]
+        staleSide.pointerPill = .music
+        staleSide.hoverPillActivity(.agents, entered: true)
+        DispatchQueue.main.advance(0.1)
+        expect(staleSide.requestedModule == .music,
+               "a stale side tracking area opens the activity currently beneath the pointer")
+        let movedPointer = fixture()
+        movedPointer.usesPillActivityDeck = true
+        movedPointer.compactActivities = [.music, .agents]
+        movedPointer.hoverPillActivity(.agents, entered: true)
+        movedPointer.pointerPill = .music
+        DispatchQueue.main.advance(0.1)
+        expect(movedPointer.openings == 0, "a pending side hover cannot open after the pointer moves to centre")
 
         let levelTray = fixture(physical: true)
         let beforeLevel = levelTray.surfaceSize

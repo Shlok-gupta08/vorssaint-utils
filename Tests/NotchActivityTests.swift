@@ -77,6 +77,11 @@ enum NotchActivityTests {
             left: [(.agents, CGSize(width: 100, height: 32))], right: [(.timer, CGSize(width: 68, height: 32))])
         let opened = NotchActivityDeckPresentation(primary: .music, primarySize: CGSize(width: 450, height: 32),
             left: [(.agents, CGSize(width: 330, height: 280))], right: [(.timer, CGSize(width: 68, height: 32))])
+        suite.expect(closed.activity(at: CGPoint(x: 0, y: 12)) == .music
+                     && closed.activity(at: CGPoint(x: closed.items[2].x, y: 12)) == .timer,
+                     "after a side pill closes, the current pointer position selects centre or side independently")
+        suite.expect(closed.activity(at: CGPoint(x: 225 + NotchPillActivityLayout.spacing / 2, y: 12)) == nil,
+                     "transparent gaps do not inherit the last hovered live activity")
         suite.expect(closed.items.map(\.id) == opened.items.map(\.id)
                      && opened.items[0] == closed.items[0] && opened.items[2] == closed.items[2],
                      "opening a left tab preserves every identity and the centre and right tab positions")

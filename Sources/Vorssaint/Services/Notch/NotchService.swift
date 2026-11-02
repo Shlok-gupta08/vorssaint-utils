@@ -511,13 +511,22 @@ final class NotchService: ObservableObject {
     /// activity opens directly, rather than whichever activity happened to be
     /// central when the pointer entered the overall island window.
     func hoverPillActivity(_ activity: NotchCompactActivity, entered: Bool) {
+        if !entered {
+            if hoveredPillActivity == activity {
+                hoveredPillActivity = nil
+                pillHoverWork?.cancel(); pillHoverWork = nil
+            }
+            return
+        }
         guard !expanded else { return }
+        guard let activity = pillActivityUnderPointer() else { return }
         if entered {
             if hoveredPillActivity == activity, let pillHoverWork, !pillHoverWork.isCancelled { return }
             hoveredPillActivity = activity
             pillHoverWork?.cancel()
             let work = DispatchWorkItem { [weak self] in
                 guard let self, self.hoveredPillActivity == activity, self.usesPillActivityDeck,
+                      !self.expanded, self.pillActivityUnderPointer() == activity,
                       self.visiblePillActivities.contains(activity) else { return }
                 self.pillHoverWork = nil
                 guard self.notice == nil || activity != self.compactActivity else { return }
@@ -529,6 +538,16 @@ final class NotchService: ObservableObject {
             hoveredPillActivity = nil
             pillHoverWork?.cancel(); pillHoverWork = nil
         }
+    }
+
+    private func pillActivityUnderPointer() -> NotchCompactActivity? {
+        guard usesPillActivityDeck, let primary = pillDeckPrimaryActivity else { return nil }
+        let layout = NotchActivityDeckPresentation(primary: primary, primarySize: pillSize(for: primary),
+            left: leftPillActivities.map { ($0, pillSize(for: $0)) },
+            right: rightPillActivities.map { ($0, pillSize(for: $0)) })
+        let point = NSEvent.mouseLocation
+        return layout.activity(at: CGPoint(x: point.x - geometry.screen.midX,
+            y: geometry.screen.maxY - geometry.floatingDrop - point.y))
     }
 
     /// The picker keeps its size whatever is chosen, so the choice moves inside

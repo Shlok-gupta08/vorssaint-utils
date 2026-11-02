@@ -11,6 +11,7 @@ struct NotchView: View {
     @ObservedObject private var launcher = QuickLauncherService.shared
     @ObservedObject private var updates = UpdateService.shared
     @AppStorage(DefaultsKey.notchLiquidGlassEnabled) private var glass = false
+    @AppStorage(DefaultsKey.notchTranslucentBackground) private var translucent = false
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -27,7 +28,7 @@ struct NotchView: View {
             // the page stops scrolling between cards and the island loses
             // focus. A fill too faint to see keeps the surface in this window,
             // as the black backdrop does.
-            .background(shape.fill(Color.black.opacity(service.usesPillActivityDeck ? 0 : 0.01)))
+            .background(shape.fill(Color.black.opacity(service.usesPillActivityDeck ? 0 : usesGlassSurface || translucent ? 0.01 : 1)))
             .contentShape(shape)
             // The backdrop is a separate, non-interactive hosting view. Claim
             // empty space here so clicks and wheel events stay in this window.
@@ -251,6 +252,9 @@ struct NotchView: View {
         }
         .transition(.opacity)
         .onHover { service.hoverPillActivity(activity, entered: $0) }
+        .onContinuousHover { phase in
+            if case .active = phase { service.hoverPillActivity(activity, entered: true) }
+        }
         .contextMenu {
             if !focused {
                 Button("Make Primary") { service.selectCompactActivity(activity) }
@@ -1117,7 +1121,7 @@ private struct NotchPillCompactMark: View {
             } else if activity == .call {
                 NotchCallStrip(geometry: geometry, size: CGSize(width: 100, height: geometry.stripHeight), minimal: true)
             } else {
-                HStack(spacing: 4) { mark; signal }
+                HStack(spacing: activity == .music ? 9 : 4) { mark; signal }
             }
         }
         .foregroundStyle(tint)

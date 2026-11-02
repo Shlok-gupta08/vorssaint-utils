@@ -695,6 +695,12 @@ struct NotchActivityDeckPresentation: Equatable {
     let items: [Item]
     let size: CGSize
 
+    func activity(at point: CGPoint) -> NotchCompactActivity? {
+        items.first { item in
+            CGRect(x: item.x - item.size.width / 2, y: 0, width: item.size.width, height: item.size.height).contains(point)
+        }?.activity
+    }
+
     init(primary: NotchCompactActivity, primarySize: CGSize,
          left: [(NotchCompactActivity, CGSize)], right: [(NotchCompactActivity, CGSize)]) {
         var result = [Item(activity: primary, size: primarySize, x: 0)]

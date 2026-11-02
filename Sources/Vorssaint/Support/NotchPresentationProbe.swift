@@ -632,18 +632,16 @@ enum NotchPresentationProbe {
         host.panel.orderFrontRegardless()
         RunLoop.current.run(until: Date().addingTimeInterval(0.03))
         host.setSeparatesPills(true)
-        if host.separatesPillsProbe { failures.append("split pills removed the expanded contour before closing") }
+        if !host.separatesPillsProbe { failures.append("returning to activities retained a giant unified backdrop") }
+        let transitions = host.contentProbeTransitionCount
         host.present(size: closed, geometry: geometry, animated: true, transitionContent: .dismiss)
         RunLoop.current.run(until: Date().addingTimeInterval(0.06))
         if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            let height = host.visibleFrame.height
-            if height >= geometry.expanded.height || height <= closed.height {
-                failures.append("pill closing did not show an immediate intermediate frame")
-            }
+            if host.contentProbeTransitionCount <= transitions { failures.append("central-panel dismissal skipped its activity crossfade") }
             host.setSeparatesPills(true)
-            if host.separatesPillsProbe { failures.append("a repeated refresh removed the moving closing contour") }
+            if !host.separatesPillsProbe { failures.append("a repeated refresh merged the returning pills") }
         }
-        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        RunLoop.current.run(until: Date().addingTimeInterval(NotchActivityDeckPresentation.settlingDuration + 0.1))
         if !host.separatesPillsProbe || abs(host.visibleFrame.height - closed.height) > 0.5 {
             failures.append("pill closing did not restore independent compact pills")
         }
@@ -655,7 +653,7 @@ enum NotchPresentationProbe {
         host.present(size: closed, geometry: geometry, animated: true)
         host.setSeparatesPills(false)
         host.present(size: geometry.expanded, geometry: geometry, animated: true, transitionContent: .reveal)
-        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        RunLoop.current.run(until: Date().addingTimeInterval(NotchActivityDeckPresentation.settlingDuration + 0.1))
         if host.separatesPillsProbe || abs(host.visibleFrame.height - geometry.expanded.height) > 0.5 {
             failures.append("reopening a closing pill inherited a stale split completion")
         }

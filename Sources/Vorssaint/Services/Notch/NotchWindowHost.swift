@@ -27,6 +27,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     private var quickAccessNotchSize = CGSize.zero
     private var quickAccessActivityFrame: CGRect?
     private var quickAccessAnimate = false
+    private var changesActivityMode = false
     private var currentGeometry: NotchGeometry
     private var appliedFrame = CGRect.zero
     private var animationGeneration = 0
@@ -139,7 +140,14 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     }
 
     func setSeparatesPills(_ enabled: Bool) {
+        let changesMode = enabled != targetSeparatesPills
         targetSeparatesPills = enabled
+        if changesMode && isPresented {
+            changesActivityMode = true
+            canvas.setSeparatesPills(true)
+            return
+        }
+        if !enabled, (changesActivityMode || isAnimating), canvas.backdropPresentation.separatesPills { return }
         // Closing an expanded page still needs its painted, masked contour.
         // Removing it now would make the native shrink animation invisible.
         if !enabled || !isPresented || (!isAnimating && targetSize.height <= currentGeometry.stripHeight) {
@@ -191,6 +199,8 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             probe.attach(level: panel.level, screen: geometry.screen)
         }
         let canAnimate = animated && (isPresented || revealing) && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let swapsActivityMode = changesActivityMode
+        changesActivityMode = false
         let previousGutter = quickAccessConfiguration == nil ? 0 : NotchQuickAccessLayout.gutter
         let previousBottom = quickAccessBottomInset(for: targetSize, geometry: currentGeometry)
         let previousFrame = currentGeometry.frame(for: CGSize(width: targetSize.width + previousGutter * 2, height: targetSize.height + previousBottom))
@@ -204,7 +214,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         let gutter = quickAccessConfiguration == nil ? 0 : NotchQuickAccessLayout.gutter
         let bottom = quickAccessBottomInset(for: size, geometry: geometry)
         let frame = geometry.frame(for: CGSize(width: size.width + gutter * 2, height: size.height + bottom))
-        let changesFrame = revealing || (hideWhenSettled && !canAnimate) || size != targetSize
+        let changesFrame = swapsActivityMode || revealing || (hideWhenSettled && !canAnimate) || size != targetSize
             || frame != previousFrame || (!isAnimating && panel.frame != appliedFrame)
         targetUsesGlass = usesGlass
         if canvas.backdropPresentation.stripHeight != geometry.stripHeight {
@@ -229,8 +239,9 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             return
         }
         if canAnimate {
-            canvas.transitionContent(revealing || restoringVisibility ? .reveal : transitionContent,
-                                     animatesArrival: animatesContentArrival, revealsHidden: revealing)
+            canvas.transitionContent(swapsActivityMode ? .replace : revealing || restoringVisibility ? .reveal : transitionContent,
+                                     animatesArrival: animatesContentArrival, revealsHidden: revealing,
+                                     replacementDuration: swapsActivityMode ? 0.32 : 0.18)
         }
         else if animated && changesFrame && (revealing || transitionContent == .reveal) {
             // Reduce Motion, or a panel that was ordered out, puts the island
@@ -1456,7 +1467,7 @@ private final class NotchCanvas: NSView {
     private(set) var contentTransitionCount = 0
 
     func transitionContent(_ kind: NotchContentTransition, shapeSnaps: Bool = false,
-                           animatesArrival: Bool = true, revealsHidden: Bool = false) {
+                           animatesArrival: Bool = true, revealsHidden: Bool = false, replacementDuration: CFTimeInterval = 0.18) {
         guard kind != .none else { return }
         contentTransitionCount += 1
         let currentOpacity = contentVisibility.presentation()?.opacity ?? contentVisibility.opacity
@@ -1480,7 +1491,7 @@ private final class NotchCanvas: NSView {
             contentVisibility.opacity = 1
             let transition = CATransition()
             transition.type = .fade
-            transition.duration = 0.18
+            transition.duration = replacementDuration
             transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             host.layer?.add(transition, forKey: kCATransition)
         } else {
