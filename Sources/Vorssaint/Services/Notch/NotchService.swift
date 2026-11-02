@@ -365,7 +365,8 @@ final class NotchService: ObservableObject {
     /// Every silhouette keeps independent activity surfaces. The hardware
     /// notch reserves its camera in the primary; satellites have no camera.
     var usesPillActivityDeck: Bool {
-        !fullscreenCompact && !showsDictation
+        (compactActivity != nil || (expanded && expandedPillActivity != nil))
+            && !fullscreenCompact && !showsDictation
             && (!expanded || (expandedPillActivity != nil && !showingSections && !showingAppPanel && selectedMetric == nil))
             && !peeking && !dragPlaceholder && captureControls == nil
     }
@@ -405,7 +406,10 @@ final class NotchService: ObservableObject {
         let candidates = pillDeckCandidates
         guard let primary = pillDeckPrimaryActivity, candidates.contains(primary) else { return candidates }
         if expanded { return candidates }
-        let available = pillAvailableWidth
+        // A transient message may extend past the compact menu-bar budget,
+        // just as an open page does. Keep side activities when the display
+        // still has room for their independent surfaces.
+        let available = notice == nil ? pillAvailableWidth : geometry.screen.width - 24
         var result = [primary]
         let primaryWidth = pillSize(for: primary).width
         var left: CGFloat = 0
@@ -996,10 +1000,15 @@ final class NotchService: ObservableObject {
         if geometry.isNotched, notice == nil { return compactGeometry(for: activity).compactActivitySize }
         let full: CGSize
         if activity == compactActivity, let notice {
-            if noticeExpanded { full = geometry.notificationPreviewSize(contentHeight: 0) }
+            // Notices own their measured surface. Compact activity budgets
+            // must yield to the message, rather than truncating it to a pill.
+            if noticeExpanded {
+                return geometry.notificationPreviewSize(contentHeight: notice.previewContentHeight(
+                    width: geometry.notificationPreviewContentWidth))
+            }
             else if geometry.isNotched {
-                full = notice.isLevelFeedback ? geometry.underNotchLevelSize : geometry.noticeSize(wingWidth: notice.preferredWingWidth)
-            } else { full = capsuleNoticeSurface(notice) }
+                return notice.isLevelFeedback ? geometry.underNotchLevelSize : geometry.noticeSize(wingWidth: notice.preferredWingWidth)
+            } else { return capsuleNoticeSize(notice) }
         } else {
             full = capsuleStripSize(for: activity, companion: nil)
         }
@@ -1016,13 +1025,8 @@ final class NotchService: ObservableObject {
             }
             let reserve = sides.isEmpty ? 0 : (max(left, right) + NotchPillActivityLayout.spacing) * 2
             let width = min(full.width, max(geometry.isNotched ? geometry.cameraWidth : 80,
-                                           min(noticeExpanded ? 420 : 300, pillAvailableWidth - reserve)))
-            let height: CGFloat
-            if noticeExpanded, let notice {
-                height = geometry.notificationPreviewSize(contentHeight: notice.previewContentHeight(
-                    width: max(40, width - NotchLayout.horizontalInset * 2))).height
-            } else { height = full.height }
-            return CGSize(width: width, height: height)
+                                           min(300, pillAvailableWidth - reserve)))
+            return CGSize(width: width, height: full.height)
         }
         return CGSize(width: pillSecondaryWidth(for: activity), height: geometry.stripHeight)
     }
@@ -1038,6 +1042,31 @@ final class NotchService: ObservableObject {
             let reading = NotchAgentSupport.stripReading(snapshot, readout: .elapsed, display: .remaining, now: Date())
             compact = max(compact, NotchCapsuleLayout.agentCompactSurface(
                 providers: providers, reading: reading, geometry: geometry).width)
+        }
+        if self.geometry.isNotched {
+            let now = Date()
+            let reading: String?
+            var providers = 0
+            switch activity {
+            case .agents:
+                let snapshot = AgentUsageService.shared.snapshot
+                providers = max(1, Set(snapshot.live.map(\.provider)).count)
+                reading = NotchAgentSupport.stripReading(snapshot, readout: .elapsed, display: .remaining, now: now)
+            case .timer:
+                let timer = NotchTimerService.shared
+                reading = NotchTimerSupport.compactText(for: timer.session, at: timer.now, locale: .current)
+            case .calendar:
+                reading = NotchCalendarService.shared.countdown.map {
+                    NotchCalendarSupport.countdownText(until: $0.target, now: now)
+                }
+            case .keepAwake:
+                reading = KeepAwakeManager.shared.endDate.map {
+                    NotchKeepAwakeSupport.compactText(until: $0, now: now, locale: .current)
+                }
+            default: reading = nil
+            }
+            compact = NotchAttachedActivityLayout.compactWidth(reading: reading, providers: providers,
+                shoulder: NotchCapsuleLayout.side(geometry))
         }
         guard widenedPillActivities.contains(activity) else { return compact }
         let room = max(compact, (pillAvailableWidth - 80) / 2 - NotchPillActivityLayout.spacing)

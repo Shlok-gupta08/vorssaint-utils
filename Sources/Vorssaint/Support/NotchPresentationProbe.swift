@@ -653,10 +653,18 @@ enum NotchPresentationProbe {
         host.present(size: closed, geometry: geometry, animated: true)
         host.setSeparatesPills(false)
         host.present(size: geometry.expanded, geometry: geometry, animated: true, transitionContent: .reveal)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+        let shellHeight = NotchLayout.capsuleBody(in: CGRect(origin: .zero, size: geometry.expanded),
+            gap: geometry.floatingGap ?? 0).height
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+           host.handoffShellProbeFrame.map({ abs($0.height - shellHeight) < 1 }) != true {
+            failures.append("a central panel waited for settling before drawing its background")
+        }
         RunLoop.current.run(until: Date().addingTimeInterval(NotchActivityDeckPresentation.settlingDuration + 0.1))
         if host.separatesPillsProbe || abs(host.visibleFrame.height - geometry.expanded.height) > 0.5 {
             failures.append("reopening a closing pill inherited a stale split completion")
         }
+        if host.handoffShellProbeFrame != nil { failures.append("a temporary panel shell survived into normal native motion") }
         host.close()
         return failures
     }
@@ -712,13 +720,17 @@ enum NotchPresentationProbe {
                 let primary = CGSize(width: physical ? musicGeometry.compactActivitySize.width : 200,
                     height: state == "centre-expanded" ? 260 : state == "centre-alert" ? geometry.underNotchLevelSize.height
                         : state == "footer" && physical ? 64 : 32)
-                let agentSize = CGSize(width: state == "left-expanded" ? 340 : state == "wide-secondary" ? 180 : 110,
+                let agentSize = CGSize(width: state == "left-expanded" ? 340 : state == "wide-secondary" ? 180
+                    : physical ? NotchAttachedActivityLayout.compactWidth(reading: "12:34", providers: 2,
+                        shoulder: NotchCapsuleLayout.side(satellite)) : 110,
                                        height: state == "left-expanded" ? 260 : 32)
                 let layout = NotchActivityDeckPresentation(primary: .music, primarySize: primary,
                     left: state == "two" || state == "footer" ? [] : [(.agents, agentSize)],
                     right: state == "footer" ? [] : state == "four"
-                        ? [(.timer, CGSize(width: 76, height: 32)), (.downloads, CGSize(width: 68, height: 32))]
-                        : [(.timer, CGSize(width: 76, height: 32))])
+                        ? [(.timer, CGSize(width: physical ? NotchAttachedActivityLayout.compactWidth(reading: "12:34",
+                            shoulder: NotchCapsuleLayout.side(satellite)) : 76, height: 32)), (.downloads, CGSize(width: 90, height: 32))]
+                        : [(.timer, CGSize(width: physical ? NotchAttachedActivityLayout.compactWidth(reading: "12:34",
+                            shoulder: NotchCapsuleLayout.side(satellite)) : 76, height: 32))])
                 let deck = ZStack(alignment: .top) {
                     ForEach(layout.items) { item in
                         Group {
@@ -736,7 +748,31 @@ enum NotchPresentationProbe {
                             } else if item.activity == .music && physical {
                                 NotchMusicStrip(service: .shared, displayGeometry: musicGeometry)
                             } else if item.activity == .agents {
-                                NotchPillAgentCompactContent(providers: [.claude, .codex], reading: "12:34", geometry: satellite)
+                                if physical {
+                                    NotchAttachedActivityContent(geometry: satellite) {
+                                        HStack(spacing: 5) {
+                                            ForEach([AgentProvider.claude, .codex]) { provider in
+                                                NotchAgentGlyph(provider: provider, size: NotchAttachedActivityLayout.agentMarkSize)
+                                                    .foregroundStyle(provider.tint)
+                                            }
+                                        }
+                                    } signal: {
+                                        Text("12:34").font(Font(NotchAttachedActivityLayout.readoutFont as CTFont))
+                                            .foregroundStyle(.white.opacity(0.9))
+                                    }
+                                } else {
+                                    NotchPillAgentCompactContent(providers: [.claude, .codex], reading: "12:34", geometry: satellite)
+                                }
+                            } else if physical && item.activity != .music {
+                                NotchAttachedActivityContent(geometry: satellite) {
+                                    Image(systemName: item.activity.symbol)
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundStyle(item.activity == .timer ? Color.orange : .white)
+                                } signal: {
+                                    Text(item.activity == .timer ? "12:34" : "52%")
+                                        .font(Font(NotchAttachedActivityLayout.readoutFont as CTFont))
+                                        .foregroundStyle(.white.opacity(0.9))
+                                }
                             } else {
                                 HStack(spacing: 7) {
                                     if item.activity == .music {

@@ -486,6 +486,10 @@ def main():
           + declaration(shelf, "    func completeInternalDrag(")
           + "}\n}\n")
     notch = "Sources/Vorssaint/Services/Notch/NotchService.swift"
+    write("NotchNotificationSizing.swift", "import AppKit\nextension NotchNotificationTests {\nfinal class SizingService: SizingState {\n"
+          + "".join(declaration(notch, prefix) for prefix in ["    func pillSize(",
+              "    private func capsuleNoticeSize(", "    func capsuleNoticeSurface("])
+          + "}\n}\n")
     write("NotchFullscreen.swift", "import CoreGraphics\nimport Foundation\nextension NotchFullscreenTests {\n"
           + declaration("Sources/Vorssaint/Services/Switcher/SpaceWindowBridge.swift", "    struct Topology {")
           + "final class Service: State {\n"
@@ -720,6 +724,7 @@ def main():
           + declaration(metric_view, "    var detailKind:") + "}\n"
           + "final class Service: State {\n"
           + "func syncWithPreferences() { presentationSyncs += 1; refreshModules(); syncVisibleConsumers(); NotchTimerService.shared.syncWithPreferences() }\n"
+          + declaration(notch, "    var usesPillActivityDeck:")
           + availability_declaration(notch, "    private func metricIsAvailable(")
           + declaration(notch, "    private func refreshModules(")
               .replace("NotchSupport.modules()", "NotchSupport.modules(in: ReviewDefaults.current)")

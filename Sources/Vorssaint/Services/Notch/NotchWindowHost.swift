@@ -144,6 +144,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         targetSeparatesPills = enabled
         if changesMode && isPresented {
             changesActivityMode = true
+            if enabled { canvas.removeActivityHandoffShell() }
             canvas.setSeparatesPills(true)
             return
         }
@@ -288,6 +289,13 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             setFrame(mainSize: envelope, gutter: reservedGutter, bottom: reservedBottom)
             configureQuickAccess()
             canvas.layoutSubtreeIfNeeded()
+            // The foreground no longer paints an opaque final-size shell:
+            // that covered the native contour on ordinary panel motion.
+            // Only a deck-to-panel handoff needs a temporary shell while
+            // the canvas remains unmasked for the departing side pills.
+            if swapsActivityMode && !targetSeparatesPills {
+                canvas.showActivityHandoffShell()
+            }
             CATransaction.commit()
             guard generation == animationGeneration else { return }
             quickAccessContainer?.motion.setVisible(quickAccessConfiguration != nil, animated: canAnimate)
@@ -398,6 +406,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         canvas.layoutSubtreeIfNeeded()
         guard generation == animationGeneration else { CATransaction.commit(); return }
         canvas.setSeparatesPills(targetSeparatesPills)
+        canvas.removeActivityHandoffShell()
         CATransaction.commit()
         CATransaction.flush()
         quickAccessContainer?.motion.setVisible(quickAccessConfiguration != nil, animated: quickAccessAnimate)
@@ -692,6 +701,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     var contentProbeOpacity: Float { canvas.contentProbeOpacity }
     var separatesPillsProbe: Bool { canvas.backdropPresentation.separatesPills }
     var independentSurfaceProbe: Bool { canvas.backdropPresentation.separatesPills && canvas.layer?.mask == nil }
+    var handoffShellProbeFrame: CGRect? { canvas.handoffShellProbeFrame }
     var contentProbeAnimating: Bool { canvas.contentProbeAnimating }
     var contentProbeTransitionCount: Int { canvas.contentTransitionCount }
     var contentProbeAlpha: CGFloat { canvas.contentProbeAlpha }
@@ -1053,6 +1063,7 @@ private final class NotchCanvas: NSView {
     private let silhouette = CAShapeLayer()
     private let edge = CAShapeLayer()
     private let edgeMask = CALayer()
+    private let activityHandoffShell = CAShapeLayer()
     /// Nil hangs the island from the top edge; a capsule floats this far inside it.
     private(set) var floatingGap: CGFloat?
     var minimumSurfaceWidth: CGFloat = 0
@@ -1088,6 +1099,10 @@ private final class NotchCanvas: NSView {
         layer?.mask = silhouette
         addSubview(backdrop)
         addSubview(host)
+        activityHandoffShell.fillColor = NSColor.black.cgColor
+        activityHandoffShell.opacity = 0
+        // Behind both the page and its material, above the clear canvas.
+        layer?.insertSublayer(activityHandoffShell, at: 0)
         activationButton.isTransparent = true
         activationButton.isHidden = true
         activationButton.target = activationButton
@@ -1239,6 +1254,9 @@ private final class NotchCanvas: NSView {
 
 #if VORSSAINT_DEVELOPMENT
     var contentProbeOpacity: Float { contentVisibility.presentation()?.opacity ?? contentVisibility.opacity }
+    var handoffShellProbeFrame: CGRect? {
+        activityHandoffShell.opacity > 0 ? activityHandoffShell.path?.boundingBoxOfPath : nil
+    }
     var contentProbeAnimating: Bool { contentVisibility.animation(forKey: "notch.opacity") != nil }
     var contentProbeAlpha: CGFloat { host.alphaValue }
     var contentProbeReplacing: Bool { host.layer?.animation(forKey: kCATransition) != nil }
@@ -1408,6 +1426,23 @@ private final class NotchCanvas: NSView {
         // against the corners of one enclosing silhouette.
         layer?.mask = enabled ? nil : silhouette
         updateCanvasBlack()
+    }
+
+    func showActivityHandoffShell() {
+        activityHandoffShell.removeAllAnimations()
+        activityHandoffShell.frame = silhouette.frame
+        activityHandoffShell.path = silhouettePath(for: contentSize)
+        activityHandoffShell.opacity = 1
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0
+        fade.toValue = 1
+        fade.duration = 0.18
+        activityHandoffShell.add(fade, forKey: "handoff")
+    }
+
+    func removeActivityHandoffShell() {
+        activityHandoffShell.removeAllAnimations()
+        activityHandoffShell.opacity = 0
     }
 
     /// The island's black is also the canvas's own fill, not only the
@@ -1701,6 +1736,10 @@ private final class NotchCanvas: NSView {
         silhouetteSize = motionStart ?? contentSize
         silhouette.path = silhouettePath(for: silhouetteSize)
         edge.path = silhouette.path
+        if activityHandoffShell.opacity > 0 {
+            activityHandoffShell.frame = silhouette.frame
+            activityHandoffShell.path = silhouettePath(for: contentSize)
+        }
         updateContrast()
         // Keep foreground layout fixed inside the reserved reveal area. Only
         // the separate backdrop's contour changes on animation frames.

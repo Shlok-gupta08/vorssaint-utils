@@ -5,6 +5,29 @@ import AppKit
 import Foundation
 
 enum NotchNotificationTests {
+    class SizingState {
+        var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            safeAreaTop: 0, cameraWidth: 0, menuBarHeight: 32, compactSideRoom: 600, silhouette: .capsule)
+        var expanded = false
+        var expandedPillActivity: NotchCompactActivity?
+        var expandedSize: CGSize { geometry.expanded }
+        var compactActivity: NotchCompactActivity? = .music
+        var pillDeckPrimaryActivity: NotchCompactActivity? { compactActivity }
+        var notice: NotchNotice?
+        var noticeExpanded = false
+        var bannerCapsuleWidth: CGFloat = 0
+        var pillActivityOrder: [NotchCompactActivity] = [.music, .timer, .agents]
+        var pillAvailableWidth: CGFloat = 160
+        func pillSecondaryWidth(for activity: NotchCompactActivity) -> CGFloat { 80 }
+        func pillSide(for activity: NotchCompactActivity, defaultIndex: Int) -> NotchPillSide {
+            NotchPillActivityLayout.defaultSide(at: defaultIndex)
+        }
+        func compactGeometry(for activity: NotchCompactActivity) -> NotchGeometry { geometry.compactMusicGeometry }
+        func capsuleStripSize(for activity: NotchCompactActivity, companion: NotchCompactActivity?) -> CGSize {
+            CGSize(width: 200, height: geometry.stripHeight)
+        }
+    }
+
     static func run(_ suite: TestSuite) {
         func expect(_ condition: Bool, _ message: String) {
             suite.expect(condition, message)
@@ -22,6 +45,7 @@ enum NotchNotificationTests {
                && NotchSupport.shouldReplace(.systemNotification, with: .battery),
                "a preview held open yields only to the next message or to what the user just did")
         previewLayoutContracts(expect: expect)
+        liveActivitySizingContracts(suite)
         expect(NotchNotificationSupport.closeAction(in: ["Name:Close\nTarget:0x0\nSelector:(null)"], title: "Close") != nil
                && NotchNotificationSupport.closeAction(in: ["Name:Close All\nTarget:0x0"], title: "Close") == nil,
                "native closing uses the exact system action label and cannot match a group action")
@@ -155,6 +179,27 @@ enum NotchNotificationTests {
                "notification preferences are included in settings backup")
         suite.expect(AppFeature.notchNotifications.permissions == [.accessibility],
                "banner mirroring needs Accessibility rather than access to private notification databases")
+    }
+
+    private static func liveActivitySizingContracts(_ suite: TestSuite) {
+        let service = SizingService()
+        let content = NotchNotificationContent(app: "Messages", title: "Project update", subtitle: "",
+            body: String(repeating: "This message needs room to be readable. ", count: 8))
+        service.notice = NotchNotice(event: .systemNotification, title: content.compactTitle,
+            detail: content.compactDetail, symbol: "message.fill", notification: content)
+        let banner = service.pillSize(for: .music)
+        suite.expect(banner == service.capsuleNoticeSurface(service.notice!) && banner.width > 300,
+            "a notification grows beyond compact activity limits even with several side activities")
+        service.noticeExpanded = true
+        let preview = service.pillSize(for: .music)
+        suite.expect(preview == service.geometry.notificationPreviewSize(contentHeight:
+            service.notice!.previewContentHeight(width: service.geometry.notificationPreviewContentWidth)),
+            "a held notification uses its full measured preview width and matching text height")
+        service.geometry = NotchGeometry(screen: service.geometry.screen, safeAreaTop: 32, cameraWidth: 210,
+            menuBarHeight: 32, compactSideRoom: 400, silhouette: .notch)
+        service.noticeExpanded = false
+        suite.expect(service.pillSize(for: .music) == service.geometry.noticeSize(wingWidth: service.notice!.preferredWingWidth),
+            "a hardware-notch notification keeps both measured message wings instead of a compact music budget")
     }
 
     private static func previewLayoutContracts(expect: (Bool, String) -> Void) {

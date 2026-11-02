@@ -53,6 +53,14 @@ enum NotchActivityTests {
             let width = NotchPillActivityLayout.compactWidth(bodyHeight: height, shoulder: 5)
             suite.expect(width - 10 >= height * 2, "compact pills stay elongated even with a taller custom fit")
         }
+        let shortClock = NotchAttachedActivityLayout.compactWidth(reading: "12:34")
+        let longClock = NotchAttachedActivityLayout.compactWidth(reading: "1:12:34")
+        suite.expect(longClock > shortClock
+                     && NotchAttachedActivityLayout.compactWidth(reading: "12:34", providers: 2) > shortClock,
+                     "physical-notch side rows grow for longer clocks and additional provider logos")
+        suite.expect(NotchAttachedActivityLayout.compactWidth() >= NotchAttachedActivityLayout.sideInset * 2
+                     + NotchAttachedActivityLayout.markSize + NotchAttachedActivityLayout.contentGap + 14,
+                     "a side mark and live indicator retain separate space and safe end padding")
         let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
         for physical in [false, true] {
             let geometry = NotchGeometry(screen: screen, safeAreaTop: physical ? 32 : 0,

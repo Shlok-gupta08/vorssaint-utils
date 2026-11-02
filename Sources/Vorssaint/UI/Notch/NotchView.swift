@@ -11,7 +11,6 @@ struct NotchView: View {
     @ObservedObject private var launcher = QuickLauncherService.shared
     @ObservedObject private var updates = UpdateService.shared
     @AppStorage(DefaultsKey.notchLiquidGlassEnabled) private var glass = false
-    @AppStorage(DefaultsKey.notchTranslucentBackground) private var translucent = false
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -28,7 +27,7 @@ struct NotchView: View {
             // the page stops scrolling between cards and the island loses
             // focus. A fill too faint to see keeps the surface in this window,
             // as the black backdrop does.
-            .background(shape.fill(Color.black.opacity(service.usesPillActivityDeck ? 0 : usesGlassSurface || translucent ? 0.01 : 1)))
+            .background(shape.fill(Color.black.opacity(service.usesPillActivityDeck ? 0 : 0.01)))
             .contentShape(shape)
             // The backdrop is a separate, non-interactive hosting view. Claim
             // empty space here so clicks and wheel events stay in this window.
@@ -294,6 +293,7 @@ struct NotchView: View {
                 activityStrip(activity, size: size)
             } else {
                 NotchPillCompactMark(activity: activity, geometry: service.activitySatelliteGeometry,
+                                     physicalSide: service.geometry.isNotched,
                                      onReadingShapeChange: { service.refreshPresentation() })
             }
         }
@@ -1113,9 +1113,26 @@ struct NotchPillAgentCompactContent: View {
     }
 }
 
+struct NotchAttachedActivityContent<Mark: View, Signal: View>: View {
+    let geometry: NotchGeometry
+    @ViewBuilder let mark: () -> Mark
+    @ViewBuilder let signal: () -> Signal
+
+    var body: some View {
+        HStack(spacing: 0) {
+            mark().fixedSize(horizontal: true, vertical: false)
+            Spacer(minLength: NotchAttachedActivityLayout.contentGap)
+            signal().fixedSize(horizontal: true, vertical: false)
+        }
+        .padding(.horizontal, NotchCapsuleLayout.side(geometry) + NotchAttachedActivityLayout.sideInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 private struct NotchPillCompactMark: View {
     let activity: NotchCompactActivity
     let geometry: NotchGeometry
+    var physicalSide = false
     var onReadingShapeChange: () -> Void = {}
     @ObservedObject private var music = NotchMusicService.shared
     @ObservedObject private var timer = NotchTimerService.shared
@@ -1123,6 +1140,7 @@ private struct NotchPillCompactMark: View {
     @ObservedObject private var usage = AgentUsageService.shared
     @ObservedObject private var watch = NotchWatchService.shared
     @ObservedObject private var awake = KeepAwakeManager.shared
+    @ObservedObject private var calendar = NotchCalendarService.shared
 
     private var tint: Color {
         switch activity {
@@ -1143,13 +1161,29 @@ private struct NotchPillCompactMark: View {
                     }
                     let reading = NotchAgentSupport.stripReading(usage.snapshot, readout: .elapsed,
                                                                  display: .remaining, now: now)
-                    NotchPillAgentCompactContent(providers: providers, reading: reading, geometry: geometry)
+                    Group {
+                        if physicalSide {
+                            NotchAttachedActivityContent(geometry: geometry) {
+                                HStack(spacing: 5) {
+                                    ForEach(providers) { provider in
+                                        NotchAgentGlyph(provider: provider, size: NotchAttachedActivityLayout.agentMarkSize)
+                                            .foregroundStyle(provider.tint)
+                                    }
+                                    if providers.isEmpty { Image(systemName: "sparkles") }
+                                }
+                            } signal: { sideReading(reading) }
+                        } else {
+                            NotchPillAgentCompactContent(providers: providers, reading: reading, geometry: geometry)
+                        }
+                    }
                         .onChange(of: NotchAgentSupport.readingShape(reading)) { _, _ in
                             DispatchQueue.main.async { onReadingShapeChange() }
                         }
                 }
             } else if activity == .call {
                 NotchCallStrip(geometry: geometry, size: CGSize(width: 100, height: geometry.stripHeight), minimal: true)
+            } else if physicalSide {
+                NotchAttachedActivityContent(geometry: geometry) { mark } signal: { signal }
             } else {
                 HStack(spacing: activity == .music ? 9 : 4) { mark; signal }
             }
@@ -1162,18 +1196,18 @@ private struct NotchPillCompactMark: View {
     @ViewBuilder private var mark: some View {
         switch activity {
         case .music:
-            let side = min(14, NotchCapsuleLayout.artworkSide(geometry))
+            let side = physicalSide ? NotchAttachedActivityLayout.markSize : min(14, NotchCapsuleLayout.artworkSide(geometry))
             NotchMusicCover(artwork: music.artwork, side: side, radius: min(2, side * 0.16))
         case .agents:
             EmptyView() // The complete provider group and clock are rendered together above.
         case .call:
             EmptyView()
         case .watch:
-            NotchWatchEye(size: 13, hidden: watch.state == .hidden)
+            NotchWatchEye(size: physicalSide ? 15 : 13, hidden: watch.state == .hidden)
         case .keepAwake:
-            Image(systemName: NotchKeepAwakeSupport.symbol).font(.system(size: 12, weight: .semibold))
+            Image(systemName: NotchKeepAwakeSupport.symbol).font(.system(size: physicalSide ? 14 : 12, weight: .medium))
         default:
-            Image(systemName: activity.symbol).font(.system(size: 12, weight: .semibold))
+            Image(systemName: activity.symbol).font(.system(size: physicalSide ? 14 : 12, weight: .medium))
         }
     }
 
@@ -1181,30 +1215,54 @@ private struct NotchPillCompactMark: View {
         switch activity {
         case .music:
             NotchLiveEqualizerBars(isPlaying: music.playback?.isPlaying == true,
-                                   bars: 2, barWidth: 1.5, height: 9,
+                                   bars: physicalSide ? 3 : 2, barWidth: 1.5, height: physicalSide ? 12 : 9,
                                    tint: music.artworkTint?.color ?? .white)
         case .downloads:
             let fraction = downloads.items.first { $0.active && !$0.completed }?.fraction ?? 0
-            Circle().trim(from: 0, to: max(0.08, fraction))
-                .stroke(.white, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                .rotationEffect(.degrees(-90)).frame(width: 9, height: 9)
+            ZStack {
+                if physicalSide { Circle().stroke(.white.opacity(0.18), lineWidth: 2) }
+                Circle().trim(from: 0, to: max(0.02, fraction))
+                    .stroke(.white, style: StrokeStyle(lineWidth: physicalSide ? 2 : 1.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }.frame(width: physicalSide ? 14 : 9, height: physicalSide ? 14 : 9)
         case .timer:
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                Text(NotchTimerSupport.compactText(for: timer.session, at: timer.now, locale: .current))
+                let reading = NotchTimerSupport.compactText(for: timer.session, at: timer.now, locale: .current)
+                if physicalSide { sideReading(reading) }
+                else { Text(reading)
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .lineLimit(1)
+                    .lineLimit(1) }
             }
         case .agents:
             EmptyView()
         case .call:
             EmptyView()
         case .calendar:
-            Circle().fill(.mint).frame(width: 6, height: 6)
+            if physicalSide, let countdown = calendar.countdown {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    sideReading(NotchCalendarSupport.countdownText(until: countdown.target, now: context.date))
+                }
+            } else { Circle().fill(.mint).frame(width: 6, height: 6) }
         case .watch:
             Circle().fill(watch.state == .hidden ? Color.secondary : Color.green).frame(width: 6, height: 6)
         case .keepAwake:
-            Image(systemName: awake.endDate == nil ? "infinity" : "clock")
-                .font(.system(size: 8, weight: .bold))
+            if physicalSide, let end = awake.endDate {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    sideReading(NotchKeepAwakeSupport.compactText(until: end, now: context.date, locale: .current))
+                }
+            } else {
+                Image(systemName: awake.endDate == nil ? "infinity" : "clock")
+                    .font(.system(size: physicalSide ? 12 : 8, weight: .medium))
+            }
         }
+    }
+
+    private func sideReading(_ reading: String) -> some View {
+        Text(reading).font(Font(NotchAttachedActivityLayout.readoutFont as CTFont))
+            .foregroundStyle(.white.opacity(0.9))
+            .lineLimit(1).fixedSize()
+            .onChange(of: NotchAgentSupport.readingShape(reading)) { _, _ in
+                DispatchQueue.main.async { onReadingShapeChange() }
+            }
     }
 }

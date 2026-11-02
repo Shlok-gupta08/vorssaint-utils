@@ -667,6 +667,25 @@ enum NotchPillActivityLayout {
 }
 
 enum NotchAttachedActivityLayout {
+    static let sideInset: CGFloat = 10
+    static let contentGap: CGFloat = 8
+    static let markSize: CGFloat = 16
+    static let agentMarkSize: CGFloat = 14
+    static let readoutFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+
+    /// A side activity has two clear groups: identity and live information.
+    /// Measure the same digits and provider group that the row renders.
+    static func compactWidth(reading: String? = nil, providers: Int = 0, shoulder: CGFloat = 0) -> CGFloat {
+        // Agent glyphs reserve their animation's full footprint, wider than
+        // the nominal mark. Counting only its ink clips the following clock.
+        let marks = providers > 0 ? CGFloat(providers) * (agentMarkSize * 1.45 + 1)
+            + CGFloat(providers - 1) * 5 : markSize
+        let signal = reading.map {
+            (NotchAgentSupport.readingShape($0) as NSString).size(withAttributes: [.font: readoutFont]).width.rounded(.up)
+        } ?? 14
+        return max(64, sideInset * 2 + marks + contentGap + signal) + shoulder * 2
+    }
+
     /// Side activities float as pills even when the primary is a notch.
     static func satelliteGeometry(_ geometry: NotchGeometry) -> NotchGeometry {
         NotchGeometry(screen: geometry.screen, safeAreaTop: 0, cameraWidth: 0,
