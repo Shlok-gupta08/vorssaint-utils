@@ -2775,3 +2775,22 @@ enum NotchTranslucentTint {
         }
     }
 }
+
+#if VORSSAINT_DEVELOPMENT
+/// Opt-in timestamps for diagnosing hover-to-paint latency in the running app.
+enum NotchHoverTrace {
+    private static let enabled = CommandLine.arguments.contains("--trace-hover-latency")
+    static func mark(_ stage: String) {
+        guard enabled else { return }
+        let line = String(format: "HOVER %.3f %@\n", ProcessInfo.processInfo.systemUptime, stage)
+        FileHandle.standardError.write(Data(line.utf8))
+    }
+}
+#endif
+
+/// One expanded-page measurement reused by its header and content views.
+struct NotchExpandedViewLayout {
+    let geometry: NotchGeometry
+    let size: CGSize
+    var contentSize: CGSize { geometry.contentSize(for: size) }
+}

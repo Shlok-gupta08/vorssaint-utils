@@ -36,6 +36,7 @@ enum NotchCompactTests {
         @Published var scratchpadFindSerial = 0
         var scratchpadFindAction = NSTextFinder.Action.showFindInterface
         var contentSize = CGSize(width: 304, height: 122)
+        var expandedViewContentSize: CGSize { contentSize }
         var selected = NotchModule.controls
         var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
                                      safeAreaTop: 0, cameraWidth: 0, layout: .custom,

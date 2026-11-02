@@ -70,6 +70,10 @@ final class NotchService: ObservableObject {
 
     @Published private(set) var geometry = NotchGeometry(
         screen: CGRect(x: 0, y: 0, width: 1440, height: 900), safeAreaTop: 0, cameraWidth: 0)
+    private(set) var expandedViewLayout: NotchExpandedViewLayout?
+    var expandedViewGeometry: NotchGeometry { expandedViewLayout?.geometry ?? expandedGeometry }
+    var expandedViewSize: CGSize { expandedViewLayout?.size ?? expandedSize }
+    var expandedViewContentSize: CGSize { expandedViewLayout?.contentSize ?? contentSize }
     @Published private(set) var expanded = false
     @Published private(set) var expandedPillActivity: NotchCompactActivity?
     @Published private(set) var showingCall = false
@@ -533,12 +537,18 @@ final class NotchService: ObservableObject {
         guard let activity = pillActivityUnderPointer() else { return }
         if entered {
             if hoveredPillActivity == activity, let pillHoverWork, !pillHoverWork.isCancelled { return }
+#if VORSSAINT_DEVELOPMENT
+            NotchHoverTrace.mark("activity deadline scheduled")
+#endif
             hoveredPillActivity = activity
             pillHoverWork?.cancel()
             let work = DispatchWorkItem { [weak self] in
                 guard let self, self.hoveredPillActivity == activity, self.usesPillActivityDeck,
                       !self.expanded, self.pillActivityUnderPointer() == activity,
                       self.visiblePillActivities.contains(activity) else { return }
+#if VORSSAINT_DEVELOPMENT
+                NotchHoverTrace.mark("activity deadline fired")
+#endif
                 self.pillHoverWork = nil
                 guard self.notice == nil || activity != self.compactActivity else { return }
                 self.open(activity.module, takeFocus: false, activity: activity)
@@ -1425,6 +1435,9 @@ final class NotchService: ObservableObject {
     func open(_ module: NotchModule? = nil, pinned: Bool = false, takeFocus: Bool = true,
               appPanel: Bool = false, metric: MetricDetailKind? = nil, feedback: Bool = true, sections: Bool = false,
               activity: NotchCompactActivity? = nil) {
+#if VORSSAINT_DEVELOPMENT
+        NotchHoverTrace.mark("open entered")
+#endif
         if showsDictation {
             guard !dictationPhase.isBusy else { return }
             dictationPhase = .idle
@@ -1463,6 +1476,9 @@ final class NotchService: ObservableObject {
         // or a capture preview under the pointer can be told the pointer left.
         // An open page is followed again only from an exit report.
         if !expanded { removeHoverExitMonitors() }
+#if VORSSAINT_DEVELOPMENT
+        NotchHoverTrace.mark("open state ready")
+#endif
         let existingActivity = expanded && usesPillActivityDeck && !appPanel && !sections && metric == nil
             ? expandedPillActivity : nil
         mutatePresentation(transitionContent: changesPresentation ? (expanded ? .replace : .reveal) : .none,
@@ -1482,6 +1498,9 @@ final class NotchService: ObservableObject {
             // the message; a held one must not reappear after collapsing.
             if notice?.notificationID != nil { noticeWork?.cancel(); noticeWork = nil; notice = nil; noticeExpanded = false }
         }
+#if VORSSAINT_DEVELOPMENT
+        NotchHoverTrace.mark("open presentation returned")
+#endif
         inside = windowHost?.containsHover(NSEvent.mouseLocation) == true
         installEventMonitors()
         syncVisibleConsumers()
@@ -1549,6 +1568,9 @@ final class NotchService: ObservableObject {
         inside = hiddenUntilHover ? geometry.contains(point, in: geometry.collapsed)
             && windowHost?.isConcealedForMissionControl == false
             : windowHost?.containsHover(point) == true || pointerOverChildWindow(point)
+#if VORSSAINT_DEVELOPMENT
+        if inside && !wasInside { NotchHoverTrace.mark("native pointer entered") }
+#endif
         hoverState.update(pointerInside: inside)
         let emphasize = inside && !hiddenInFullscreen && !hiddenUntilHover && !expanded && !peeking && !dragPlaceholder
             && notice == nil && captureControls == nil
@@ -2681,6 +2703,7 @@ final class NotchService: ObservableObject {
             removeScreenEdgeClickMonitors()
             return
         }
+        expandedViewLayout = expanded ? NotchExpandedViewLayout(geometry: expandedGeometry, size: expandedSize) : nil
         let access = expandedQuickAccess
         let size = surfaceSize
         let contentTransition = usesPillActivityDeck || fullscreenCompact ? NotchContentTransition.none

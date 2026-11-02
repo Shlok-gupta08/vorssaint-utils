@@ -370,20 +370,20 @@ struct NotchView: View {
                     content
                 }
             }
-            .frame(width: service.contentSize.width, height: service.contentSize.height, alignment: .top)
-            .clipShape(NotchPageClip(top: service.expandedGeometry.headerTopInset
-                                        + service.expandedGeometry.headerRowHeight + NotchLayout.spacing))
+            .frame(width: service.expandedViewContentSize.width, height: service.expandedViewContentSize.height, alignment: .top)
+            .clipShape(NotchPageClip(top: service.expandedViewGeometry.headerTopInset
+                                        + service.expandedViewGeometry.headerRowHeight + NotchLayout.spacing))
         }
         .padding(.horizontal, NotchLayout.horizontalInset)
-        .padding(.top, service.expandedGeometry.headerTopInset)
+        .padding(.top, service.expandedViewGeometry.headerTopInset)
         .padding(.bottom, NotchLayout.bottomInset)
-        .frame(width: service.expandedSize.width, height: service.expandedSize.height, alignment: .top)
+        .frame(width: service.expandedViewSize.width, height: service.expandedViewSize.height, alignment: .top)
     }
 
     /// Keep each page's minimum usable layout reachable when a custom height
     /// or the display leaves less room. The outer silhouette stays unchanged.
     private var pageSize: CGSize {
-        var size = service.contentSize
+        var size = service.expandedViewContentSize
         guard !showsDetail else { return size }
         switch service.selected {
         case .controls:
@@ -428,7 +428,7 @@ struct NotchView: View {
         return size
     }
 
-    private var contentOverflows: Bool { pageSize.height > service.contentSize.height }
+    private var contentOverflows: Bool { pageSize.height > service.expandedViewContentSize.height }
 
     private var scrollsVertically: Bool {
         guard !service.showingAppPanel else { return false }
@@ -444,12 +444,12 @@ struct NotchView: View {
     }
 
     private var header: some View {
-        HStack(spacing: service.expandedGeometry.headerCameraGap > 0 ? 0 : 6) {
+        HStack(spacing: service.expandedViewGeometry.headerCameraGap > 0 ? 0 : 6) {
             let quickActions = service.expandedQuickAccess.actions
             HStack(spacing: 6) {
                 if service.showingSections {
                     NotchIconButton(symbol: "chevron.left", title: l10n.s.obBack, action: service.toggleSections)
-                    if service.expandedGeometry.headerCameraGap == 0 {
+                    if service.expandedViewGeometry.headerCameraGap == 0 {
                         Text(text.sectionsTitle)
                             .font(.system(size: 16, weight: .semibold))
                             .lineLimit(1)
@@ -458,7 +458,7 @@ struct NotchView: View {
                     // Beside the camera the field takes the rest of its side,
                     // stopping a little short of the cutout.
                     NotchSectionSearch(service: service,
-                                       maximumFieldWidth: service.expandedGeometry.headerCameraGap > 0 ? .infinity : 150)
+                                       maximumFieldWidth: service.expandedViewGeometry.headerCameraGap > 0 ? .infinity : 150)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else if showsDetail || service.modules.isEmpty {
                     if showsDetail {
@@ -478,8 +478,8 @@ struct NotchView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .padding(.trailing, service.expandedGeometry.headerCameraGap > 0 ? NotchLayout.cameraClearance : 0)
-            .frame(width: service.expandedGeometry.headerCameraGap > 0 ? (service.contentSize.width - service.expandedGeometry.headerCameraGap) / 2 : nil)
+            .padding(.trailing, service.expandedViewGeometry.headerCameraGap > 0 ? NotchLayout.cameraClearance : 0)
+            .frame(width: service.expandedViewGeometry.headerCameraGap > 0 ? (service.expandedViewContentSize.width - service.expandedViewGeometry.headerCameraGap) / 2 : nil)
             .frame(maxWidth: .infinity, alignment: .leading)
             // Keep search mounted so a media key never discards its focus.
             .opacity(headerFeedback == nil ? 1 : 0)
@@ -488,29 +488,29 @@ struct NotchView: View {
             .overlay(alignment: .leading) {
                 if let notice = headerFeedback {
                     NotchExpandedLevelView(notice: notice)
-                        .padding(.trailing, service.expandedGeometry.headerCameraGap > 0 ? NotchLayout.cameraClearance : 0)
+                        .padding(.trailing, service.expandedViewGeometry.headerCameraGap > 0 ? NotchLayout.cameraClearance : 0)
                 }
             }
             .clipped()
-            if service.expandedGeometry.headerCameraGap > 0 {
-                Color.clear.frame(width: service.expandedGeometry.headerCameraGap)
+            if service.expandedViewGeometry.headerCameraGap > 0 {
+                Color.clear.frame(width: service.expandedViewGeometry.headerCameraGap)
             }
             HStack(spacing: 6) {
                 if service.selected == .captures, !showsDetail, !service.showingSections,
                    let actions = service.captureActions {
                     actions.fixedSize()
                     overflowMenu(items: overflowItems(tools: false, clear: false))
-                } else if service.expandedGeometry.headerCameraGap > 0 {
+                } else if service.expandedViewGeometry.headerCameraGap > 0 {
                     cameraHeaderActions
                 } else {
                     headerActions(quickActions: quickActions)
                 }
             }
-            .padding(.leading, service.expandedGeometry.headerCameraGap > 0 ? NotchLayout.cameraClearance : 0)
-            .frame(width: service.expandedGeometry.headerCameraGap > 0 ? (service.contentSize.width - service.expandedGeometry.headerCameraGap) / 2 : nil,
+            .padding(.leading, service.expandedViewGeometry.headerCameraGap > 0 ? NotchLayout.cameraClearance : 0)
+            .frame(width: service.expandedViewGeometry.headerCameraGap > 0 ? (service.expandedViewContentSize.width - service.expandedViewGeometry.headerCameraGap) / 2 : nil,
                    alignment: .trailing)
         }
-        .frame(height: service.expandedGeometry.headerRowHeight)
+        .frame(height: service.expandedViewGeometry.headerRowHeight)
         .contentShape(Rectangle())
         .onHover { headerHovered = $0 }
         .onAppear { UpdateService.shared.checkIfStale() }
@@ -1051,6 +1051,9 @@ struct NotchActivityViewport: ViewModifier {
             .transaction { $0.animation = nil }
         }
         .onChange(of: CGRect(x: targetX, y: 0, width: targetSize.width, height: targetSize.height)) {
+#if VORSSAINT_DEVELOPMENT
+            NotchHoverTrace.mark("viewport motion started")
+#endif
             let now = Date()
             let current = pose(at: now)
             fromSize = current.size

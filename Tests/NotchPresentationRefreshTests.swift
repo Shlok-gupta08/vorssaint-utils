@@ -151,6 +151,8 @@ enum NotchPresentationRefreshContract {
         }
     }
     class State: ObservableObject {
+        var expandedViewLayout: NotchExpandedViewLayout?
+        var expandedSize: CGSize { surfaceSize }
         var hasCallActivity = false
         var configuredQuickAccess = NotchQuickAccessConfiguration.current()
         var expandedPillActivity: NotchCompactActivity?
@@ -341,6 +343,9 @@ enum NotchPresentationRefreshContract {
                      && toolbar.expandedGeometry.headerTopInset == 42
                      && toolbar.windowHost?.activationRect.height == 42,
                      "a capture toolbar keeps a full row below the camera without losing actions to the cutout")
+        suite.expect(toolbar.expandedViewLayout?.geometry == toolbar.expandedGeometry
+                     && toolbar.expandedViewLayout?.size == toolbar.windowHost?.targetSize,
+                     "the expanded view reuses the current presentation's measured layout after changing pages")
         toolbar.showingSections = true
         suite.expect(toolbar.expandedGeometry.headerCameraGap == 210,
                      "leaving capture editing restores the compact header layout")
