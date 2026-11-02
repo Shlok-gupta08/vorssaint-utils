@@ -48,6 +48,8 @@ enum NotchMusicVisibilityTests {
     enum NSEvent { static let mouseLocation = CGPoint.zero }
 
     class State {
+        var hasCallActivity = false
+        var showingCall = false
         var dictationPhase = DictationPhase.idle
         var showsDictation: Bool { dictationPhase.presentsIsland }
         var activitySelection = NotchActivitySelection()
@@ -56,9 +58,18 @@ enum NotchMusicVisibilityTests {
             primary == .timer ? timerCompanions : []
         }
         var showsCompactActivityPicker = false
+        var usesPillActivityDeck = false
+        var widenedPillActivities = Set<NotchCompactActivity>()
+        var userHiddenUntilHover: Bool { NotchSupport.hidesUntilHover(in: ReviewDefaults.current) }
+        var automaticallyHiddenWithoutNotch: Bool {
+            !geometry.isNotched && hiddenInFullscreen && NotchSupport.autoHidesWithoutNotch(in: ReviewDefaults.current)
+        }
         var compactActivityPickerLayout = NotchActivityPickerLayout(
             count: 2, labelWidth: 80, stripSize: CGSize(width: 300, height: 32), screenWidth: 1440)
         var hiddenInFullscreen = false
+        var hiddenAtRestInFullscreen: Bool {
+            hiddenInFullscreen && !geometry.isNotched && !expanded && !peeking && notice == nil && !showsDictation
+        }
         var running = true
         var suspended = false
         var isPlayerActive = false
@@ -91,6 +102,10 @@ enum NotchMusicVisibilityTests {
         var awaitsTrackNotice = false
         var timerStripWing: CGFloat = 44
         func timerStripWing(for companion: NotchCompactActivity?, in geometry: NotchGeometry) -> CGFloat { timerStripWing }
+        var workingAgentCount = 1
+        func musicAgentStripGeometry(in geometry: NotchGeometry) -> NotchGeometry {
+            geometry.compactMusicAgentGeometry(working: workingAgentCount)
+        }
         var agentStripWing: CGFloat = 58
         func agentStripWing(in geometry: NotchGeometry) -> CGFloat { agentStripWing }
         var watchStripWing: CGFloat = 60
@@ -127,7 +142,7 @@ enum NotchMusicVisibilityTests {
             captureClose = nil
             captureClosesOnCollapse = false
         }
-        func mutatePresentation(transitionContent: NotchContentTransition, _ change: () -> Void) { change() }
+        func mutatePresentation(transitionContent: NotchContentTransition, animatesPills: Bool = false, _ change: () -> Void) { change() }
     }
 
     static func run(_ suite: TestSuite) {
@@ -144,6 +159,9 @@ enum NotchMusicVisibilityTests {
         for feature in AppFeature.allCases { defaults.set(true, forKey: feature.availabilityKey) }
         defaults.set(true, forKey: DefaultsKey.notchEnabled)
         defaults.set(false, forKey: DefaultsKey.notchTrackChange)
+        // This suite pins the established visible presentation. The separate
+        // capsule preference contract covers the new default-on hidden mode.
+        defaults.set(false, forKey: DefaultsKey.notchAutoHideWithoutNotch)
         let service = Service()
         let dictation = Service()
         dictation.hiddenInFullscreen = true
@@ -194,14 +212,14 @@ enum NotchMusicVisibilityTests {
 
             service.hiddenInFullscreen = true
             service.syncVisibleConsumers()
-            suite.expect(!reader.running && service.surfaceSize == closed,
-                         "fullscreen keeps a black cutout and stops the automatic playback reader")
+            suite.expect(!reader.running && (physical ? service.surfaceSize == closed : service.hiddenUntilHover),
+                         "fullscreen keeps hardware black and visually hides a simulated island while stopping its reader")
             let plain = service.geometry
             service.geometry = NotchGeometry(screen: plain.screen, safeAreaTop: physical ? 32 : 0,
                                              cameraWidth: physical ? 180 : 0, menuBarHeight: 32,
                                              compactSideRoom: 100, outline: true)
-            suite.expect(service.surfaceSize == closed,
-                         "fullscreen draws no outline, so its cutout keeps to the camera without the outline's room")
+            suite.expect(physical ? service.surfaceSize == closed : service.hiddenUntilHover,
+                         "fullscreen draws no outline on hardware and keeps a simulated island visually hidden")
             service.geometry = plain
             service.showsCopies = true
             service.syncVisibleConsumers()
@@ -215,8 +233,8 @@ enum NotchMusicVisibilityTests {
             suite.expect(reader.running && service.surfaceSize == service.expandedSize,
                          "manually opening Music in fullscreen starts its reader")
             service.collapse()
-            suite.expect(!reader.running && service.surfaceSize == closed,
-                         "closing Music in fullscreen stops its reader and restores the black cutout")
+            suite.expect(!reader.running && (physical ? service.surfaceSize == closed : service.hiddenUntilHover),
+                         "closing Music in fullscreen stops its reader and restores the hardware or hover target")
             service.hiddenInFullscreen = false
             service.syncVisibleConsumers()
             suite.expect(reader.running, "leaving fullscreen restarts the playback reader when music is enabled")
@@ -392,6 +410,12 @@ enum NotchMusicVisibilityTests {
                      "a running Keep Awake session takes the timer's wings in the closed island")
         service.geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1470, height: 956), safeAreaTop: 32,
                                          cameraWidth: 180, menuBarHeight: 32, compactSideRoom: 100)
+        service.workingAgentCount = 3
+        suite.expect(service.compactGeometry(for: .music, companion: .agents)
+                        == service.geometry.compactMusicAgentGeometry(working: 3),
+                     "music paired with agents uses the live logo-count geometry")
+        suite.expect(service.compactGeometry(for: .music) == service.geometry.compactMusicGeometry,
+                     "solo music keeps its existing cover and waveform geometry")
         service.calendarStripWing = 66
         suite.expect(service.compactGeometry(for: .calendar, companion: .music).compactActivityWingWidth == 66
                      && service.compactGeometry(for: .calendar).compactActivityWingWidth == 72,

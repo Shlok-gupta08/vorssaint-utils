@@ -27,6 +27,7 @@ struct NotchMirrorView: View {
         if let activity = mirror.activity {
             if geometry.floats {
                 switch activity {
+                case .call: NotchCallStrip(geometry: geometry, size: size)
                 case .timer: NotchCapsuleTimerStrip(service: service, size: size, displayGeometry: geometry)
                 case .watch: NotchCapsuleWatchStrip(service: service, size: size, displayGeometry: geometry)
                 case .downloads: NotchCapsuleDownloadStrip(service: service, size: size, displayGeometry: geometry)
@@ -37,6 +38,7 @@ struct NotchMirrorView: View {
                 }
             } else {
                 switch activity {
+                case .call: NotchCallStrip(geometry: mirror.strip, size: size)
                 case .timer: NotchTimerStrip(service: service, displayGeometry: mirror.strip)
                 case .watch: NotchWatchStrip(service: service, displayGeometry: mirror.strip)
                 case .downloads: NotchDownloadStrip(service: service, displayGeometry: mirror.strip)

@@ -7,6 +7,7 @@ import SwiftUI
 
 enum NotchActivityTests {
     static func run(_ suite: TestSuite) {
+        NotchCallTests.run(suite)
         timerContracts(suite)
         alertContracts(suite)
         pomodoroContracts(suite)
@@ -16,10 +17,42 @@ enum NotchActivityTests {
         compactTimerContracts(suite)
         compactMarginContracts(suite)
         compactDownloadContracts(suite)
+        pillDeckContracts(suite)
         keepAwakeContracts(suite)
         accessoryContracts(suite)
         PeripheralBatteryLifecycleTests.run(suite)
         gateContracts(suite)
+    }
+
+    private static func pillDeckContracts(_ suite: TestSuite) {
+        let all: [NotchCompactActivity] = [.timer, .watch, .downloads, .agents, .calendar, .music, .keepAwake]
+        suite.expect(NotchPillActivityLayout.ordered(all, preferred: nil)
+                     == [.agents, .music, .downloads, .calendar, .watch, .timer, .keepAwake],
+                     "the floating pill prioritizes active work over passive timers")
+        suite.expect(NotchPillActivityLayout.visible(all, preferred: .calendar)
+                     == [.calendar, .agents, .music, .downloads],
+                     "a person's primary choice stays central and the deck caps itself at four pills")
+        suite.expect(NotchPillActivityLayout.surfaceWidth(primary: 180, secondary: [42, 42, 42], available: 500)
+                     == 180 + 42 * 3 + NotchPillActivityLayout.spacing * 3,
+                     "compact side activities add only their pills and the real gaps between them")
+        suite.expect(NotchPillActivityLayout.surfaceWidth(primary: 260, secondary: [172, 172], available: 420) == 420,
+                     "a widened deck never consumes more menu bar than the display leaves")
+        let playing = NotchPillActivityLayout.Context(musicPlaying: true, agentsActive: true)
+        suite.expect(NotchPillActivityLayout.ordered(all, preferred: nil, context: playing).first == .music,
+                     "playing music leads background agent work without a manual override")
+        let urgent = NotchPillActivityLayout.Context(musicPlaying: true, agentsActive: true, calendarImminent: true)
+        suite.expect(NotchPillActivityLayout.ordered(all, preferred: nil, context: urgent).first == .calendar,
+                     "an imminent meeting takes priority over playing music")
+        suite.expect(NotchPillActivityLayout.ordered(all, preferred: .agents, context: urgent).first == .agents,
+                     "only a deliberate primary override outranks automatic attention")
+        suite.expect(NotchPillActivityLayout.defaultSide(at: 0) == .right
+                     && NotchPillActivityLayout.defaultSide(at: 1) == .left
+                     && NotchPillActivityLayout.defaultSide(at: 2) == .right,
+                     "secondary activities fill right, then left, then right")
+        for height: CGFloat in [16, 20, 32, 44] {
+            let width = NotchPillActivityLayout.compactWidth(bodyHeight: height, shoulder: 5)
+            suite.expect(width - 10 >= height * 2, "compact pills stay elongated even with a taller custom fit")
+        }
     }
 
     /// Keep Awake as an activity: off until turned on, gated like the others,
@@ -591,12 +624,30 @@ enum NotchActivityTests {
                      "an activity that is not showing offers no pair")
         suite.expect(companions(of: .calendar, running: false) == [.downloads, .agents, .music],
                      "an event's clock keeps its side beside a download, agents or music, whatever the timer does")
-        suite.expect([NotchCompactActivity.downloads, .agents, .music].allSatisfy { companions(of: $0).isEmpty },
-                     "downloads, agents and music need both wings and cannot lead a pair")
+        suite.expect([NotchCompactActivity.downloads, .agents].allSatisfy { companions(of: $0).isEmpty },
+                     "downloads and agents cannot lead a pair")
         suite.expect(NotchActivityCombination(primary: .calendar, companion: .music).title(.enUS) == "Music + Calendar"
                      && NotchActivityCombination(primary: .timer, companion: .calendar).title(.enUS) == "Calendar + Timer",
                      "a pair is named in the order the island shows it, the companion left of the camera first")
+        suite.expect(companions(of: .music) == [.agents], "music offers an explicit agents-left, music-right pair")
+        suite.expect(NotchSupport.compactCompanions(of: .music, timer: true, running: true, downloads: true,
+                     agents: false, calendar: true, music: true).isEmpty,
+                     "music cannot pair with agents when none are working")
+        suite.expect(NotchSupport.compactCompanions(of: .music, timer: true, running: true, downloads: true,
+                     agents: true, calendar: true, music: false).isEmpty,
+                     "inactive music offers no agent pair")
         let screen = CGRect(x: 0, y: 0, width: 1470, height: 956)
+        let pairBase = NotchGeometry(screen: screen, safeAreaTop: 32, cameraWidth: 180, compactSideRoom: 400)
+        var previousWing: CGFloat = 0
+        for count in 1...5 {
+            let pair = pairBase.compactMusicAgentGeometry(working: count)
+            let needed = NotchAgentSupport.stripMarksWing(working: count, geometry: pair)
+            suite.expect(pair.compactActivityWingWidth >= needed && pair.compactActivityWingWidth > previousWing,
+                         "each additional agent grows the combined wing while keeping full-size logos and padding")
+            suite.expect(pair.compactActivityCameraGap == pairBase.cameraWidth && !pair.compactActivityUsesFooter,
+                         "the combined strip keeps the physical camera clear without growing a footer")
+            previousWing = pair.compactActivityWingWidth
+        }
         for barHeight: CGFloat in [16, 22, 24, 32, 40, 64] {
             for notched in [false, true] {
                 for layout in NotchSize.allCases {

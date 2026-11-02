@@ -58,6 +58,9 @@ enum NotchDestinationContract {
     enum NotchLockScreenService { static var shared = LockScreen() }
 
     class State {
+        var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900), safeAreaTop: 0, cameraWidth: 0)
+        var expandedPillActivity: NotchCompactActivity?
+        var showingCall = false
         var dictationPhase = DictationPhase.idle
         var showsDictation: Bool { dictationPhase.presentsIsland }
         var acceptsUserInteraction = true
@@ -96,7 +99,7 @@ enum NotchDestinationContract {
         var presentationTearDowns = 0
         var captureControlsCancel: (() -> Void)?
         var captureClose: (() -> Void)?
-        func mutatePresentation(transitionContent: NotchContentTransition, _ change: () -> Void) { change() }
+        func mutatePresentation(transitionContent: NotchContentTransition, animatesPills: Bool = false, _ change: () -> Void) { change() }
         func installEventMonitors() {}
         func syncVisibleConsumers() { requestedDetail = selectedMetric }
         func provideHapticFeedback() {}

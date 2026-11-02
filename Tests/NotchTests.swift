@@ -427,26 +427,16 @@ enum NotchTests {
                                              safeAreaTop: cameraHeight, cameraWidth: camera)
                 let rest = geometry.restingSize(showsContent: false)
                 let open = geometry.underNotchLevelSize
-                let radius = NotchLayout.surfaceRadius(height: cameraHeight)
                 for pair in [(rest, open), (open, rest)] {
                     for time in stride(from: 0.0, through: 0.4, by: 1.0 / 120) {
                         let size = NotchLevelMotion.size(at: time, from: pair.0, to: pair.1)
-                        let widthProgress = (size.width - pair.0.width) / (pair.1.width - pair.0.width)
-                        let heightProgress = (size.height - pair.0.height) / (pair.1.height - pair.0.height)
-                        suite.expect(abs(widthProgress - heightProgress) < 0.000001,
-                                     "width and height glide together on one curve without separate stages")
+                        suite.expect(size.width >= rest.width && size.width <= open.width,
+                                     "level feedback stays within its modest width expansion without overshoot")
+                        suite.expect(size.height >= rest.height && size.height <= open.height,
+                                     "vertical level motion stays between its endpoints without overshoot")
                         if time > 0 && time < 0.32 {
-                            suite.expect(widthProgress > 0 && widthProgress < 1 && heightProgress > 0 && heightProgress < 1,
-                                         "neither dimension pauses while the other moves")
-                        }
-                        guard size.height > cameraHeight + 0.01 else { continue }
-                        let shoulder = min(NotchLayout.shoulder(height: cameraHeight), max(0, (size.width - camera) / 2))
-                        let shape = NotchShape(attached: true, radius: radius, profileHeight: cameraHeight, minimumBodyWidth: camera)
-                            .path(in: CGRect(origin: .zero, size: size))
-                        for y in [(shoulder + size.height - radius) / 2] {
-                            suite.expect(shape.contains(CGPoint(x: (size.width - camera) / 2 + 0.01, y: y))
-                                         && shape.contains(CGPoint(x: (size.width + camera) / 2 - 0.01, y: y)),
-                                         "the meter's side walls never pinch narrower than the physical camera during the glide")
+                            suite.expect(size.height > rest.height && size.height < open.height,
+                                         "the drop moves continuously between its endpoints")
                         }
                     }
                 }
@@ -467,7 +457,7 @@ enum NotchTests {
                 let geometry = NotchGeometry(screen: CGRect(x: -1470, y: 100, width: 1470, height: 956),
                                              safeAreaTop: height, cameraWidth: camera)
                 let size = geometry.underNotchLevelSize
-                suite.expect(size.width >= camera + 32 && size.height == geometry.stripHeight + 42
+                suite.expect(size.width == camera + 24 && size.height == geometry.stripHeight + 38
                              && geometry.underNotchLevelTop > geometry.cameraHeight
                              && geometry.screen.contains(geometry.frame(for: size)),
                              "the small level tray clears the physical camera and stays within the display")

@@ -55,7 +55,15 @@ struct NotchMusicStrip: View {
     private var fillsCameraGap: Bool { !geometry.isNotched && geometry.compactActivityCameraGap >= 56 }
     private var showsArtist: Bool { geometry.compactActivityContentHeight >= 28 }
 
-    var body: some View {
+    @ViewBuilder var body: some View {
+        if snapshot == nil, service.compactCompanion == .agents {
+            NotchMusicAgentStrip(service: service, geometry: geometry, artwork: artwork, title: title)
+        } else {
+            solo
+        }
+    }
+
+    @ViewBuilder private var solo: some View {
         let isPaused = playback?.isPlaying != true
         Button { service.openActivity(.music) } label: {
             HStack(spacing: 0) {
@@ -166,5 +174,54 @@ struct NotchMusicCover: View {
             RoundedRectangle(cornerRadius: radius, style: .circular)
                 .strokeBorder(.white.opacity(0.14), lineWidth: 0.5)
         }
+    }
+}
+
+/// Working agents keep the left wing; the track cover takes the right.
+private struct NotchMusicAgentStrip: View {
+    @ObservedObject var service: NotchService
+    let geometry: NotchGeometry
+    let artwork: NSImage?
+    let title: String
+    @ObservedObject private var usage = AgentUsageService.shared
+
+    private var working: [AgentProvider] {
+        AgentProvider.allCases.filter { provider in usage.snapshot.live.contains { $0.provider == provider } }
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button { service.openActivity(.agents) } label: {
+                HStack(spacing: NotchAgentSupport.stripMarkSpacing) {
+                    if geometry.compactActivityWingWidth >= 28 {
+                        ForEach(working) {
+                            NotchAgentGlyph(provider: $0, size: NotchAgentSupport.stripMarkSize(height: geometry.compactActivityContentHeight))
+                        }
+                    }
+                }
+                .padding(.leading, NotchAgentSupport.stripMarkOuterInset(geometry: geometry))
+                .padding(.trailing, NotchAgentSupport.stripCameraGap)
+                .frame(width: geometry.compactActivityWingWidth, height: geometry.compactActivityContentHeight)
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel(working.map(\.displayName).joined(separator: ", "))
+            Color.clear.frame(width: geometry.compactActivityCameraGap)
+            Button { service.openActivity(.music) } label: {
+                Group {
+                    if geometry.compactActivityWingWidth >= 28 {
+                        NotchMusicCover(artwork: artwork, side: geometry.compactMusicArtworkSide,
+                                        radius: geometry.compactMusicArtworkRadius)
+                    }
+                }
+                .padding(.trailing, geometry.compactMusicArtworkInset)
+                .frame(width: geometry.compactActivityWingWidth, height: geometry.compactActivityContentHeight, alignment: .trailing)
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel(title)
+        }
+        .frame(height: geometry.compactActivityContentHeight)
+        .padding(.horizontal, geometry.compactActivityHorizontalPadding)
+        .padding(.top, geometry.compactActivityTopPadding)
+        .buttonStyle(.plain)
     }
 }

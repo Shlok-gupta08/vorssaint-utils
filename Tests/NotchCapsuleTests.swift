@@ -44,6 +44,8 @@ enum NotchCapsuleTests {
         let long = String(repeating: "A long title that keeps going ", count: 6)
         var result: [(String, CGSize)] = [
             ("rest", geometry.restingSize(showsContent: false)),
+            ("music + one agent", Layout.musicAgentSurface(working: 1, geometry: geometry)),
+            ("music + five agents", Layout.musicAgentSurface(working: 5, geometry: geometry)),
             ("music", Layout.musicSurface(title: "Song", geometry: geometry)),
             ("long music", Layout.musicSurface(title: long, geometry: geometry)),
             ("timer", Layout.timerSurface(reading: "25min", companion: nil, workingAgents: 0, downloadPercent: false,
@@ -90,6 +92,13 @@ enum NotchCapsuleTests {
         suite.expect(Defaults.registeredDefaults[DefaultsKey.notchSilhouette] as? String == NotchSilhouette.capsule.rawValue
                      && SettingsBackupSupport.exportKeys().contains(DefaultsKey.notchSilhouette),
                      "the capsule is the registered shape without a notch and travels with a backup")
+        suite.expect(Defaults.registeredDefaults[DefaultsKey.notchAutoHideWithoutNotch] as? Bool == true
+                     && SettingsBackupSupport.exportKeys().contains(DefaultsKey.notchAutoHideWithoutNotch)
+                     && NotchSupport.autoHidesWithoutNotch(in: defaults),
+                     "a simulated island stays visually clear by default and the choice travels with a backup")
+        defaults.set(false, forKey: DefaultsKey.notchAutoHideWithoutNotch)
+        suite.expect(!NotchSupport.autoHidesWithoutNotch(in: defaults),
+                     "the no-notch visual hiding default remains an explicit opt-out")
         suite.expect(NotchSilhouette.current(in: defaults) == .capsule, "a display without a notch floats a capsule by default")
         defaults.set(NotchSilhouette.notch.rawValue, forKey: DefaultsKey.notchSilhouette)
         suite.expect(NotchSilhouette.current(in: defaults) == .notch, "the simulated notch stays available")
@@ -114,6 +123,11 @@ enum NotchCapsuleTests {
     private static func placementContracts(_ suite: TestSuite) {
         let standard = capsule(bar: 24)
         let hiddenBar = capsule(bar: 22)
+        let nearlyHidden = CGSize(width: 160, height: 1.6)
+        let thinPath = NotchLayout.capsulePath(in: CGRect(origin: .zero, size: nearlyHidden), gap: 2)
+        let recovered = NotchLayout.capsuleSurface(ofBody: thinPath.boundingBoxOfPath, gap: 2)
+        suite.expect(abs(recovered.height - nearlyHidden.height) < 0.000_01,
+                     "a nearly hidden capsule round-trips through its degenerate path without adding a false gap")
         suite.expect(standard.floatingGap == 2 && standard.stripBodyHeight == 20
                      && hiddenBar.floatingGap == 1 && hiddenBar.stripBodyHeight == 20
                      && standard.cameraWidth == hiddenBar.cameraWidth
@@ -189,7 +203,14 @@ enum NotchCapsuleTests {
                 let geometry = capsule(bar: bar, room: room)
                 let resting = geometry.restingSize(showsContent: false).width
                 let available = Layout.availableWidth(geometry)
-                let side = Layout.side(geometry)
+                var previousPairWidth: CGFloat = 0
+        for count in 1...5 {
+            let pair = Layout.musicAgentSurface(working: count, geometry: geometry)
+            suite.expect(pair.width >= previousPairWidth && pair.height == geometry.stripHeight,
+                         "combined capsule widens until menu space caps it, without changing its height")
+            previousPairWidth = pair.width
+        }
+        let side = Layout.side(geometry)
                 for (name, size) in strips(geometry) {
                     suite.expect(size.width >= resting && size.width == size.width.rounded()
                                  && (size.width <= available || size.width == resting)
@@ -227,6 +248,13 @@ enum NotchCapsuleTests {
                          "a reading keeps its capsule while its digits change: \(first) and \(second)")
         }
         let music = Layout.musicSurface(title: "Song", geometry: geometry)
+        let oneAgent = Layout.agentCompactSurface(providers: 1, reading: "12:34", geometry: geometry)
+        let twoAgents = Layout.agentCompactSurface(providers: 2, reading: "12:34", geometry: geometry)
+        let fourAgents = Layout.agentCompactSurface(providers: 4, reading: "12:34", geometry: geometry)
+        suite.expect(oneAgent.width < twoAgents.width && twoAgents.width < fourAgents.width,
+                     "the compact agent pill grows for every active provider logo")
+        suite.expect(Layout.agentCompactSurface(providers: 2, reading: "1:12:34", geometry: geometry).width > twoAgents.width,
+                     "the compact agent pill reserves more room when elapsed time gains digits")
         let unnamed = Layout.musicSurface(title: nil, geometry: geometry)
         suite.expect(unnamed.width == geometry.restingSize(showsContent: false).width
                      && Layout.musicSurface(title: String(repeating: "Song ", count: 40), geometry: geometry).width > unnamed.width,
@@ -235,8 +263,9 @@ enum NotchCapsuleTests {
         suite.expect(music.width < longMusic.width && longMusic.width == (Layout.Maximum.music + side * 2).rounded(.down),
                      "a song's capsule fits its title up to the widest music strip, which then truncates the title")
         let cover = Layout.artworkSide(geometry)
-        suite.expect(abs(Layout.artworkInset(geometry) + cover / 2 - geometry.stripBodyHeight / 2) < 0.001 && cover >= 12,
-                     "the cover is a circle concentric with the capsule's round end, an even gap inside it")
+        suite.expect(abs(Layout.artworkInset(geometry) + cover / 2 - geometry.stripBodyHeight / 2) < 0.001
+                     && Layout.artworkInset(geometry) >= 5,
+                     "rounded-square artwork keeps five points of clearance inside the capsule")
         let eventAndMusic = Layout.calendarPairSurface(companion: .music, workingAgents: 0, downloadPercent: false,
                                                        geometry: geometry, language: .enUS)
         let eventAndMusicContent = Layout.artworkInset(geometry) + cover + Layout.groupSpacing + Layout.calendarClockWidth

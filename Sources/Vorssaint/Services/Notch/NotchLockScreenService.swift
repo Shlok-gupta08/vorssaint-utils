@@ -16,9 +16,14 @@ final class NotchLockScreenService {
     static let shared = NotchLockScreenService()
 
     private struct Frames: Equatable {
+        struct Island: Equatable {
+            let frame: CGRect
+            let cameraWidth: CGFloat
+            let floating: Bool
+        }
         var player: CGRect?
         var row: CGRect?
-        var island: CGRect?
+        var island: Island?
     }
 
     private let model = NotchLockScreenModel()
@@ -126,9 +131,16 @@ final class NotchLockScreenService {
         }
         // The island's own reading of its camera, with the fit the person set.
         let geometry = NotchService.shared.geometry
-        if geometry.isNotched, NSScreen.screens.contains(where: { $0.frame == geometry.screen && $0.safeAreaInsets.top > 0 }) {
-            frames.island = NotchLockScreenLayout.islandFrame(in: geometry.screen, cameraWidth: geometry.bareCutout.width,
-                                                              cameraHeight: geometry.bareCutout.height)
+        if geometry.isNotched,
+           NSScreen.screens.contains(where: { $0.frame == geometry.screen && $0.safeAreaInsets.top > 0 }),
+           let frame = NotchLockScreenLayout.islandFrame(in: geometry.screen,
+                                                         cameraWidth: geometry.bareCutout.width,
+                                                         cameraHeight: geometry.bareCutout.height) {
+            frames.island = Frames.Island(frame: frame, cameraWidth: geometry.bareCutout.width, floating: false)
+        } else if NSScreen.screens.contains(where: { $0.frame == geometry.screen }),
+                  let frame = NotchLockScreenLayout.capsuleFrame(
+                    in: geometry.screen, size: geometry.restingSize(showsContent: false), drop: geometry.floatingDrop) {
+            frames.island = Frames.Island(frame: frame, cameraWidth: 0, floating: true)
         }
         return frames
     }
@@ -152,15 +164,16 @@ final class NotchLockScreenService {
             downloads: NotchSupport.routes(.download), countdown: NotchCalendarSupport.showsCountdown(),
             timeLeft: NotchCalendarSupport.showsTimeLeft())
         if model.gates != gates { model.gates = gates }
-        let island = frames.island.map { frame in
+        let island = frames.island.map { placement in
             // Extend the panel 8 pts above screen.maxY (islandTopBleed) so the
             // black background covers the NSHostingView safe-area inset that
             // would otherwise leave a gap between the capsule and the bezel.
-            let bleed = NotchLockScreenLayout.islandTopBleed
+            let frame = placement.frame
+            let bleed = placement.floating ? 0 : NotchLockScreenLayout.islandTopBleed
             let panelFrame = CGRect(x: frame.minX, y: frame.minY,
                                     width: frame.width, height: frame.height + bleed)
             return Self.makePanel(frame: panelFrame, content: NotchLockScreenIsland(
-                model: model, size: frame.size, cameraWidth: NotchService.shared.geometry.bareCutout.width))
+                model: model, size: frame.size, cameraWidth: placement.cameraWidth, floating: placement.floating))
         }
         let panels = [island].compactMap { $0 }
         guard !panels.isEmpty || (!screenSaver && (frames.row != nil || (gates.music && frames.player != nil))) else {

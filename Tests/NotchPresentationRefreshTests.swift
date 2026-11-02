@@ -33,9 +33,11 @@ enum NotchPresentationRefreshContract {
             var hides = false
             var outline = false
             var coversMenus = true
+            var autoHidesWithoutNotch = false
             func bool(forKey key: String) -> Bool {
                 switch key {
                 case DefaultsKey.notchHideUntilHover: return hides
+                case DefaultsKey.notchAutoHideWithoutNotch: return autoHidesWithoutNotch
                 case DefaultsKey.notchOutlineEnabled: return outline
                 default: return true
                 }
@@ -120,11 +122,13 @@ enum NotchPresentationRefreshContract {
         var revealFromHidden = false
         var outlineEnabled = false
         var outlineColor = NSColor.white
+        var separatesPills = false
         var transitions: [NotchContentTransition] = []
         func setOutline(enabled: Bool, color: NSColor) {
             outlineEnabled = enabled
             outlineColor = color
         }
+        func setSeparatesPills(_ enabled: Bool) { separatesPills = enabled }
         func present(size: CGSize, geometry: NotchGeometry, animated: Bool,
                      transitionContent: NotchContentTransition, quickAccess: NotchQuickAccessConfiguration?,
                      revealFromHidden: Bool, usesGlass: Bool) {
@@ -142,11 +146,20 @@ enum NotchPresentationRefreshContract {
         }
     }
     class State: ObservableObject {
+        var hasCallActivity = false
         var showsDictation = false
         var activitySelection = NotchActivitySelection()
         var compactActivities: [NotchCompactActivity] = []
         func compactCompanions(of primary: NotchCompactActivity) -> [NotchCompactActivity] { [] }
         var showsCompactActivityPicker = false
+        var usesPillActivityDeck = false
+        var widenedPillActivities = Set<NotchCompactActivity>()
+        var userHiddenUntilHover: Bool {
+            UserDefaults.standard.hides && UserDefaults.standard.bool(forKey: DefaultsKey.notchOpenOnHover)
+        }
+        var automaticallyHiddenWithoutNotch: Bool {
+            !geometry.isNotched && hiddenInFullscreen && UserDefaults.standard.bool(forKey: DefaultsKey.notchAutoHideWithoutNotch)
+        }
         var hiddenInFullscreen = false
         var fullscreenCompact: Bool { hiddenInFullscreen && !expanded && !peeking }
         let objectWillChange = ObservableObjectPublisher()
@@ -233,6 +246,20 @@ enum NotchPresentationRefreshContract {
     }
 
     static func run(_ suite: TestSuite) {
+        let deck = Service()
+        deck.geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+                                      safeAreaTop: 0, cameraWidth: 0, compactSideRoom: 300, silhouette: .capsule)
+        deck.expanded = false
+        deck.usesPillActivityDeck = true
+        deck.compactActivities = [.music, .agents]
+        deck.notice = NotchNotice(event: .volume, title: "Volume", detail: "50%", symbol: "speaker.wave.2.fill", level: 0.5)
+        deck.refreshPresentation(transitionContent: .reveal)
+        suite.expect(deck.windowHost?.separatesPills == true && deck.windowHost?.transitions.last == NotchContentTransition.none,
+                     "centre feedback keeps independent side pills and never fades the whole deck")
+        deck.notice = nil
+        deck.refreshPresentation(transitionContent: .depart)
+        suite.expect(deck.windowHost?.separatesPills == true && deck.windowHost?.transitions.last == NotchContentTransition.none,
+                     "feedback dismissal restores the primary without withdrawing the side pills")
         let level = Service()
         level.expanded = false
         level.notice = NotchNotice(event: .volume, title: "Volume", detail: "50%", symbol: "speaker.wave.2.fill", level: 0.5)

@@ -33,6 +33,8 @@ enum NotchFullscreenTests {
     enum NotchSupport {
         enum Event { case volume }
         static func routes(_ event: Event) -> Bool { true }
+        static var autoHide = false
+        static func autoHidesWithoutNotch() -> Bool { autoHide }
     }
     enum SessionActivity {
         static let shared = Session()
@@ -52,6 +54,7 @@ enum NotchFullscreenTests {
         static func topology() -> Topology? { reads += 1; return value }
     }
     class State {
+        var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1920, height: 1080), safeAreaTop: 32, cameraWidth: 180)
         var running = true, suspended = false, hiddenInFullscreen = false
         var hoverEmphasized = false
         var panel: Bool? = true
@@ -62,12 +65,13 @@ enum NotchFullscreenTests {
         var hoverWork: DispatchWorkItem?, noticeWork: DispatchWorkItem?
         var notice: Bool? = true
         var collapses = 0, cancellations = 0, screenUpdates = 0, consumerSyncs = 0, refreshes = 0, departures = 0
+        var refreshAnimations: [Bool] = []
         func cancelCaptureControls() { cancellations += 1 }
         func endDeparture() { departures += 1 }
         func collapse() { collapses += 1 }
         func updateScreen() { screenUpdates += 1; screenUpdate?() }
         func syncVisibleConsumers() { consumerSyncs += 1 }
-        func refreshPresentation(animated: Bool) { refreshes += 1 }
+        func refreshPresentation(animated: Bool) { refreshes += 1; refreshAnimations.append(animated) }
         func updateFullscreenDisplays() {}
         func syncMirrors() {}
     }
@@ -98,6 +102,18 @@ enum NotchFullscreenTests {
         suite.expect(unknown.isFullscreen(on: 1, separateSpaces: false)
                      && !unknown.isFullscreen(on: 1, separateSpaces: true),
                      "a shared Space can omit its display UUID")
+
+        let floating = Service()
+        floating.geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1920, height: 1080), safeAreaTop: 0, cameraWidth: 0)
+        SpaceWindowBridge.value = topology
+        NotchSupport.autoHide = true
+        floating.updateFullscreenVisibility(displayID: 1)
+        suite.expect(!floating.hiddenInFullscreen, "default no-notch hiding leaves the normal desktop visible")
+        floating.updateFullscreenVisibility(displayID: 2)
+        suite.expect(floating.hiddenInFullscreen, "default no-notch hiding activates only in a fullscreen Space")
+        NotchSupport.autoHide = false
+        floating.updateFullscreenVisibility(displayID: 2)
+        suite.expect(!floating.hiddenInFullscreen, "the no-notch fullscreen hiding preference can be disabled")
 
         let service = Service()
         SpaceWindowBridge.value = topology
@@ -140,6 +156,7 @@ enum NotchFullscreenTests {
         service.fullscreenEnvironmentDidChange()
         suite.expect(service.screenUpdates == 2 && service.consumerSyncs == 1 && service.refreshes == 1,
                      "a fullscreen change reevaluates the display, consumers and presentation together")
+        suite.expect(service.refreshAnimations.last == true, "fullscreen transitions preserve animated withdrawal and return")
         service.screenUpdate = nil
         service.suspended = true
         service.fullscreenEnvironmentDidChange()

@@ -339,7 +339,7 @@ enum NotchLayout {
     /// The surface a capsule was drawn for, from the bounds it was drawn in,
     /// so a resize starts from the size on screen.
     static func capsuleSurface(ofBody body: CGRect, gap: CGFloat) -> CGSize {
-        let height = body.height > 0 ? body.maxY + max(0, gap) : body.minY * 2
+        let height = body.height > 0.000_001 ? body.maxY + max(0, gap) : body.minY * 2
         return CGSize(width: body.width + shoulder(height: height) * 2, height: max(0, height))
     }
 
@@ -557,12 +557,13 @@ enum NotchHoverEmphasis {
 }
 
 enum NotchCompactActivity: String, Identifiable {
-    case timer, watch, downloads, agents, calendar, music, keepAwake
+    case timer, watch, downloads, agents, calendar, music, keepAwake, call
 
     var id: String { rawValue }
 
     func title(_ language: AppLanguage) -> String {
         switch self {
+        case .call: return "Call"
         case .timer: return FeatureStrings.notchActivities(language).timer
         case .watch: return FeatureStrings.notchWatch(language).title
         case .downloads: return FeatureStrings.notchFiles(language).downloadsTitle
@@ -576,6 +577,7 @@ enum NotchCompactActivity: String, Identifiable {
     /// Keep Awake has no page of its own: its tile is on Controls.
     var module: NotchModule {
         switch self {
+        case .call: return .controls
         case .timer: return .timer
         case .watch: return .watch
         case .downloads: return .downloads
@@ -587,8 +589,85 @@ enum NotchCompactActivity: String, Identifiable {
     }
 
     var symbol: String {
-        self == .keepAwake ? NotchControlItem.keepAwake.symbol : module.symbol
+        if self == .call { return "phone.fill" }
+        return self == .keepAwake ? NotchControlItem.keepAwake.symbol : module.symbol
     }
+
+    /// A floating pill has enough horizontal room to keep several activities
+    /// visible. Work that benefits from attention stays central; passive,
+    /// long-running status such as a timer or Keep Awake moves to a side pill.
+    var pillPriority: Int {
+        switch self {
+        case .call: return 10_000
+        case .agents: return 700
+        case .music: return 600
+        case .downloads: return 500
+        case .calendar: return 400
+        case .watch: return 300
+        case .timer: return 200
+        case .keepAwake: return 100
+        }
+    }
+}
+
+enum NotchPillActivityLayout {
+    /// Four simultaneous pills remain easy to target without swallowing the
+    /// middle of the menu bar. Further activities stay available when one of
+    /// the visible activities finishes.
+    static let maximumVisible = 4
+    static let spacing: CGFloat = 6
+    static let compactWidth: CGFloat = 42
+    static let widenedMaximum: CGFloat = 172
+    static let hoverDelay: TimeInterval = 0.06
+
+    struct Context {
+        var musicPlaying = false
+        var agentsActive = true
+        var calendarImminent = false
+        var downloadsFinishing = false
+    }
+
+    static func compactWidth(bodyHeight: CGFloat, shoulder: CGFloat) -> CGFloat {
+        max(54, bodyHeight * 2 + shoulder * 2)
+    }
+
+    static func defaultSide(at index: Int) -> NotchPillSide {
+        index.isMultiple(of: 2) ? .right : .left
+    }
+
+    static func ordered(_ activities: [NotchCompactActivity], preferred: NotchCompactActivity?,
+                        context: Context = Context()) -> [NotchCompactActivity] {
+        func priority(_ activity: NotchCompactActivity) -> Int {
+            switch activity {
+            case .calendar where context.calendarImminent: return 900
+            case .music where context.musicPlaying: return 800
+            case .downloads where context.downloadsFinishing: return 750
+            case .agents where !context.agentsActive: return 350
+            default: return activity.pillPriority
+            }
+        }
+        return activities.sorted { lhs, rhs in
+            if lhs == .call || rhs == .call { return lhs == .call && rhs != .call }
+            if lhs == preferred { return true }
+            if rhs == preferred { return false }
+            if priority(lhs) != priority(rhs) { return priority(lhs) > priority(rhs) }
+            return lhs.rawValue < rhs.rawValue
+        }
+    }
+
+    static func visible(_ activities: [NotchCompactActivity], preferred: NotchCompactActivity?) -> [NotchCompactActivity] {
+        Array(ordered(activities, preferred: preferred).prefix(maximumVisible))
+    }
+
+    static func surfaceWidth(primary: CGFloat, secondary: [CGFloat], available: CGFloat) -> CGFloat {
+        let pieces = [primary] + secondary
+        let wanted = pieces.reduce(0, +) + CGFloat(max(0, pieces.count - 1)) * spacing
+        return min(max(0, available), wanted.rounded(.up))
+    }
+}
+
+enum NotchPillSide: Equatable {
+    case left, right
 }
 
 /// Two activities sharing the closed island: the primary keeps its reading
@@ -763,8 +842,27 @@ enum NotchCapsuleLayout {
     }
 
     /// A cover sits in the capsule's round end, concentric with it.
-    static func artworkSide(_ geometry: NotchGeometry) -> CGFloat { max(0, geometry.stripBodyHeight - 6) }
+    static func artworkSide(_ geometry: NotchGeometry) -> CGFloat { max(0, geometry.stripBodyHeight - 10) }
     static func artworkInset(_ geometry: NotchGeometry) -> CGFloat { (geometry.stripBodyHeight - artworkSide(geometry)) / 2 }
+
+    static let agentCompactFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+    static let agentCompactMarkSpacing: CGFloat = 4
+
+    static func agentCompactGlyphSize(_ geometry: NotchGeometry) -> CGFloat {
+        min(11, max(7, (geometry.stripBodyHeight - 8) / 1.45))
+    }
+
+    static func agentCompactSurface(providers: Int, reading: String, geometry: NotchGeometry) -> CGSize {
+        let count = max(1, providers)
+        let marks = CGFloat(count) * (agentCompactGlyphSize(geometry) * 1.45 + 1)
+            + CGFloat(count - 1) * agentCompactMarkSpacing
+        let clock = (reading as NSString).size(withAttributes: [.font: agentCompactFont]).width.rounded(.up)
+        // A secondary capsule has no idle island to preserve. Measure its
+        // actual logos and clock instead of inheriting the bare island's
+        // minimum width, which masked the first few size changes.
+        let wanted = marks + spacing + clock + endPadding * 2 + side(geometry) * 2
+        return CGSize(width: min(availableWidth(geometry), wanted.rounded(.up)), height: geometry.stripHeight)
+    }
 
     /// The capsule's side within its surface, as `capsuleBody` places it.
     static func side(_ geometry: NotchGeometry) -> CGFloat { NotchLayout.shoulder(height: geometry.stripHeight) }
@@ -836,6 +934,11 @@ enum NotchCapsuleLayout {
         let named = title.map { endPadding + width($0, font: titleFont) + endPadding } ?? endPadding
         let content = artworkSide(geometry) + named + barsWidth
         return surface(content: content, leading: artworkInset(geometry), maximum: Maximum.music, geometry: geometry)
+    }
+
+    static func musicAgentSurface(working: Int, geometry: NotchGeometry) -> CGSize {
+        surface(content: agentMarksWidth(working: working) + spacing + artworkSide(geometry),
+                trailing: artworkInset(geometry), maximum: Maximum.activity, geometry: geometry)
     }
 
     /// A timer's mark, or the mark of what shares the capsule with a timer
@@ -1432,8 +1535,9 @@ enum NotchSupport {
     /// music plays, and it only says that the Mac stays awake. A watch
     /// follows the timer: the person started both and is waiting on them.
     static func compactActivities(timer: Bool, watch: Bool = false, downloads: Bool, agents: Bool,
-                                  calendar: Bool, music: Bool, keepAwake: Bool = false) -> [NotchCompactActivity] {
+                                  calendar: Bool, music: Bool, keepAwake: Bool = false, call: Bool = false) -> [NotchCompactActivity] {
         let candidates: [(Bool, NotchCompactActivity)] = [
+            (call, .call),
             (timer, .timer), (watch, .watch), (downloads, .downloads), (agents, .agents),
             (calendar, .calendar), (music, .music), (keepAwake, .keepAwake)
         ]
@@ -1452,6 +1556,8 @@ enum NotchSupport {
         case .timer where timer:
             pairs = [(downloads, .downloads), (running && agents, .agents), (running && calendar, .calendar),
                      (running && music, .music)]
+        case .music where music:
+            pairs = [(agents, .agents)]
         case .calendar where calendar:
             pairs = [(downloads, .downloads), (agents, .agents), (music, .music)]
         default:
@@ -1536,6 +1642,13 @@ enum NotchSupport {
     /// shows no notices while it waits.
     static func hidesUntilHover(in defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: DefaultsKey.notchHideUntilHover) && defaults.bool(forKey: DefaultsKey.notchOpenOnHover)
+    }
+
+    /// Unlike the legacy hidden mode, this applies only where there is no
+    /// hardware cutout. The island can therefore remain visible around a
+    /// MacBook camera while external displays default to an unobstructed bar.
+    static func autoHidesWithoutNotch(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: DefaultsKey.notchAutoHideWithoutNotch) as? Bool ?? true
     }
 
     static func idleContent(in defaults: UserDefaults = .standard) -> NotchIdleContent {
@@ -1985,6 +2098,16 @@ struct NotchGeometry: Equatable {
     /// A working agent keeps its mark and one reading beside the camera,
     /// never below it, like the timer. Both wings take the width the reading
     /// needs, so a short one leaves no band of empty black at the ends.
+    /// Use the same full-size marks and edge clearance as the agents-only strip.
+    /// The music side needs only its cover; neither side reserves a reading.
+    func compactMusicAgentGeometry(working: Int) -> NotchGeometry {
+        let provisional = compactAgentGeometry(wing: NotchAgentSupport.stripWingRange.lowerBound)
+        let marks = NotchAgentSupport.stripMarksWing(working: working, geometry: provisional)
+        let cover = provisional.compactMusicArtworkSide + provisional.compactMusicArtworkInset
+            + NotchAgentSupport.stripCameraGap
+        return compactAgentGeometry(wing: max(marks, cover))
+    }
+
     func compactAgentGeometry(wing: CGFloat) -> NotchGeometry {
         var compact = self
         let room = compactSideRoom ?? 0
@@ -2060,19 +2183,11 @@ struct NotchGeometry: Equatable {
     }
     var noticeCameraGap: CGFloat { cameraWidth }
 
-    /// A level meter expanding beneath and beside the physical cutout.
-    /// The logo occupies the left wing, percentage occupies the right wing,
-    /// and the slider glides directly beneath the camera.
+    /// A compact level row drops below the camera with a little lateral breathing room.
     var underNotchLevelTop: CGFloat { stripHeight + 8 }
     var underNotchLevelSize: CGSize {
-        // At full size the camera fits inside the flat bottom edge, not merely
-        // the bounding box: shoulders and lower corners consume width. Wings beside
-        // the camera provide ample room for the audio/display icon and percentage.
-        let corners = NotchLayout.shoulder(height: cameraHeight) + NotchLayout.surfaceRadius(height: cameraHeight)
-        let minWing: CGFloat = 58
-        let width = max(296, max(cameraWidth, physicalCameraWidth) + max(minWing * 2, corners * 2 + 36))
-        return CGSize(width: min(screen.width - 24, ceil(width)),
-               height: min(screen.height - 48, underNotchLevelTop + 22 + 12))
+        CGSize(width: min(screen.width - 24, max(cameraWidth, physicalCameraWidth) + 24),
+               height: min(screen.height - 48, stripHeight + 38))
     }
 
     func noticeSize(wingWidth: CGFloat) -> CGSize {

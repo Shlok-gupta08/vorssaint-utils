@@ -182,7 +182,7 @@ struct NotchCapsuleRestingView: View {
                 case .music:
                     if let artwork = music.artwork {
                         NotchMusicCover(artwork: artwork, side: CapsuleLayout.artworkSide(geometry),
-                                        radius: CapsuleLayout.artworkSide(geometry) / 2)
+                                        radius: CapsuleLayout.artworkSide(geometry) * 0.24)
                     }
                     if music.playback?.isPlaying == true {
                         NotchLiveEqualizerBars(bars: 3, barWidth: 2, height: 10, tint: music.artworkTint?.color ?? .white)
@@ -217,14 +217,25 @@ struct NotchCapsuleMusicStrip: View {
     private var tint: NotchArtworkTint? { shown == nil ? music.artworkTint : shown?.tint }
     private var title: String { playback?.track.title ?? FeatureStrings.radialMenu(l10n.language).mediaNowPlaying }
 
-    var body: some View {
+    @ViewBuilder var body: some View {
+        if snapshot == nil, service.compactCompanion == .agents {
+            NotchCapsuleMusicAgentStrip(service: service, geometry: geometry, size: size,
+                                        artwork: artwork, title: title)
+        } else {
+            solo
+        }
+    }
+
+    @ViewBuilder private var solo: some View {
         let isPaused = playback?.isPlaying != true
         let side = CapsuleLayout.artworkSide(geometry)
-        let named = service.capsuleMusicTitleShown
+        // A simulated pill is not constrained by a physical camera. Keep the
+        // track name present and let the surface breathe with its content.
+        let named = true
         NotchCapsuleRow(size: size ?? CapsuleLayout.musicSurface(title: named ? title : nil, geometry: geometry),
                         geometry: geometry, leading: CapsuleLayout.artworkInset(geometry)) {
             HStack(spacing: 0) {
-                NotchMusicCover(artwork: artwork, side: side, radius: side / 2)
+                NotchMusicCover(artwork: artwork, side: side, radius: side * 0.24)
                 // A song is named only as it starts; then the cover and bars say enough.
                 Group {
                     if named { Text(title).capsuleTitle().truncationMode(.tail).transition(.opacity) }
@@ -246,6 +257,39 @@ struct NotchCapsuleMusicStrip: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([title, playback?.track.artist].compactMap { $0 }.joined(separator: ", "))
         .help(title)
+    }
+}
+
+private struct NotchCapsuleMusicAgentStrip: View {
+    @ObservedObject var service: NotchService
+    let geometry: NotchGeometry
+    let size: CGSize?
+    let artwork: NSImage?
+    let title: String
+    @ObservedObject private var usage = AgentUsageService.shared
+
+    private var working: [AgentProvider] {
+        AgentProvider.allCases.filter { provider in usage.snapshot.live.contains { $0.provider == provider } }
+    }
+
+    var body: some View {
+        NotchCapsuleRow(size: size ?? CapsuleLayout.musicAgentSurface(working: working.count, geometry: geometry),
+                        geometry: geometry, trailing: CapsuleLayout.artworkInset(geometry)) {
+            HStack(spacing: CapsuleLayout.spacing) {
+                Button { service.openActivity(.agents) } label: {
+                    NotchCapsuleAgentMarks(providers: working, bodyHeight: geometry.stripBodyHeight)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel(working.map(\.displayName).joined(separator: ", "))
+                Button { service.openActivity(.music) } label: {
+                    let side = CapsuleLayout.artworkSide(geometry)
+                    NotchMusicCover(artwork: artwork, side: side, radius: side * 0.24)
+                }
+                .accessibilityLabel(title)
+            }
+            .buttonStyle(.plain)
+        }
     }
 }
 
@@ -309,11 +353,16 @@ struct NotchCapsuleTimerStrip: View {
 /// The working agents' marks, side by side, each in a frame wider than it.
 private struct NotchCapsuleAgentMarks: View {
     let providers: [AgentProvider]
+    var bodyHeight: CGFloat = 20
 
     var body: some View {
         HStack(spacing: NotchAgentSupport.stripMarkSpacing) {
-            ForEach(providers) { NotchAgentGlyph(provider: $0, size: CapsuleLayout.agentMarkSize(working: providers.count)) }
+            ForEach(providers) {
+                NotchAgentGlyph(provider: $0, size: min(CapsuleLayout.agentMarkSize(working: providers.count),
+                                                       max(7, (bodyHeight - 8) / 1.45)))
+            }
         }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
@@ -346,14 +395,14 @@ private struct NotchCapsuleCompanionMark: View {
             })
         case .music:
             let side = CapsuleLayout.artworkSide(geometry)
-            NotchMusicCover(artwork: music.artwork, side: side, radius: side / 2)
+            NotchMusicCover(artwork: music.artwork, side: side, radius: side * 0.24)
         case .calendar:
             if let countdown = calendar.countdown {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     NotchCapsuleCalendarStrip.clockMark(countdown, now: context.date)
                 }
             }
-        case .timer, .keepAwake, .watch:
+        case .timer, .keepAwake, .watch, .call:
             EmptyView()
         }
     }
@@ -379,7 +428,8 @@ struct NotchCapsuleAgentStrip: View {
         let working = working
         NotchCapsuleRow(size: size, geometry: displayGeometry ?? service.geometry) {
             HStack(spacing: CapsuleLayout.spacing) {
-                NotchCapsuleAgentMarks(providers: working)
+                NotchCapsuleAgentMarks(providers: working, bodyHeight: (displayGeometry ?? service.geometry).stripBodyHeight)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 NotchAgentReadoutTimeline(readout: NotchAgentReadout(rawValue: readout) ?? .elapsed) { date in
                     let text = reading(at: date)
                     Text(text)
@@ -392,7 +442,9 @@ struct NotchCapsuleAgentStrip: View {
                             DispatchQueue.main.async { service.refreshPresentation() }
                         }
                 }
+                .fixedSize(horizontal: true, vertical: false)
             }
+            .frame(maxWidth: .infinity)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(working.map(\.displayName).joined(separator: ", "))

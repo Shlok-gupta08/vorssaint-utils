@@ -847,6 +847,7 @@ enum DefaultsKey {
     static let notchAgentsDailyBudget = "notchAgentsDailyBudget"
     static let notchAgentsPriceUpdates = "notchAgentsPriceUpdates"
     static let notchEnabled = "notchEnabled"
+    static let notchCallsEnabled = "notchCallsEnabled"
     static let notchDisplay = "notchDisplay"
     // How the island looks on a display without a camera housing.
     static let notchSilhouette = "notchSilhouette"
@@ -857,6 +858,10 @@ enum DefaultsKey {
     static let notchOpenOnHover = "notchOpenOnHover"
     static let notchHideInFullscreen = "notchHideInFullscreen"
     static let notchHideUntilHover = "notchHideUntilHover"
+    // A simulated island can stay completely out of the menu bar until the
+    // pointer reaches its usual position. This is display-aware, unlike the
+    // older global hidden-until-hover preference.
+    static let notchAutoHideWithoutNotch = "notchAutoHideWithoutNotch"
     static let notchCoversMenus = "notchCoversMenus"
     static let notchHoverDelay = "notchHoverDelay"
     static let notchReturnHome = "notchReturnHome"
@@ -1432,6 +1437,7 @@ enum Defaults {
         DefaultsKey.notchWatchSound: true,
         DefaultsKey.notchWatchCondition: NotchWatchCondition.changes.rawValue,
         DefaultsKey.notchEnabled: false,
+        DefaultsKey.notchCallsEnabled: true,
         DefaultsKey.notchDisplay: NotchDisplay.automatic.rawValue,
         DefaultsKey.notchSilhouette: NotchSilhouette.capsule.rawValue,
         DefaultsKey.notchCapsuleFitWidth: 0.0,
@@ -1440,6 +1446,7 @@ enum Defaults {
         DefaultsKey.notchOpenOnHover: false,
         DefaultsKey.notchHideInFullscreen: false,
         DefaultsKey.notchHideUntilHover: false,
+        DefaultsKey.notchAutoHideWithoutNotch: true,
         DefaultsKey.notchCoversMenus: true,
         DefaultsKey.notchHoverDelay: NotchSupport.defaultHoverDelay,
         DefaultsKey.notchReturnHome: false,

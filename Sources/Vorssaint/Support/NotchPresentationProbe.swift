@@ -162,7 +162,9 @@ enum NotchPresentationProbe {
             }
             host.panel.orderFrontRegardless()
             advance(0.02)
-            if !fadeStarted || host.contentProbeOpacity > 0.01 {
+            if geometry.floats && (!fadeStarted || host.contentProbeOpacity < 0.7) {
+                failures.append("a floating page waited before becoming legible")
+            } else if !geometry.floats && (!fadeStarted || host.contentProbeOpacity > 0.01) {
                 failures.append("a page opened at once showed before the island reached its size")
             }
             advance(0.3)
@@ -515,7 +517,268 @@ enum NotchPresentationProbe {
         exit(failures.isEmpty ? 0 : 1)
     }
 
+    /// Render the same deck row used by the live island, including asymmetric
+    /// sides and a widened secondary. This catches overlap that size-only
+    /// service tests cannot detect.
+    private static func runSplitPillsAndExit() -> Never {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("build/pill-previews")
+        try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                                     safeAreaTop: 0, cameraWidth: 0, silhouette: .capsule)
+        func pill(_ title: String, width: CGFloat, artwork: Bool = false) -> some View {
+            HStack(spacing: 5) {
+                if artwork {
+                    RoundedRectangle(cornerRadius: 3).fill(.pink.gradient)
+                        .frame(width: NotchCapsuleLayout.artworkSide(geometry),
+                               height: NotchCapsuleLayout.artworkSide(geometry))
+                }
+                Text(title).font(.system(size: 10, weight: .medium)).lineLimit(1)
+            }
+            .foregroundStyle(.white)
+            .frame(width: width, height: geometry.stripHeight)
+            .background(NotchShape.island(height: geometry.stripHeight, geometry: geometry).fill(.black))
+        }
+        let compact = NotchPillActivityLayout.compactWidth(bodyHeight: geometry.stripBodyHeight,
+                                                         shoulder: NotchCapsuleLayout.side(geometry))
+        let agents = NotchCapsuleLayout.agentCompactSurface(providers: 2, reading: "12:34", geometry: geometry).width
+        let call = NotchCallSession(id: UUID(), pid: 0, bundleID: "com.apple.FaceTime", appName: "FaceTime",
+                                    phase: .active, firstSeen: Date().addingTimeInterval(-65),
+                                    connectedAt: Date().addingTimeInterval(-65), muted: false,
+                                    canAnswer: false, canEnd: true, canMute: true)
+        for (name, left, right, primary, height): (String, [CGFloat], [CGFloat], CGFloat, CGFloat) in [
+            ("two", [], [compact], 164, geometry.stripHeight),
+            ("three", [agents], [68], 164, geometry.stripHeight),
+            ("four", [agents], [68, compact], 164, geometry.stripHeight),
+            ("wide-secondary", [142], [68], 164, geometry.stripHeight),
+            ("centre-alert", [agents], [68], 240, geometry.stripHeight),
+            ("centre-preview", [agents], [68], 280, 160),
+            ("left-expanded", [360], [68], 164, 270),
+            ("call-compact", [agents], [68], 230, geometry.stripHeight),
+            ("call-expanded", [agents], [68], 420, 270)
+        ] {
+            func extent(_ widths: [CGFloat]) -> CGFloat {
+                widths.reduce(0, +) + CGFloat(max(0, widths.count - 1)) * NotchPillActivityLayout.spacing
+            }
+            let side = max(extent(left), extent(right))
+            let size = CGSize(width: primary + (side + NotchPillActivityLayout.spacing) * 2, height: height)
+            let row = NotchPillDeckRow(size: size, primaryWidth: primary) {
+                HStack(alignment: .top, spacing: NotchPillActivityLayout.spacing) {
+                    ForEach(left.indices, id: \.self) { index in
+                        if name == "left-expanded" {
+                            VStack(spacing: 18) {
+                                Text("AI agents").font(.headline)
+                                Text("This card opens and closes at the side pill.").font(.subheadline)
+                                Text("Claude    Codex    12:34").font(.system(.body, design: .monospaced))
+                            }
+                            .foregroundStyle(.white).frame(width: left[index], height: height)
+                            .background(NotchShape.island(height: height, geometry: geometry).fill(.black))
+                        } else if name != "wide-secondary" {
+                            NotchPillAgentCompactContent(providers: [.claude, .codex], reading: "12:34", geometry: geometry)
+                                .frame(width: left[index], height: geometry.stripHeight)
+                                .background(NotchShape.island(height: geometry.stripHeight, geometry: geometry).fill(.black))
+                        } else { pill("Agent · working", width: left[index]) }
+                    }
+                }
+            } primary: {
+                if name == "call-expanded" {
+                    NotchCallPanel(service: .shared, snapshot: call)
+                        .frame(width: primary, height: height)
+                        .background(NotchShape.island(height: height, geometry: geometry).fill(.black))
+                } else if name == "call-compact" {
+                    NotchCallStrip(geometry: geometry, size: CGSize(width: primary, height: height), snapshot: call)
+                        .background(NotchShape.island(height: height, geometry: geometry).fill(.black))
+                } else if height > geometry.stripHeight && name != "left-expanded" {
+                    Text("Notification preview\n\nOnly the centre expands.")
+                        .font(.system(size: 12)).foregroundStyle(.white)
+                        .frame(width: primary, height: height)
+                        .background(NotchShape.island(height: height, geometry: geometry).fill(.black))
+                } else {
+                    pill(name == "centre-alert" ? "◖  Volume   ━━━  50%" : "Song title   ▥", width: primary, artwork: true)
+                }
+            } right: {
+                HStack(spacing: NotchPillActivityLayout.spacing) {
+                    ForEach(right.indices, id: \.self) { index in pill("◷  12:34", width: right[index]) }
+                }
+            }
+            let view = row.padding(20).background(Color(red: 0.2, green: 0.25, blue: 0.3))
+            let host = NSHostingView(rootView: view)
+            let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: size.width + 40, height: size.height + 40),
+                                  styleMask: .borderless, backing: .buffered, defer: false)
+            window.contentView = host
+            window.alphaValue = 0
+            window.orderFrontRegardless()
+            host.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+            guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { exit(1) }
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            try! bitmap.representation(using: .png, properties: [:])!.write(to: directory.appendingPathComponent(name + ".png"))
+            window.orderOut(nil)
+        }
+        print("SPLIT PILL SNAPSHOTS OK: \(directory.path)")
+        exit(0)
+    }
+
+    private static func checkPillCollapse(screen: NSScreen) -> [String] {
+        var failures: [String] = []
+        let geometry = NotchGeometry(screen: screen.frame, safeAreaTop: 0, cameraWidth: 0, silhouette: .capsule)
+        let closed = CGSize(width: 260, height: geometry.stripHeight)
+        let host = NotchWindowHost(content: AnyView(Color.clear), geometry: geometry,
+                                   size: geometry.expanded, background: surface, quickAccess: quickAccess)
+        host.panel.alphaValue = 0
+        host.panel.ignoresMouseEvents = true
+        host.present(size: geometry.expanded, geometry: geometry, animated: false, quickAccess: .initial)
+        host.panel.orderFrontRegardless()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.03))
+        host.setSeparatesPills(true)
+        if host.separatesPillsProbe { failures.append("split pills removed the expanded contour before closing") }
+        host.present(size: closed, geometry: geometry, animated: true, transitionContent: .dismiss)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let height = host.visibleFrame.height
+            if height >= geometry.expanded.height || height <= closed.height {
+                failures.append("pill closing did not show an immediate intermediate frame")
+            }
+            host.setSeparatesPills(true)
+            if host.separatesPillsProbe { failures.append("a repeated refresh removed the moving closing contour") }
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        if !host.separatesPillsProbe || abs(host.visibleFrame.height - closed.height) > 0.5 {
+            failures.append("pill closing did not restore independent compact pills")
+        }
+        // A reopen cancels the pending split, rather than letting an old
+        // closing completion remove the newly expanded surface.
+        host.setSeparatesPills(false)
+        host.present(size: geometry.expanded, geometry: geometry, animated: false)
+        host.setSeparatesPills(true)
+        host.present(size: closed, geometry: geometry, animated: true)
+        host.setSeparatesPills(false)
+        host.present(size: geometry.expanded, geometry: geometry, animated: true, transitionContent: .reveal)
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        if host.separatesPillsProbe || abs(host.visibleFrame.height - geometry.expanded.height) > 0.5 {
+            failures.append("reopening a closing pill inherited a stale split completion")
+        }
+        host.close()
+        return failures
+    }
+
+    private static func checkIndependentPillResize(screen: NSScreen) -> [String] {
+        var failures: [String] = []
+        let geometry = NotchGeometry(screen: screen.frame, safeAreaTop: 0, cameraWidth: 0, silhouette: .capsule)
+        let compact = CGSize(width: 400, height: geometry.stripHeight)
+        let expanded = CGSize(width: min(screen.frame.width - 24, 1040), height: 280)
+        let host = NotchWindowHost(content: AnyView(Color.clear), geometry: geometry, size: compact, background: surface)
+        host.panel.alphaValue = 0
+        host.panel.ignoresMouseEvents = true
+        host.setSeparatesPills(true)
+        host.present(size: compact, geometry: geometry, animated: false)
+        host.panel.orderFrontRegardless()
+        for target in [expanded, compact, expanded, compact] {
+            host.setSeparatesPills(true)
+            host.present(size: target, geometry: geometry, animated: true)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+            if !host.independentSurfaceProbe {
+                failures.append("an individual activity resize created a unified island mask or backdrop")
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.7))
+            if !host.independentSurfaceProbe {
+                failures.append("settling an individual activity merged the side pills")
+            }
+        }
+        host.close()
+        return failures
+    }
+
+    private static func checkPillVisibility(screen: NSScreen) -> [String] {
+        var failures: [String] = []
+        let geometry = NotchGeometry(screen: screen.frame, safeAreaTop: 0, cameraWidth: 0, silhouette: .capsule)
+        let size = CGSize(width: 280, height: geometry.stripHeight)
+        let host = NotchWindowHost(content: AnyView(Color.clear), geometry: geometry, size: size, background: surface)
+        host.panel.alphaValue = 0
+        host.panel.ignoresMouseEvents = true
+        host.setSeparatesPills(true)
+        host.present(size: size, geometry: geometry, animated: false)
+        host.panel.orderFrontRegardless()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.04))
+        let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        host.hide(animated: true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.04))
+        let departing = host.contentProbeOpacity
+        if !reduced && (departing <= 0 || departing >= 1) {
+            failures.append("independent pills disappeared without an intermediate opacity")
+        }
+        host.present(size: size, geometry: geometry, animated: true, revealFromHidden: true)
+        host.panel.orderFrontRegardless()
+        let reversing = host.contentProbeOpacity
+        RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+        if !reduced && host.contentProbeOpacity <= reversing && host.contentProbeOpacity < 1 {
+            failures.append("a rapid fullscreen reversal kept fading out instead of returning (\(departing), \(reversing), \(host.contentProbeOpacity))")
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        if !host.panel.isVisible || host.contentProbeOpacity != 1 || host.departsContent {
+            failures.append("a fullscreen reversal left independent pills hidden")
+        }
+        host.hide(animated: true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        if host.panel.isVisible { failures.append("independent pills failed to withdraw") }
+        host.present(size: size, geometry: geometry, animated: true, revealFromHidden: true)
+        host.panel.orderFrontRegardless()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.04))
+        if !reduced && (host.contentProbeOpacity <= 0 || host.contentProbeOpacity >= 1) {
+            failures.append("independent pills returned without an intermediate opacity")
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        let resizes = host.resizeCount
+        let transitions = host.contentProbeTransitionCount
+        for _ in 0..<1000 {
+            host.present(size: size, geometry: geometry, animated: true, revealFromHidden: true)
+        }
+        if host.resizeCount != resizes || host.contentProbeTransitionCount != transitions || host.contentProbeOpacity != 1 {
+            failures.append("unchanged split-pill refreshes restarted presentation work (resizes \(resizes)/\(host.resizeCount), transitions \(transitions)/\(host.contentProbeTransitionCount))")
+        }
+        host.close()
+        return failures
+    }
+
+    private static func runCallReaderAndExit() -> Never {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        app.finishLaunching()
+        guard AXIsProcessTrusted() else {
+            print("CALL READER SKIPPED: Accessibility permission required")
+            exit(0)
+        }
+        let end = NSButton(title: "End call", target: nil, action: nil)
+        end.setAccessibilityLabel("End call")
+        let mute = NSButton(title: "Mute microphone", target: nil, action: nil)
+        mute.setAccessibilityLabel("Mute microphone")
+        let host = NSStackView(views: [end, mute])
+        host.orientation = .vertical
+        let offscreen = (NSScreen.screens.map { $0.frame.minX }.min() ?? 0) - 400
+        let window = NSWindow(contentRect: CGRect(x: offscreen, y: 100, width: 300, height: 160),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Call detector fixture"
+        window.contentView = host
+        window.alphaValue = 1
+        window.orderFrontRegardless()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        var finished = false
+        var valid = false
+        NotchCallService.shared.readApplicationForProbe(.current) { value in
+            valid = value?.phase == .active && value?.canEnd == true && value?.canMute == true
+            finished = true
+        }
+        let deadline = Date().addingTimeInterval(3)
+        while !finished && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        window.orderOut(nil)
+        print(valid ? "CALL READER OK: verified native AX call controls" : "CALL READER FAILED: native fixture controls were not detected")
+        exit(valid ? 0 : 1)
+    }
+
     static func runAndExit() -> Never {
+        if CommandLine.arguments.contains("--call-reader") { runCallReaderAndExit() }
+        if CommandLine.arguments.contains("--split-pills") { runSplitPillsAndExit() }
         if CommandLine.arguments.contains("--camera-transitions") { runCameraTransitionsAndExit() }
         if CommandLine.arguments.contains("--media-layout") { NotchMediaPresentationProbe.runAndExit() }
         if CommandLine.arguments.contains("--mission-control") { runMissionControlAndExit() }
@@ -533,6 +796,12 @@ enum NotchPresentationProbe {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         guard let screen = NSScreen.main else { print("NOTCH PROBE FAILED: no display"); exit(1) }
+        if CommandLine.arguments.contains("--pill-lifecycle") {
+            let failures = checkPillCollapse(screen: screen) + checkPillVisibility(screen: screen)
+                + checkIndependentPillResize(screen: screen)
+            print(failures.isEmpty ? "PILL LIFECYCLE OK" : "PILL LIFECYCLE FAILED\n" + failures.joined(separator: "\n"))
+            exit(failures.isEmpty ? 0 : 1)
+        }
         // `--capsule` runs every check on this display as one without a
         // camera, where the island floats in the menu bar; `--capsule-fit`
         // with a capsule fitted wider, taller and lower.
@@ -548,6 +817,11 @@ enum NotchPresentationProbe {
         host.panel.ignoresMouseEvents = true
         host.panel.orderFrontRegardless()
         var failures = checkHiddenReveal(screen: screen)
+        if capsule {
+            failures += checkPillCollapse(screen: screen)
+            failures += checkPillVisibility(screen: screen)
+            failures += checkIndependentPillResize(screen: screen)
+        }
         host.setOutline(enabled: true, color: .systemOrange)
         if host.outlineProbeOpacity != 1 || host.outlineProbeWidth != 2 {
             failures.append("the optional outline is not visible around the compact island")
@@ -656,7 +930,11 @@ enum NotchPresentationProbe {
         if !reduceMotion, !host.contentProbeAnimating {
             failures.append("opening content has no reveal transition")
         }
-        if !reduceMotion, !host.contentProbeGrowing || !host.contentProbeBlurred {
+        if !reduceMotion, geometry.floats,
+           host.contentProbeGrowing || host.contentProbeBlurred || host.contentProbeOpacity < 0.7 {
+            failures.append("floating content retained the delayed blur/scale reveal")
+        }
+        if !reduceMotion, !geometry.floats, !host.contentProbeGrowing || !host.contentProbeBlurred {
             failures.append("opening content arrived without growing into focus")
         }
         if !reduceMotion, host.backdropProbeOpenness > 0.01 {
@@ -998,7 +1276,10 @@ enum NotchPresentationProbe {
             if bubbles.quickAccessProbeInteractive { failures.append("departing floating controls still accepted input") }
             if bubbles.quickAccessProbeTrackingAreas != 0 { failures.append("departing controls retained hover tracking") }
             advance(0.06)
-            if !reduceMotion, abs(bubbles.visibleFrame.width - geometry.expanded.width) > 0.5 {
+            if !reduceMotion, geometry.floats, bubbles.visibleFrame.height >= geometry.expanded.height {
+                failures.append("a floating pill waited for its controls instead of closing alongside them")
+            }
+            if !reduceMotion, !geometry.floats, abs(bubbles.visibleFrame.width - geometry.expanded.width) > 0.5 {
                 failures.append("the notch withdrew before its floating controls could rejoin it")
             }
             advance(0.95)

@@ -303,6 +303,9 @@ private struct NotchSettingsPreviewKey: EnvironmentKey {
 final class NotchBackdropPresentation: ObservableObject {
     @Published var contour = Path()
     @Published var usesGlass = false
+    /// Multiple floating activities draw their own capsules, leaving real
+    /// transparent gaps inside the host window instead of one black slab.
+    @Published var separatesPills = false
     /// The camera strip's height in points, which the translucent background
     /// keeps black at every island height.
     @Published var stripHeight: CGFloat = 0
@@ -369,9 +372,9 @@ struct NotchSurfaceBackground: View {
         return false
     }
 
-    private var showsGlass: Bool { offersGlass && presentation.usesGlass }
+    private var showsGlass: Bool { !presentation.separatesPills && offersGlass && presentation.usesGlass }
     private var showsTranslucent: Bool {
-        translucent && !offersGlass && presentation.usesGlass && !reduceTransparency
+        !presentation.separatesPills && translucent && !offersGlass && presentation.usesGlass && !reduceTransparency
     }
 
     var body: some View {
@@ -380,7 +383,8 @@ struct NotchSurfaceBackground: View {
             // the glass has opened, and the glass exists only while that
             // black lets it show, so the window's resizes at either end of a
             // transition happen in plain black.
-            Color.black.opacity(showsGlass || showsTranslucent ? presentation.restingBlack : 1)
+            Color.black.opacity(presentation.separatesPills ? 0
+                : showsGlass || showsTranslucent ? presentation.restingBlack : 1)
 #if compiler(>=6.2)
             if #available(macOS 26, *), showsGlass, presentation.restingBlack < 1 {
                 let shape = NotchBackdropShape(contour: presentation.contour)

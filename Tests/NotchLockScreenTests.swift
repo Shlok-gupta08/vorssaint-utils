@@ -137,10 +137,20 @@ enum NotchLockScreenTests {
         } else {
             suite.expect(false, "a notched display has room for the padlock")
         }
+        if let capsule = Layout.capsuleFrame(in: measured, size: CGSize(width: 52, height: 24), drop: 2) {
+            suite.expect(capsule.midX == measured.midX && capsule.maxY == measured.maxY - 4
+                         && capsule.size == CGSize(width: 52, height: 24),
+                         "a display without a notch keeps the padlock in a centred floating capsule")
+        } else {
+            suite.expect(false, "a display without a notch has room for the lock capsule")
+        }
         suite.expect(Layout.islandFrame(in: measured, cameraWidth: 0, cameraHeight: 32) == nil
                      && Layout.islandFrame(in: measured, cameraWidth: 179, cameraHeight: .nan) == nil
                      && Layout.islandFrame(in: measured, cameraWidth: 1460, cameraHeight: 32) == nil,
                      "no padlock without a camera to hang it from, or room beside it")
+        suite.expect(Layout.capsuleFrame(in: measured, size: CGSize(width: 0, height: 24), drop: 2) == nil
+                     && Layout.capsuleFrame(in: measured, size: CGSize(width: 52, height: CGFloat.nan), drop: 2) == nil,
+                     "an unreadable simulated capsule leaves the lock screen untouched")
     }
 
     static func contentContracts(_ suite: TestSuite) {

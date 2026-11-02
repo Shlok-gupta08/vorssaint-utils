@@ -24,10 +24,13 @@ enum NotchHoverTests {
     enum UserDefaults {
         static var standard = Preferences()
         struct Preferences {
-            var enabled = true, expands = true, hides = false
+            var enabled = true, expands = true, hides = false, autoHidesWithoutNotch = false
             var delay = NotchSupport.defaultHoverDelay
             func bool(forKey key: String) -> Bool {
-                key == DefaultsKey.notchHideUntilHover ? hides : key == DefaultsKey.notchOpenOnHover ? enabled : expands
+                if key == DefaultsKey.notchHideUntilHover { return hides }
+                if key == DefaultsKey.notchOpenOnHover { return enabled }
+                if key == DefaultsKey.notchAutoHideWithoutNotch { return autoHidesWithoutNotch }
+                return expands
             }
             func double(forKey key: String) -> Double { delay }
         }
@@ -66,6 +69,7 @@ enum NotchHoverTests {
     /// The strip's track by title; the real snapshot also holds its cover and geometry.
     struct NotchCompactMusicSnapshot: Equatable { let title: String }
     class State {
+        var hasCallActivity = false
         var showsDictation = false
         func schedulePointerFollow() {}
         var hiddenInFullscreen = false
@@ -86,6 +90,18 @@ enum NotchHoverTests {
         var heldMusic: NotchCompactMusicSnapshot?
         var compactActivity: NotchCompactActivity?
         var compactActivities: [NotchCompactActivity] = []
+        var usesPillActivityDeck = false
+        var pillHoverWork: DispatchWorkItem?
+        var hoveredPillActivity: NotchCompactActivity?
+        var visiblePillActivities: [NotchCompactActivity] { compactActivities }
+        var userHiddenUntilHover: Bool { UserDefaults.standard.hides && UserDefaults.standard.enabled }
+        var automaticallyHiddenWithoutNotch: Bool {
+            !geometry.isNotched && hiddenInFullscreen && UserDefaults.standard.autoHidesWithoutNotch
+        }
+        var opensOnHover: Bool {
+            (hiddenInFullscreen && !geometry.isNotched && !expanded && !peeking && notice == nil && !showsDictation)
+                || automaticallyHiddenWithoutNotch || UserDefaults.standard.enabled
+        }
         var activityPickerMenuOpen = false
         var hoverState = NotchHoverState()
         var hiddenHoverMonitors: [Any] = []
@@ -115,7 +131,7 @@ enum NotchHoverTests {
         }
         var openings = 0, closures = 0, feedbacks = 0
         var requestedModule: NotchModule?
-        func open(_ module: NotchModule? = nil, takeFocus: Bool) {
+        func open(_ module: NotchModule? = nil, takeFocus: Bool, activity: NotchCompactActivity? = nil) {
             requestedModule = module
             openings += 1; expanded = true; openedByHover = !takeFocus
             hoverState.open(); hoverWork?.cancel(); hoverWork = nil
@@ -127,7 +143,7 @@ enum NotchHoverTests {
             hoverWork?.cancel(); hoverWork = nil
             updateBounds()
         }
-        func mutatePresentation(transitionContent: NotchContentTransition, _ change: () -> Void) { change(); updateBounds() }
+        func mutatePresentation(transitionContent: NotchContentTransition, animatesPills: Bool = false, _ change: () -> Void) { change(); updateBounds() }
         var refreshes = 0, menuSpaceSyncs = 0
         func refreshPresentation() { refreshes += 1; updateBounds() }
         func syncMenuSpaceMonitoring() { menuSpaceSyncs += 1 }
@@ -161,6 +177,35 @@ enum NotchHoverTests {
             NSEvent.mouseLocation = CGPoint(x: service.geometry.screen.minX, y: service.geometry.screen.minY)
             service.hover(false)
         }
+        let singlePill = fixture()
+        singlePill.geometry = NotchGeometry(screen: singlePill.geometry.screen, safeAreaTop: 0, cameraWidth: 0,
+                                            menuBarHeight: 24, compactSideRoom: 200, silhouette: .capsule)
+        singlePill.updateBounds()
+        UserDefaults.standard.delay = 1
+        singlePill.hover(true)
+        DispatchQueue.main.advance(0.061)
+        expect(singlePill.openings == 1, "single floating pills use the same prompt opening cadence as split pills")
+
+        let pillHover = fixture()
+        pillHover.usesPillActivityDeck = true
+        pillHover.compactActivities = [.music, .agents]
+        pillHover.compactActivity = .music
+        pillHover.hoverPillActivity(.agents, entered: true)
+        DispatchQueue.main.advance(0.04)
+        pillHover.hoverPillActivity(.agents, entered: true)
+        DispatchQueue.main.advance(0.019)
+        expect(pillHover.openings == 0, "split pills filter accidental pointer crossings briefly")
+        DispatchQueue.main.advance(0.002)
+        expect(pillHover.requestedModule == .agents && pillHover.openings == 1 && pillHover.compactActivity == .music,
+               "duplicate hover events keep the original short deadline and music stays primary")
+        let cancelledPill = fixture()
+        cancelledPill.usesPillActivityDeck = true
+        cancelledPill.compactActivities = [.music, .agents]
+        cancelledPill.hoverPillActivity(.agents, entered: true)
+        cancelledPill.hoverPillActivity(.agents, entered: false)
+        DispatchQueue.main.advance(0.1)
+        expect(cancelledPill.openings == 0, "leaving a split pill cancels its pending expansion")
+
         let levelTray = fixture(physical: true)
         let beforeLevel = levelTray.surfaceSize
         expect(levelTray.show(volume) && levelTray.surfaceSize == levelTray.geometry.underNotchLevelSize,
@@ -260,9 +305,9 @@ enum NotchHoverTests {
         simulatedFullscreen.hiddenInFullscreen = true
         simulatedFullscreen.hover(true)
         DispatchQueue.main.advance(0.26)
-        suite.expect(simulatedFullscreen.hoverWork == nil && !simulatedFullscreen.peeking
-                     && simulatedFullscreen.openings == 0,
-                     "a simulated cutout hidden in full screen does not open on hover")
+        suite.expect(simulatedFullscreen.hoverWork == nil && simulatedFullscreen.expanded
+                     && simulatedFullscreen.openings == 1,
+                     "a simulated cutout hidden in full screen expands from its hover target")
         for physical in [false, true] {
             let service = fixture(physical: physical)
             service.hover(true)

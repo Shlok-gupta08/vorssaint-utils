@@ -22,6 +22,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchCalendarCountdown) private var calendarCountdown = false
     @AppStorage(DefaultsKey.notchCalendarTimeLeft) private var calendarTimeLeft = false
     @AppStorage(DefaultsKey.notchAgentsEnabled) private var agentsEnabled = true
+    @AppStorage(DefaultsKey.notchCallsEnabled) private var callsEnabled = true
     @AppStorage(DefaultsKey.notchWatchEnabled) private var watchEnabled = true
     @AppStorage(DefaultsKey.notchLyricsEnabled) private var lyricsEnabled = true
     @AppStorage(DefaultsKey.notchLyricsOnline) private var lyricsOnline = false
@@ -33,6 +34,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchOpenOnHover) private var hover = false
     @AppStorage(DefaultsKey.notchHideInFullscreen) private var hideInFullscreen = false
     @AppStorage(DefaultsKey.notchHideUntilHover) private var hideUntilHover = false
+    @AppStorage(DefaultsKey.notchAutoHideWithoutNotch) private var autoHideWithoutNotch = true
     @AppStorage(DefaultsKey.notchCoversMenus) private var coversMenus = true
     @AppStorage(DefaultsKey.notchHoverDelay) private var hoverDelay = NotchSupport.defaultHoverDelay
     @AppStorage(DefaultsKey.notchReturnHome) private var returnHome = false
@@ -94,8 +96,8 @@ struct NotchSettings: View {
     private var editor: NotchEditorStrings { FeatureStrings.notchEditor(l10n.language) }
 
     private var configuration: [String] {
-        [String(enabled), String(calendarEnabled), String(calendarCountdown), String(calendarTimeLeft), String(notificationsEnabled), String(dismissNativeNotifications), String(gesturesEnabled), String(lyricsEnabled), String(lyricsOnline), String(queueEnabled), String(liveEqualizer), String(showPlayingMusic), String(hideMusicWhenPlayerActive), String(includeOtherPlayers), idle, hiddenControls, controlOrder, size,
-         String(timerEnabled), String(timerSoundEnabled), String(cameraEnabled), String(accessoriesEnabled), String(outlineEnabled), String(customWidth), String(customHeight), String(cameraFitWidth), String(cameraFitHeight), String(capsuleFitWidth), String(capsuleFitHeight), String(capsuleFitDrop), String(hapticFeedback), String(shelfWindow), String(dragReveal), String(captureControls), String(quickPanel), String(appPanel), String(hoverExpand), String(hideUntilHover), String(hideInFullscreen), String(coversMenus), display, silhouette, String(hover), hidden, order, String(volume),
+        [String(enabled), String(callsEnabled), String(calendarEnabled), String(calendarCountdown), String(calendarTimeLeft), String(notificationsEnabled), String(dismissNativeNotifications), String(gesturesEnabled), String(lyricsEnabled), String(lyricsOnline), String(queueEnabled), String(liveEqualizer), String(showPlayingMusic), String(hideMusicWhenPlayerActive), String(includeOtherPlayers), idle, hiddenControls, controlOrder, size,
+         String(timerEnabled), String(timerSoundEnabled), String(cameraEnabled), String(accessoriesEnabled), String(outlineEnabled), String(customWidth), String(customHeight), String(cameraFitWidth), String(cameraFitHeight), String(capsuleFitWidth), String(capsuleFitHeight), String(capsuleFitDrop), String(hapticFeedback), String(shelfWindow), String(dragReveal), String(captureControls), String(quickPanel), String(appPanel), String(hoverExpand), String(hideUntilHover), String(autoHideWithoutNotch), String(hideInFullscreen), String(coversMenus), display, silhouette, String(hover), hidden, order, String(volume),
          String(brightness), String(keyboardLight), String(microphone), String(battery), String(clipboard), String(clipboardWindow), String(capture), String(trackChange), captureAction, String(showInCaptures), String(returnHome), homeModule, String(opensActivity), String(scratchpad), String(agentsEnabled), String(watchEnabled), String(keepAwakeActivity), String(expandedScale)]
     }
 
@@ -120,7 +122,8 @@ struct NotchSettings: View {
                 Toggle(text.enable, isOn: $enabled).labelsHidden().toggleStyle(.switch)
                     .disabled(!AppFeature.notch.isAvailable).accessibilityLabel(text.enable)
             }
-            if enabled, AppFeature.notch.isAvailable, !(hover && hideUntilHover), !notch.geometry.isNotched, !permissions.accessibility {
+            if enabled, AppFeature.notch.isAvailable, !(hover && hideUntilHover), !autoHideWithoutNotch,
+               !notch.geometry.isNotched, !permissions.accessibility {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(text.menuBarAccessHint)
                         .font(.callout).foregroundStyle(.secondary)
@@ -173,6 +176,8 @@ struct NotchSettings: View {
 
     private var layoutPage: some View {
         VStack(alignment: .leading, spacing: 20) {
+            displayGroupHeader("Common appearance", symbol: "circle.grid.cross",
+                               caption: "These options follow the island on every display.")
             NotchLayoutEditor(configuration: access, size: $size, width: $customWidth, height: $customHeight) {
                 selectedModule = .controls; tab = .content
             }
@@ -200,8 +205,13 @@ struct NotchSettings: View {
                           isOn: liquidGlassIsOn ? .constant(true) : $translucentBackground)
                     .disabled(liquidGlassIsOn)
             }
+            SettingsCard {
+                switchRow("capsule", text.showOutline, isOn: $outlineEnabled)
+            }
             // Only a display without a camera can float the island.
             if NotchSupport.hasDisplayWithoutNotch {
+                displayGroupHeader(text.withoutNotch, symbol: "display",
+                                   caption: "A floating island can use the menu bar freely and resize for its activity.")
                 SettingsCard(title: text.withoutNotch) {
                     HStack(spacing: 10) {
                         silhouetteChoice(.capsule, title: text.capsuleShape)
@@ -223,11 +233,10 @@ struct NotchSettings: View {
                     }
                 }
             }
-            SettingsCard {
-                switchRow("capsule", text.showOutline, isOn: $outlineEnabled)
-            }
-            // Only a physical camera has an outline to match.
+            // Camera fitting is meaningful only around a physical housing.
             if NotchSupport.hasNotchedDisplay {
+                displayGroupHeader("Displays with a notch", symbol: "laptopcomputer",
+                                   caption: "Fit the island to the physical camera housing.")
                 SettingsCard(title: text.cameraFit) {
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
                         // Whole points keep the island centred on the camera's pixels.
@@ -363,6 +372,8 @@ struct NotchSettings: View {
             }
             Divider()
             let activities = FeatureStrings.notchActivities(l10n.language)
+            switchRow("phone.fill", "Call live activity",
+                      caption: "Detect call controls in supported calling apps using Accessibility. Calls always take the centre while active; no audio or conversation content is recorded.", isOn: $callsEnabled)
             switchRow(NotchControlItem.keepAwake.symbol, activities.keepAwakeActivity,
                       caption: activities.keepAwakeActivityHint, isOn: $keepAwakeActivity)
                 .disabled(!AppFeature.keepAwake.isAvailable)
@@ -560,7 +571,6 @@ struct NotchSettings: View {
                     choice(editor.clickOpen, symbol: "cursorarrow", selected: !hover) { hideUntilHover = false; hover = false }
                     choice(editor.hoverPreview, symbol: "rectangle.topthird.inset.filled", selected: hover && !hoverExpand && !hideUntilHover) { hideUntilHover = false; hover = true; hoverExpand = false }
                     choice(editor.hoverExpand, symbol: "arrow.up.left.and.arrow.down.right", selected: hover && hoverExpand && !hideUntilHover) { hideUntilHover = false; hover = true; hoverExpand = true }
-                    choice(editor.hiddenUntilHover, symbol: "eye.slash", selected: hover && hideUntilHover) { hover = true; hoverExpand = true; hideUntilHover = true }
                 }
                 if hover { hoverDelayControl }
                 switchRow("hand.draw", FeatureStrings.notchGestures(l10n.language).title,
@@ -607,6 +617,23 @@ struct NotchSettings: View {
                            selected: display == NotchDisplay.all.rawValue) { display = NotchDisplay.all.rawValue }
                 }
             }
+            if NotchSupport.hasDisplayWithoutNotch {
+                SettingsCard(title: text.withoutNotch) {
+                    switchRow("eye.slash", "Hide persistent island in full screen",
+                              caption: "On by default. In full-screen apps, hide idle content and live activities until you hover the island area. The island stays visible on the desktop. Notifications and volume or brightness feedback can still appear.",
+                              isOn: $autoHideWithoutNotch)
+                }
+            }
+            if NotchSupport.hasNotchedDisplay {
+                SettingsCard(title: "Displays with a notch") {
+                    switchRow("eye.slash", editor.hiddenUntilHover,
+                              caption: "Hide the hardware-notch island and all of its automatic feedback until you hover it.",
+                              isOn: Binding(get: { hover && hideUntilHover }, set: { hidden in
+                                  hideUntilHover = hidden
+                                  if hidden { hover = true; hoverExpand = true }
+                              }))
+                }
+            }
             SettingsCard(title: editor.destinations) {
                 destination(text.panel, symbol: "bubble.middle.top", value: $appPanel)
                 Text(editor.appPanelHint).font(.caption).foregroundStyle(.secondary)
@@ -640,6 +667,19 @@ struct NotchSettings: View {
             Text(editor.activationTimeHint).font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private func displayGroupHeader(_ title: String, symbol: String, caption: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol).font(.system(size: 17, weight: .semibold)).foregroundStyle(.secondary)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline)
+                Text(caption).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 4)
     }
 
     private func choice(_ title: String, symbol: String, selected: Bool, action: @escaping () -> Void) -> some View {

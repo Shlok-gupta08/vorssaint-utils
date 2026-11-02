@@ -136,4 +136,15 @@ enum NotchLockScreenLayout {
         // Centred on the camera to the half point: a notch only comes on Retina displays.
         return CGRect(x: screen.midX - width / 2, y: screen.maxY - cameraHeight, width: width, height: cameraHeight)
     }
+
+    /// A display without a camera still gets the lock indicator, in the same
+    /// floating capsule position used by its everyday island.
+    static func capsuleFrame(in screen: CGRect, size: CGSize, drop: CGFloat) -> CGRect? {
+        guard [screen.width, screen.height, size.width, size.height, drop].allSatisfy({ $0.isFinite }),
+              screen.width > 0, screen.height > 0, size.width > 0, size.height > 0 else { return nil }
+        let width = min(screen.width - 24, max(52, size.width))
+        return CGRect(x: (screen.midX - width / 2).rounded(),
+                      y: screen.maxY - max(4, drop) - size.height,
+                      width: width, height: size.height)
+    }
 }

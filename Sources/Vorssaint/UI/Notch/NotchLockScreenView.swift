@@ -79,10 +79,41 @@ struct NotchLockScreenIsland: View {
     @ObservedObject var model: NotchLockScreenModel
     let size: CGSize
     let cameraWidth: CGFloat
+    var floating = false
     @ObservedObject private var music = NotchMusicService.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    var body: some View {
+    @ViewBuilder var body: some View {
+        if floating { floatingCapsule }
+        else { attachedIsland }
+    }
+
+    private var floatingCapsule: some View {
+        let playing = model.showsMusic(music.playback) && music.playback?.isPlaying == true
+        return HStack(spacing: 12) {
+            Image(systemName: model.padlockOpen ? "lock.open.fill" : "lock.fill")
+                .font(.system(size: min(13, size.height * 0.42), weight: .semibold))
+                .contentTransition(.symbolEffect(.replace))
+                .symbolEffect(.bounce, options: .speed(1.4), value: reduceMotion ? false : model.padlockOpen)
+            if playing {
+                NotchEqualizerBars(isPlaying: true, bars: 3, barWidth: 2,
+                                   height: min(11, size.height * 0.38),
+                                   tint: music.artworkTint?.color ?? .white)
+                    .transition(.opacity.combined(with: .scale))
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 13)
+        .frame(width: max(52, size.width), height: size.height)
+        .background(.black, in: Capsule())
+        .scaleEffect(model.islandRetracted ? 0.72 : 1)
+        .opacity(model.islandRetracted ? 0 : 1)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: model.islandRetracted)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: model.padlockOpen)
+        .accessibilityHidden(true)
+    }
+
+    private var attachedIsland: some View {
         let width = size.width
         let cameraHeight = size.height
         let visibleHeight = cameraHeight
@@ -93,7 +124,7 @@ struct NotchLockScreenIsland: View {
         let playing = model.showsMusic(music.playback) && music.playback?.isPlaying == true
         let activeWidth = model.islandRetracted ? cameraWidth : width
 
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             Color.clear.frame(height: bleed)
 
             HStack(spacing: 0) {

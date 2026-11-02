@@ -15,6 +15,7 @@ struct NotchView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var headerHovered = false
+    @Namespace private var pillMotion
     private var text: NotchStrings { FeatureStrings.notch(l10n.language) }
 
     var body: some View {
@@ -26,7 +27,7 @@ struct NotchView: View {
             // the page stops scrolling between cards and the island loses
             // focus. A fill too faint to see keeps the surface in this window,
             // as the black backdrop does.
-            .background(shape.fill(Color.black.opacity(0.01)))
+            .background(shape.fill(Color.black.opacity(service.usesPillActivityDeck ? 0 : 0.01)))
             .contentShape(shape)
             // The backdrop is a separate, non-interactive hosting view. Claim
             // empty space here so clicks and wheel events stay in this window.
@@ -81,8 +82,10 @@ struct NotchView: View {
             } else {
                 NotchCaptureControlsView(options: options, service: service, layout: service.captureControlsLayout)
             }
-        } else if service.expanded {
-            expanded
+        } else if service.expanded && !service.usesPillActivityDeck {
+            if service.showingCall {
+                NotchCallPanel(service: service).padding(.top, service.geometry.safeContentTop)
+            } else { expanded }
         } else if service.dragPlaceholder {
             Label(text.dropHint, systemImage: "tray.and.arrow.down")
                 .font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
@@ -95,6 +98,8 @@ struct NotchView: View {
                 }
                 .padding(.horizontal, NotchLayout.horizontalInset)
                 .padding(.top, service.geometry.safeContentTop)
+        } else if service.usesPillActivityDeck {
+            floatingCompactSurface
         } else if let notice = service.notice ?? (service.peeking ? nil : service.departingNotice) {
             if service.noticeExpanded, let content = notice.notification {
                 NotchNotificationPreviewView(notice: notice, content: content, service: service)
@@ -137,7 +142,9 @@ struct NotchView: View {
             }
             .padding(.horizontal, NotchLayout.horizontalInset).padding(.top, service.geometry.safeContentTop)
         } else if let activity = service.compactActivity {
-            if service.showsCompactActivityPicker {
+            if service.usesPillActivityDeck {
+                pillActivityDeck(primary: activity)
+            } else if service.showsCompactActivityPicker {
                 let layout = service.compactActivityPickerLayout
                 VStack(spacing: 0) {
                     let strip = service.compactStripSize(for: activity, companion: service.compactCompanion)
@@ -183,10 +190,127 @@ struct NotchView: View {
     /// The island floats as a capsule, whose strips run end to end.
     private var floats: Bool { service.geometry.floats }
 
+    /// Keep one compact rendering tree as activities start and finish.
+    /// Individual capsules change without rebuilding the entire deck.
+    private var floatingCompactSurface: some View {
+        ZStack(alignment: .top) {
+            if let activity = service.pillDeckPrimaryActivity {
+                pillActivityDeck(primary: activity)
+                    .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .top)))
+            } else if let notice = service.notice {
+                Button { service.activateNotice(notice) } label: {
+                    NotchCapsuleNoticeView(notice: notice, geometry: service.geometry, size: service.surfaceSize)
+                        .background(shape.fill(.black))
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity)
+            } else {
+                NotchCapsuleRestingView(service: service, size: service.surfaceSize)
+                    .background(shape.fill(.black))
+                    .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: service.compactActivities)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: service.notice?.event)
+    }
+
+    /// The primary activity stays centred while the smaller pills balance on
+    /// either side. Their transparent gaps are supplied by the native host,
+    /// so this remains one coordinated, fluidly resizing island window.
+    private func pillActivityDeck(primary: NotchCompactActivity) -> some View {
+        let primarySize = service.pillSize(for: primary)
+        return NotchPillDeckRow(size: service.pillActivityDeckSize, primaryWidth: primarySize.width) {
+            HStack(alignment: .top, spacing: NotchPillActivityLayout.spacing) {
+                ForEach(service.leftPillActivities) { activity in pill(activity) }
+            }
+        } primary: {
+            pill(primary)
+        } right: {
+            HStack(alignment: .top, spacing: NotchPillActivityLayout.spacing) {
+                ForEach(service.rightPillActivities) { activity in pill(activity) }
+            }
+        }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.26), value: primary)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: service.widenedPillActivities)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: service.pillActivitySides)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.26), value: service.visiblePillActivities)
+        .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.1), value: primarySize)
+        .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.08), value: service.expanded)
+        .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.08), value: service.expandedPillActivity)
+    }
+
+    private func pill(_ activity: NotchCompactActivity) -> some View {
+        let size = service.pillSize(for: activity)
+        let focused = activity == service.pillDeckPrimaryActivity
+        let widened = service.widenedPillActivities.contains(activity)
+        return Group {
+            if (service.expanded && activity == service.expandedPillActivity) || (focused && service.noticeExpanded) {
+                pillContent(activity, size: size, focused: focused, widened: widened)
+            } else {
+                Button {
+                    if focused, let notice = service.notice { service.activateNotice(notice) }
+                    else { service.activatePillActivity(activity) }
+                } label: {
+                    pillContent(activity, size: size, focused: focused, widened: widened)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .matchedGeometryEffect(id: activity, in: pillMotion)
+        .transition(.scale(scale: 0.65).combined(with: .opacity))
+        .onHover { service.hoverPillActivity(activity, entered: $0) }
+        .contextMenu {
+            if !focused {
+                Button("Make Primary") { service.selectCompactActivity(activity) }
+                Button(widened ? "Use Compact Pill" : "Use Wider Pill") { service.togglePillWidth(activity) }
+                Divider()
+                Button("Move to Left Side") { service.movePillActivity(activity, to: .left) }
+                Button("Move to Right Side") { service.movePillActivity(activity, to: .right) }
+            }
+            Button("Open \(activity.title(l10n.language))") { service.activatePillActivity(activity) }
+            Divider()
+            Button("Use Automatic Priority") { service.useAutomaticPillPriority() }
+        }
+        .help(activity.title(l10n.language))
+        .accessibilityLabel(activity.title(l10n.language))
+        .accessibilityHint("Hover or click to open; right-click to change layout")
+    }
+
+    private func pillContent(_ activity: NotchCompactActivity, size: CGSize, focused: Bool, widened: Bool) -> some View {
+        Group {
+            if service.expanded && activity == service.expandedPillActivity {
+                if service.showingCall { NotchCallPanel(service: service) }
+                else { expanded }
+            } else if focused, service.noticeExpanded, let notice = service.notice, let content = notice.notification {
+                NotchNotificationPreviewView(notice: notice, content: content, service: service)
+                    .padding(.horizontal, NotchLayout.horizontalInset)
+                    .padding(.top, service.geometry.safeContentTop)
+                    .padding(.bottom, NotchLayout.bottomInset)
+            } else if focused, let notice = service.notice {
+                NotchCapsuleNoticeView(notice: notice, geometry: service.geometry, size: size)
+                    .id(notice.event).transition(.opacity)
+            } else if focused || widened {
+                activityStrip(activity, size: size)
+            } else {
+                NotchPillCompactMark(activity: activity, geometry: service.geometry,
+                                     onReadingShapeChange: { service.refreshPresentation() })
+            }
+        }
+        .frame(width: size.width, height: size.height, alignment: .top)
+        .clipShape(NotchShape.island(height: size.height, geometry: service.geometry))
+        .background { NotchShape.island(height: size.height, geometry: service.geometry).fill(.black) }
+        .overlay {
+            NotchShape.island(height: size.height, geometry: service.geometry)
+                .stroke(.white.opacity(focused ? 0.13 : 0.08), lineWidth: 0.5)
+        }
+        .contentShape(NotchShape.island(height: size.height, geometry: service.geometry))
+    }
+
     /// `size` is the capsule's; a hanging strip keeps the camera's geometry.
     @ViewBuilder private func activityStrip(_ activity: NotchCompactActivity, size: CGSize) -> some View {
         if floats {
             switch activity {
+            case .call: NotchCallStrip(geometry: service.geometry, size: size)
             case .timer: NotchCapsuleTimerStrip(service: service, size: size)
             case .watch: NotchCapsuleWatchStrip(service: service, size: size)
             case .downloads: NotchCapsuleDownloadStrip(service: service, size: size)
@@ -197,6 +321,7 @@ struct NotchView: View {
             }
         } else {
             switch activity {
+            case .call: NotchCallStrip(geometry: service.compactActivityGeometry, size: size)
             case .timer: NotchTimerStrip(service: service)
             case .watch: NotchWatchStrip(service: service)
             case .downloads: NotchDownloadStrip(service: service)
@@ -831,6 +956,148 @@ struct NotchActivityPicker: View {
                 .accessibilityAddTraits(chosen ? .isSelected : [])
                 .accessibilityIdentifier("notch.activity.\(activity.rawValue)")
             }
+        }
+    }
+}
+
+/// The smallest live-activity state: an identifying mark and one changing
+/// signal. It stays legible at 42 points and never pretends to be a full row.
+struct NotchPillDeckRow<Left: View, Primary: View, Right: View>: View {
+    let size: CGSize
+    let primaryWidth: CGFloat
+    @ViewBuilder let left: () -> Left
+    @ViewBuilder let primary: () -> Primary
+    @ViewBuilder let right: () -> Right
+
+    var body: some View {
+        let side = max(0, (size.width - primaryWidth) / 2 - NotchPillActivityLayout.spacing)
+        HStack(alignment: .top, spacing: side > 0 ? NotchPillActivityLayout.spacing : 0) {
+            left().frame(width: side, alignment: .trailing)
+            primary().frame(width: primaryWidth)
+            right().frame(width: side, alignment: .leading)
+        }
+        .frame(width: size.width, height: size.height)
+    }
+}
+
+struct NotchPillAgentCompactContent: View {
+    let providers: [AgentProvider]
+    let reading: String
+    let geometry: NotchGeometry
+
+    var body: some View {
+        HStack(spacing: NotchCapsuleLayout.spacing) {
+            HStack(spacing: NotchCapsuleLayout.agentCompactMarkSpacing) {
+                ForEach(providers) { provider in
+                    NotchAgentGlyph(provider: provider, size: NotchCapsuleLayout.agentCompactGlyphSize(geometry))
+                }
+                if providers.isEmpty {
+                    Image(systemName: "sparkles").font(.system(size: 10, weight: .semibold))
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(reading).font(Font(NotchCapsuleLayout.agentCompactFont as CTFont))
+                .lineLimit(1).fixedSize()
+        }
+        .foregroundStyle(providers.first?.tint ?? .cyan)
+        .padding(.horizontal, NotchCapsuleLayout.side(geometry) + NotchCapsuleLayout.endPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct NotchPillCompactMark: View {
+    let activity: NotchCompactActivity
+    let geometry: NotchGeometry
+    var onReadingShapeChange: () -> Void = {}
+    @ObservedObject private var music = NotchMusicService.shared
+    @ObservedObject private var timer = NotchTimerService.shared
+    @ObservedObject private var downloads = NotchDownloadService.shared
+    @ObservedObject private var usage = AgentUsageService.shared
+    @ObservedObject private var watch = NotchWatchService.shared
+    @ObservedObject private var awake = KeepAwakeManager.shared
+
+    private var tint: Color {
+        switch activity {
+        case .timer: return .orange
+        case .agents: return usage.snapshot.live.first?.provider.tint ?? .cyan
+        case .calendar: return .mint
+        case .keepAwake: return .yellow
+        default: return .white
+        }
+    }
+
+    var body: some View {
+        Group {
+            if activity == .agents {
+                NotchAgentReadoutTimeline(readout: .elapsed) { now in
+                    let providers = AgentProvider.allCases.filter { provider in
+                        usage.snapshot.live.contains { $0.provider == provider }
+                    }
+                    let reading = NotchAgentSupport.stripReading(usage.snapshot, readout: .elapsed,
+                                                                 display: .remaining, now: now)
+                    NotchPillAgentCompactContent(providers: providers, reading: reading, geometry: geometry)
+                        .onChange(of: NotchAgentSupport.readingShape(reading)) { _, _ in
+                            DispatchQueue.main.async { onReadingShapeChange() }
+                        }
+                }
+            } else if activity == .call {
+                NotchCallStrip(geometry: geometry, size: CGSize(width: 100, height: geometry.stripHeight), minimal: true)
+            } else {
+                HStack(spacing: 4) { mark; signal }
+            }
+        }
+        .foregroundStyle(tint)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private var mark: some View {
+        switch activity {
+        case .music:
+            let side = min(14, NotchCapsuleLayout.artworkSide(geometry))
+            NotchMusicCover(artwork: music.artwork, side: side, radius: min(2, side * 0.16))
+        case .agents:
+            EmptyView() // The complete provider group and clock are rendered together above.
+        case .call:
+            EmptyView()
+        case .watch:
+            NotchWatchEye(size: 13, hidden: watch.state == .hidden)
+        case .keepAwake:
+            Image(systemName: NotchKeepAwakeSupport.symbol).font(.system(size: 12, weight: .semibold))
+        default:
+            Image(systemName: activity.symbol).font(.system(size: 12, weight: .semibold))
+        }
+    }
+
+    @ViewBuilder private var signal: some View {
+        switch activity {
+        case .music:
+            NotchLiveEqualizerBars(isPlaying: music.playback?.isPlaying == true,
+                                   bars: 2, barWidth: 1.5, height: 9,
+                                   tint: music.artworkTint?.color ?? .white)
+        case .downloads:
+            let fraction = downloads.items.first { $0.active && !$0.completed }?.fraction ?? 0
+            Circle().trim(from: 0, to: max(0.08, fraction))
+                .stroke(.white, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                .rotationEffect(.degrees(-90)).frame(width: 9, height: 9)
+        case .timer:
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(NotchTimerSupport.compactText(for: timer.session, at: timer.now, locale: .current))
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .lineLimit(1)
+            }
+        case .agents:
+            EmptyView()
+        case .call:
+            EmptyView()
+        case .calendar:
+            Circle().fill(.mint).frame(width: 6, height: 6)
+        case .watch:
+            Circle().fill(watch.state == .hidden ? Color.secondary : Color.green).frame(width: 6, height: 6)
+        case .keepAwake:
+            Image(systemName: awake.endDate == nil ? "infinity" : "clock")
+                .font(.system(size: 8, weight: .bold))
         }
     }
 }

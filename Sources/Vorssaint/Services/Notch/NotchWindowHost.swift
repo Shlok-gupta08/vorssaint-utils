@@ -32,6 +32,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     private var isAnimating = false
     private var hidesWhenSettled = false
     private var targetUsesGlass = false
+    private var targetSeparatesPills = false
     private var mouseEventsBeforeHide: Bool?
     private var frameProbe: NotchFrameProbe?
     private var missionControlTimer: Timer?
@@ -136,12 +137,21 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         canvas.setOutline(enabled: enabled, color: color)
     }
 
+    func setSeparatesPills(_ enabled: Bool) {
+        targetSeparatesPills = enabled
+        // Closing an expanded page still needs its painted, masked contour.
+        // Removing it now would make the native shrink animation invisible.
+        if !enabled || !isPresented || (!isAnimating && targetSize.height <= currentGeometry.stripHeight) {
+            canvas.setSeparatesPills(enabled)
+        }
+    }
+
     func hide(animated: Bool, transitionContent: NotchContentTransition = .dismiss) {
         guard isPresented else { return }
         let animate = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard !hidesWhenSettled || !animate else { return }
         present(size: CGSize(width: currentGeometry.collapsed.width, height: 0), geometry: currentGeometry,
-                animated: animate, transitionContent: transitionContent == .depart ? .depart : .dismiss,
+                animated: animate, transitionContent: canvas.backdropPresentation.separatesPills || transitionContent == .depart ? .depart : .dismiss,
                 hideWhenSettled: true)
     }
 
@@ -157,6 +167,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         // Choosing the capsule or the notch redraws the island at once, even
         // at a size it already has.
         canvas.setFloatingGap(geometry.floatingGap)
+        let restoringVisibility = hidesWhenSettled && !hideWhenSettled
         hidesWhenSettled = hideWhenSettled
         if hideWhenSettled {
             if mouseEventsBeforeHide == nil {
@@ -215,7 +226,10 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             if !isAnimating { quickAccessContainer?.motion.setVisible(quickAccessConfiguration != nil, animated: canAnimate) }
             return
         }
-        if canAnimate { canvas.transitionContent(revealing ? .reveal : transitionContent, animatesArrival: animatesContentArrival) }
+        if canAnimate {
+            canvas.transitionContent(revealing || restoringVisibility ? .reveal : transitionContent,
+                                     animatesArrival: animatesContentArrival, revealsHidden: revealing)
+        }
         else if animated && changesFrame && (revealing || transitionContent == .reveal) {
             // Reduce Motion, or a panel that was ordered out, puts the island
             // at its new size at once. Shown at once, the page reached the
@@ -288,7 +302,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         animation.keyTimes = motion.keyTimes.map { NSNumber(value: $0) }
         animation.calculationMode = .linear
         animation.duration = motion.duration
-        if withdrawing {
+        if withdrawing && !geometry.floats {
             animation.beginTime = CACurrentMediaTime() + NotchQuickAccessLayout.withdrawalDuration
             animation.fillMode = .backwards
         }
@@ -334,6 +348,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         configureQuickAccess()
         canvas.layoutSubtreeIfNeeded()
         guard generation == animationGeneration else { CATransaction.commit(); return }
+        canvas.setSeparatesPills(targetSeparatesPills)
         CATransaction.commit()
         CATransaction.flush()
         quickAccessContainer?.motion.setVisible(quickAccessConfiguration != nil, animated: quickAccessAnimate)
@@ -624,7 +639,10 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     }
 
     var contentProbeOpacity: Float { canvas.contentProbeOpacity }
+    var separatesPillsProbe: Bool { canvas.backdropPresentation.separatesPills }
+    var independentSurfaceProbe: Bool { canvas.backdropPresentation.separatesPills && canvas.layer?.mask == nil }
     var contentProbeAnimating: Bool { canvas.contentProbeAnimating }
+    var contentProbeTransitionCount: Int { canvas.contentTransitionCount }
     var contentProbeAlpha: CGFloat { canvas.contentProbeAlpha }
     var contentProbeReplacing: Bool { canvas.contentProbeReplacing }
     var contentProbeBlurred: Bool { canvas.contentProbeBlurred }
@@ -1233,12 +1251,16 @@ private final class NotchCanvas: NSView {
     }
 
     func containsVisiblePoint(_ point: CGPoint) -> Bool {
-        contains(point, in: visiblePath)
+        if backdropPresentation.separatesPills {
+            return CGRect(x: islandX(contentSize), y: 0, width: contentSize.width, height: contentSize.height).contains(point)
+        }
+        return contains(point, in: visiblePath)
     }
 
     /// The model path already describes the size a resize is heading to.
     func containsDestinationPoint(_ point: CGPoint) -> Bool {
-        contains(point, in: silhouette.path.map(inCanvas))
+        if backdropPresentation.separatesPills { return containsVisiblePoint(point) }
+        return contains(point, in: silhouette.path.map(inCanvas))
     }
 
     private func contains(_ point: CGPoint, in path: CGPath?) -> Bool {
@@ -1328,13 +1350,23 @@ private final class NotchCanvas: NSView {
         updateCanvasBlack()
     }
 
+    func setSeparatesPills(_ enabled: Bool) {
+        guard backdropPresentation.separatesPills != enabled else { return }
+        backdropPresentation.separatesPills = enabled
+        // An expanded central card must not clip the small side capsules
+        // against the corners of one enclosing silhouette.
+        layer?.mask = enabled ? nil : silhouette
+        updateCanvasBlack()
+    }
+
     /// The island's black is also the canvas's own fill, not only the
     /// SwiftUI backdrop's, which reaches the screen a frame late whenever it
     /// changes: left to the backdrop alone, the island could vanish for a
     /// frame as it began to open or settled after closing. Under glass the
     /// fill gives way as the backdrop's resting black does.
     func updateCanvasBlack() {
-        let alpha = usesGlass ? CGFloat(backdropPresentation.restingBlack) : 1
+        let alpha: CGFloat = backdropPresentation.separatesPills ? 0
+            : usesGlass ? CGFloat(backdropPresentation.restingBlack) : 1
         let color = NSColor.black.withAlphaComponent(alpha).cgColor
         guard layer?.backgroundColor != color else { return }
         CATransaction.begin()
@@ -1384,8 +1416,12 @@ private final class NotchCanvas: NSView {
 
     deinit { backdropDisplayLink?.invalidate() }
 
-    func transitionContent(_ kind: NotchContentTransition, shapeSnaps: Bool = false, animatesArrival: Bool = true) {
+    private(set) var contentTransitionCount = 0
+
+    func transitionContent(_ kind: NotchContentTransition, shapeSnaps: Bool = false,
+                           animatesArrival: Bool = true, revealsHidden: Bool = false) {
         guard kind != .none else { return }
+        contentTransitionCount += 1
         let currentOpacity = contentVisibility.presentation()?.opacity ?? contentVisibility.opacity
         let presentedArrival = self.presentedArrival
         contentVisibility.removeAnimation(forKey: "notch.opacity")
@@ -1393,7 +1429,17 @@ private final class NotchCanvas: NSView {
         endArrival()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        if kind == .replace {
+        if floatingGap != nil, kind == .reveal {
+            // Floating pills already move with their contour. Start their
+            // content immediately; the camera layout's delayed blur/scale
+            // makes a hover feel like a second, stalled opening.
+            contentVisibility.opacity = 1
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = revealsHidden ? 0 : currentOpacity
+            fade.toValue = 1
+            fade.duration = revealsHidden ? 0.2 : 0.16
+            contentVisibility.add(fade, forKey: "notch.opacity")
+        } else if kind == .replace {
             contentVisibility.opacity = 1
             let transition = CATransition()
             transition.type = .fade
