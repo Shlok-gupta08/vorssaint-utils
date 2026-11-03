@@ -671,6 +671,20 @@ enum NotchPresentationRefreshContract {
                      && closing.departingMusic == nil,
                      "new playback interrupts a departing track and reveals its replacement")
 
+        let recording = Service()
+        recording.expanded = false
+        recording.showsDictation = true
+        recording.presentedMusic = NotchCompactMusicSnapshot(track: 1)
+        suite.expect(recording.compactMusicTransition(.none, animated: true) == .none
+                     && recording.departingMusic == nil && recording.presentedMusic == nil,
+                     "pause-hold expiry cannot fade an active dictation surface")
+        recording.departingMusic = NotchCompactMusicSnapshot(track: 1)
+        let delayedDeparture = DispatchWorkItem {}
+        recording.musicDepartureWork = delayedDeparture
+        suite.expect(recording.compactMusicTransition(.none, animated: true) == .reveal
+                     && recording.departingMusic == nil && delayedDeparture.isCancelled,
+                     "dictation interrupts a pending music departure immediately and restores its content mask")
+
         let held = Service()
         held.expanded = false
         held.presentedMusic = NotchCompactMusicSnapshot(track: 2)

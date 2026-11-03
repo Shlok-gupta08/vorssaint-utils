@@ -140,6 +140,7 @@ enum NotchScreenRefreshContract {
         func collapse() { collapses += 1 }
         var displayHasMenuBar = true
         static let pointerFollowDelay: TimeInterval = 0.2
+        var showsDictation = false
         var followsPointer = false
         var pointerMonitors: [Any] = []
         var pointerFollowWork: DispatchWorkItem?
@@ -523,7 +524,7 @@ enum NotchScreenRefreshContract {
         suite.expect(DispatchQueue.main.pending == 0, "on its new display the island schedules nothing more")
 
         let blockers: [(String, (Service) -> Void)] = [
-            ("open", { $0.expanded = true }), ("peeking", { $0.peeking = true }), ("showing a notice", { $0.notice = true }),
+            ("dictating", { $0.showsDictation = true }), ("open", { $0.expanded = true }), ("peeking", { $0.peeking = true }), ("showing a notice", { $0.notice = true }),
             ("showing capture controls", { $0.captureControls = true }), ("holding a drag", { $0.heldDrag = true }),
             ("choosing where a file drops", { $0.choosingFileDropDestination = true }),
             ("keeping a working surface", { $0.keepsWorkingSurface = true }),

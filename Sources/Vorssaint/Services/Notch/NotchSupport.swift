@@ -795,6 +795,7 @@ final class NotchMirrorModel: ObservableObject {
     @Published private(set) var size: CGSize
     @Published private(set) var activity: NotchCompactActivity?
     @Published private(set) var deck: NotchActivityDeckPresentation?
+    @Published private(set) var notice: NotchNotice?
     var shown = false
     /// The outline last drawn around it, and whether a timer's color tinted it.
     var outline: Bool?
@@ -807,8 +808,8 @@ final class NotchMirrorModel: ObservableObject {
     }
 
     /// Whether anything it draws changed, so a copy is only resized when it did.
-    func update(geometry: NotchGeometry, strip: NotchGeometry, size: CGSize, activity: NotchCompactActivity?, deck: NotchActivityDeckPresentation? = nil) -> Bool {
-        guard self.deck != deck || self.geometry != geometry || self.strip != strip || self.size != size || self.activity != activity else {
+    func update(geometry: NotchGeometry, strip: NotchGeometry, size: CGSize, activity: NotchCompactActivity?, deck: NotchActivityDeckPresentation? = nil, notice: NotchNotice? = nil) -> Bool {
+        guard self.notice != notice || self.deck != deck || self.geometry != geometry || self.strip != strip || self.size != size || self.activity != activity else {
             return false
         }
         self.geometry = geometry
@@ -816,6 +817,7 @@ final class NotchMirrorModel: ObservableObject {
         self.size = size
         self.activity = activity
         self.deck = deck
+        self.notice = notice
         return true
     }
 }

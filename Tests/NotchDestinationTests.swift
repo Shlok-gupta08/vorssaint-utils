@@ -58,6 +58,11 @@ enum NotchDestinationContract {
     enum NotchLockScreenService { static var shared = LockScreen() }
 
     class State {
+        var presentedMusic: Bool?
+        var musicDeparturesFinished = 0
+        func finishMusicDeparture() { musicDeparturesFinished += 1 }
+        func endDeparture() { departingNotice = nil }
+
         var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900), safeAreaTop: 0, cameraWidth: 0)
         var expandedPillActivity: NotchCompactActivity?
         var fullscreenCompact = false
@@ -134,7 +139,12 @@ enum NotchDestinationContract {
         let recording = Service()
         recording.expanded = true
         recording.peeking = true
+        recording.presentedMusic = true
+        let pendingHover = DispatchWorkItem {}
+        recording.hoverWork = pendingHover
         recording.receiveDictationPhase(.recording)
+        suite.expect(recording.presentedMusic == nil && recording.musicDeparturesFinished == 1 && pendingHover.isCancelled,
+                     "dictation immediately preempts a paused-music departure and pending hover work")
         suite.expect(recording.phasesAtCollapse == [.recording] && !recording.peeking
                      && recording.presentationTransitions.isEmpty,
                      "dictation replaces an open page directly without first resizing back to compact activities")

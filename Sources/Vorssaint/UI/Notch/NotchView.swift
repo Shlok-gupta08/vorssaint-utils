@@ -1172,7 +1172,7 @@ private final class NotchActivityObservation: ObservableObject {
     }
 }
 
-private struct NotchPillCompactMark: View {
+struct NotchPillCompactMark: View {
     let activity: NotchCompactActivity
     let geometry: NotchGeometry
     var physicalSide = false

@@ -83,6 +83,13 @@ enum NotchMirrorContract {
             NotchPillActivityLayout.defaultSide(at: defaultIndex ?? 0)
         }
         func measureMirrorSideRoom(on screen: NSScreen, geometry: NotchGeometry) -> CGFloat? { nil }
+        var notice: NotchNotice?
+        var activatedNotices: [NotchNotice] = []
+        func activateNotice(_ notice: NotchNotice) { activatedNotices.append(notice) }
+        func pillSecondaryWidth(for activity: NotchCompactActivity, in geometry: NotchGeometry?) -> CGFloat { 70 }
+        func capsuleNoticeSurface(_ notice: NotchNotice, in geometry: NotchGeometry?) -> CGSize {
+            CGSize(width: 300, height: geometry!.stripHeight)
+        }
         var compactActivity: NotchCompactActivity?
         var compactCompanion: NotchCompactActivity?
         var idleContent = NotchIdleContent.none
@@ -168,6 +175,18 @@ enum NotchMirrorContract {
         suite.expect(capsule?.model.deck?.items.count == 3
                      && (capsule?.model.size.width ?? 0) <= external.frame.width - 24,
                      "secondary displays fit the live activity set using their own width budget")
+        let satellite = capsule?.model.deck?.items.first(where: { $0.activity == .music })
+        suite.expect(satellite?.x ?? 0 > 0 && satellite?.size.width == 70,
+                     "the first secondary uses the same right side and compact width as the interactive island")
+        let banner = NotchNotice(event: .systemNotification, title: "Test", detail: "Connected display", symbol: "bell")
+        service.notice = banner
+        service.syncMirrors()
+        suite.expect(capsule?.model.notice == banner && capsule?.model.deck == nil
+                     && capsule?.model.size.width == 300,
+                     "notifications replace compact activity on the external display using its own geometry")
+        capsule?.host.activate?()
+        suite.expect(service.activatedNotices == [banner], "a copied notification activates the same notification without waiting for a display handoff")
+        service.notice = nil
         service.activityOrder = []
         service.syncMirrors()
 

@@ -239,6 +239,9 @@ final class NotchService: ObservableObject {
     private var hoveredPillActivity: NotchCompactActivity?
     private static let musicTitleDuration: TimeInterval = 4
     private var mirrors: [CGDirectDisplayID: NotchMirror] = [:]
+#if VORSSAINT_DEVELOPMENT
+    private var probingConnectedDisplays = false
+#endif
     private struct MirrorMenuReading {
         let geometry: NotchGeometry
         let pid: pid_t
@@ -644,7 +647,7 @@ final class NotchService: ObservableObject {
     }
 
     private var compactActivityIsVisible: Bool {
-        !fullscreenCompact && !expanded && !peeking && !dragPlaceholder && notice == nil && captureControls == nil
+        !showsDictation && !fullscreenCompact && !expanded && !peeking && !dragPlaceholder && notice == nil && captureControls == nil
             && compactActivity != nil
     }
 
@@ -1011,7 +1014,8 @@ final class NotchService: ObservableObject {
     }
 
     /// A notice's own capsule, which it keeps while the island closes around it.
-    func capsuleNoticeSurface(_ notice: NotchNotice) -> CGSize {
+    func capsuleNoticeSurface(_ notice: NotchNotice, in base: NotchGeometry? = nil) -> CGSize {
+        let geometry = base ?? self.geometry
         let layout = NotchCapsuleLayout.self
         guard let content = notice.notification else {
             return layout.surface(content: layout.noticeContent(title: notice.title, detail: notice.detail,
@@ -1078,8 +1082,9 @@ final class NotchService: ObservableObject {
         return CGSize(width: pillSecondaryWidth(for: activity), height: geometry.stripHeight)
     }
 
-    private func pillSecondaryWidth(for activity: NotchCompactActivity) -> CGFloat {
-        let geometry = activitySatelliteGeometry
+    func pillSecondaryWidth(for activity: NotchCompactActivity, in base: NotchGeometry? = nil) -> CGFloat {
+        let base = base ?? self.geometry
+        let geometry = base.floats ? base : NotchAttachedActivityLayout.satelliteGeometry(base)
         var compact = max(activity == .timer ? 68 : 0,
                           NotchPillActivityLayout.compactWidth(bodyHeight: geometry.stripBodyHeight,
                                                              shoulder: NotchCapsuleLayout.side(geometry)))
@@ -1090,7 +1095,7 @@ final class NotchService: ObservableObject {
             compact = max(compact, NotchCapsuleLayout.agentCompactSurface(
                 providers: providers, reading: reading, geometry: geometry).width)
         }
-        if self.geometry.isNotched {
+        if base.isNotched {
             let now = Date()
             let reading: String?
             var providers = 0
@@ -1116,7 +1121,7 @@ final class NotchService: ObservableObject {
                 shoulder: NotchCapsuleLayout.side(geometry))
         }
         guard widenedPillActivities.contains(activity) else { return compact }
-        let room = max(compact, (pillAvailableWidth - 80) / 2 - NotchPillActivityLayout.spacing)
+        let room = max(compact, (NotchCapsuleLayout.availableWidth(base) - 80) / 2 - NotchPillActivityLayout.spacing)
         return min(room, NotchPillActivityLayout.widenedMaximum,
                    max(compact + 24, capsuleStripSize(for: activity, companion: nil, geometry: geometry).width))
     }
@@ -1476,6 +1481,9 @@ final class NotchService: ObservableObject {
         if !running || self.panel == nil { syncWithPreferences() }
         else { refreshModules() }
         guard let panel else { return }
+        finishMusicDeparture()
+        presentedMusic = nil
+        endDeparture()
         let reopening = reopeningDestination
         let useReopeningSurface = module == nil && !expanded && !appPanel && !sections && metric == nil
         let destination = module.flatMap { modules.contains($0) ? $0 : nil } ?? reopening.module
@@ -2566,9 +2574,15 @@ final class NotchService: ObservableObject {
     }
 
     private func compactMusicTransition(_ requested: NotchContentTransition, animated: Bool) -> NotchContentTransition {
+        if showsDictation {
+            let wasDeparting = departingMusic != nil
+            finishMusicDeparture()
+            presentedMusic = nil
+            return wasDeparting && requested == .none ? .reveal : requested
+        }
         let musicVisible = compactMusicIsVisible
         let canKeepDeparting = !musicVisible && compactActivity == nil && !expanded && !peeking
-            && notice == nil && !dragPlaceholder && captureControls == nil
+            && notice == nil && !dragPlaceholder && captureControls == nil && !showsDictation
         if departingMusic != nil {
             if canKeepDeparting && requested == .none && animated
                 && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return .none }
@@ -2863,7 +2877,7 @@ final class NotchService: ObservableObject {
     /// notice or a drag out of the island stays where it is.
     private var canFollowPointer: Bool {
         // A song held for its New track notice keeps its old display's geometry.
-        !expanded && !peeking && notice == nil && captureControls == nil && !heldDrag
+        !showsDictation && !expanded && !peeking && notice == nil && captureControls == nil && !heldDrag
             && !choosingFileDropDestination && !keepsWorkingSurface && heldMusic == nil
     }
 
@@ -2939,7 +2953,7 @@ final class NotchService: ObservableObject {
     /// With the island on every display, it follows the pointer as it does
     /// when it only follows it, and each other display shows a copy of what
     /// it shows closed. The copies are drawn for their own displays, a
-    /// capsule or a notch, and they take no part in hovering or notices.
+    /// capsule or a notch. Notices are shared, while expansion stays local.
     private func syncMirrors() {
         guard showsOnAllDisplays, running, !suspended, windowHost != nil else { closeMirrors(); return }
         let screens = eligibleScreens
@@ -2954,14 +2968,15 @@ final class NotchService: ObservableObject {
         for screen in screens {
             let preference = NotchDisplayPreference.current(for: screen.notchPersistentID)
             let activity = preference.liveActivities ? sharedCompactActivity : nil
+            let mirroredNotice = notice
             let id = screen.notchDisplayID
             var base: NotchGeometry?
-            if id != displayID, !fullscreenDisplays.contains(id) {
+            if id != displayID, mirroredNotice != nil || !fullscreenDisplays.contains(id) {
                 var geometry = baseGeometry(for: screen)
                 geometry.compactSideRoom = mirrorSideRoom(on: screen, geometry: geometry)
                 // A simulated island needs the menus' room at rest, as the island does.
                 if !(hidesAtRest && geometry.isNotched),
-                   geometry.isNotched || geometry.floats || geometry.compactSideRoom != nil { base = geometry }
+                   mirroredNotice != nil || geometry.isNotched || geometry.floats || geometry.compactSideRoom != nil { base = geometry }
             }
             guard let base else {
                 if let mirror = mirrors[id], mirror.model.shown {
@@ -2971,8 +2986,8 @@ final class NotchService: ObservableObject {
                 continue
             }
             let (strip, stripSize) = mirrorSurface(on: base, activity: activity)
-            let deck = activity.map { mirrorDeck(on: base, primary: $0, primarySize: stripSize) }
-            let size = deck?.size ?? stripSize
+            let deck = mirroredNotice == nil ? activity.map { mirrorDeck(on: base, primary: $0, primarySize: stripSize) } : nil
+            let size = mirroredNotice.map { mirrorNoticeSize($0, on: base) } ?? deck?.size ?? stripSize
             let mirror = mirrors[id] ?? makeMirror(geometry: base, size: size)
             mirrors[id] = mirror
             if mirror.model.outline != outline || mirror.model.timerOutline != (activity == .timer) {
@@ -2984,15 +2999,19 @@ final class NotchService: ObservableObject {
             if mirror.host.panel.sharingType != sharing { mirror.host.panel.sharingType = sharing }
             let revealing = !mirror.model.shown
             let previous = mirror.model.activity
-            guard mirror.model.update(geometry: base, strip: strip, size: size, activity: activity, deck: deck) || revealing else { continue }
+            let previousNotice = mirror.model.notice
+            guard mirror.model.update(geometry: base, strip: strip, size: size, activity: activity, deck: deck, notice: mirroredNotice) || revealing else { continue }
             mirror.model.shown = true
             mirror.host.setSeparatesPills(deck != nil)
             // Shown at once where the island just left, so the two trade places.
             mirror.host.present(size: size, geometry: base, animated: !revealing,
-                                transitionContent: !revealing && previous != activity ? .replace : .none)
+                                transitionContent: !revealing && (previous != activity || previousNotice?.event != mirroredNotice?.event) ? .replace : .none)
             mirror.host.setActivationArea(CGRect(origin: .zero, size: size),
                                           title: FeatureStrings.notch(L10n.shared.language).open,
-                                          willPress: {}, activate: { [weak self] in self?.bringIsland(to: id) })
+                                          willPress: {}, activate: { [weak self] in
+                                              if let mirroredNotice { self?.activateNotice(mirroredNotice) }
+                                              else { self?.bringIsland(to: id) }
+                                          })
             if !mirror.host.panel.isVisible { mirror.host.panel.orderFrontRegardless() }
         }
     }
@@ -3002,7 +3021,20 @@ final class NotchService: ObservableObject {
     private func mirrorSurface(on base: NotchGeometry, activity: NotchCompactActivity?) -> (strip: NotchGeometry, size: CGSize) {
         guard let activity else { return (base, base.restingSize(showsContent: !base.floats && idleContent != .none)) }
         let companion: NotchCompactActivity? = nil
-        if base.floats { return (base, capsuleStripSize(for: activity, companion: companion, geometry: base)) }
+        if base.floats {
+            var size = capsuleStripSize(for: activity, companion: companion, geometry: base)
+            let sides = pillActivityOrder.prefix(NotchPillActivityLayout.maximumVisible).filter { $0 != activity }
+            var left: CGFloat = 0, right: CGFloat = 0
+            for (index, side) in sides.enumerated() {
+                let width = pillSecondaryWidth(for: side, in: base)
+                if pillSide(for: side, defaultIndex: index) == .left {
+                    left += (left > 0 ? NotchPillActivityLayout.spacing : 0) + width
+                } else { right += (right > 0 ? NotchPillActivityLayout.spacing : 0) + width }
+            }
+            let reserve = sides.isEmpty ? 0 : (max(left, right) + NotchPillActivityLayout.spacing) * 2
+            size.width = min(size.width, max(80, min(300, NotchCapsuleLayout.availableWidth(base) - reserve)))
+            return (base, size)
+        }
         let strip = compactGeometry(for: activity, companion: companion, base: base)
         return (strip, strip.compactActivitySize)
     }
@@ -3015,17 +3047,24 @@ final class NotchService: ObservableObject {
         var left: [(NotchCompactActivity, CGSize)] = []
         var right: [(NotchCompactActivity, CGSize)] = []
         let available = base.floats ? base.screen.width - 24 : NotchCapsuleLayout.availableWidth(base)
-        for (index, activity) in pillActivityOrder.prefix(NotchPillActivityLayout.maximumVisible).enumerated() where activity != primary {
-            let size = capsuleStripSize(for: activity, companion: nil, geometry: satellite)
+        for activity in pillActivityOrder.prefix(NotchPillActivityLayout.maximumVisible) where activity != primary {
+            let index = left.count + right.count
+            let size = CGSize(width: pillSecondaryWidth(for: activity, in: base), height: satellite.stripHeight)
             var nextLeft = left
             var nextRight = right
-            if pillSide(for: activity, defaultIndex: index) == .left { nextLeft.append((activity, size)) }
+            if pillSide(for: activity, defaultIndex: index) == .left { nextLeft.insert((activity, size), at: 0) }
             else { nextRight.append((activity, size)) }
             let candidate = NotchActivityDeckPresentation(primary: primary, primarySize: primarySize,
                                                           left: nextLeft, right: nextRight)
             if candidate.size.width <= available { left = nextLeft; right = nextRight }
         }
         return NotchActivityDeckPresentation(primary: primary, primarySize: primarySize, left: left, right: right)
+    }
+
+    private func mirrorNoticeSize(_ notice: NotchNotice, on geometry: NotchGeometry) -> CGSize {
+        if geometry.floats { return capsuleNoticeSurface(notice, in: geometry) }
+        return geometry.isNotched && notice.isLevelFeedback ? geometry.underNotchLevelSize
+            : geometry.noticeSize(wingWidth: notice.preferredWingWidth)
     }
 
     /// Floating pills keep their own surface. Attached cutouts respect the
@@ -3083,6 +3122,9 @@ final class NotchService: ObservableObject {
                                    geometry: geometry, size: size,
                                    background: { AnyView(NotchWindowBackground(presentation: $0)) })
         host.panel.title = FeatureStrings.notch(L10n.shared.language).title
+#if VORSSAINT_DEVELOPMENT
+        if probingConnectedDisplays { host.panel.alphaValue = 0 }
+#endif
         return NotchMirror(host: host, model: model)
     }
 
@@ -3794,6 +3836,10 @@ final class NotchService: ObservableObject {
         guard phase != dictationPhase else { return }
         let wasPresenting = dictationPhase.presentsIsland
         if phase.presentsIsland {
+            finishMusicDeparture()
+            presentedMusic = nil
+            endDeparture()
+            hoverWork?.cancel(); hoverWork = nil
             noticeWork?.cancel(); noticeWork = nil
             notice = nil
             departingNotice = nil
@@ -4206,6 +4252,55 @@ final class NotchService: ObservableObject {
         SystemMonitor.shared.setNotchVisible(false)
     }
 }
+
+#if VORSSAINT_DEVELOPMENT
+extension NotchService {
+    /// Exercises actual display geometry, native windows, and the shipped
+    /// notice-copy path without input, microphone capture, or preference writes.
+    static func checkConnectedDisplayNotices() -> [String] {
+        let service = NotchService()
+        service.probingConnectedDisplays = true
+        service.running = true
+        service.showsOnAllDisplays = true
+        service.modules = [.controls]
+        defer {
+            service.closeMirrors()
+            service.windowHost?.close()
+            service.running = false
+        }
+        let screens = service.eligibleScreens
+        guard screens.count >= 2 else { return ["connect at least two enabled displays"] }
+        guard service.displayPreference.showsOnAllDisplays else { return ["choose Automatic or All displays"] }
+        var failures: [String] = []
+        for screen in screens {
+            service.displayID = screen.notchDisplayID
+            service.updateScreen()
+            service.windowHost?.panel.alphaValue = 0
+            service.refreshPresentation(animated: false)
+            if service.geometry.screen != screen.frame { failures.append("interaction snapped away from \(screen.localizedName)") }
+            let notice = NotchNotice(event: .systemNotification, title: "Test notification", detail: "Display handoff", symbol: "bell.fill",
+                                     notification: NotchNotificationContent(app: "Test", title: "Test notification", subtitle: "", body: "Display handoff"))
+            service.notice = notice
+            service.refreshPresentation(animated: false)
+            for other in screens where other.notchDisplayID != screen.notchDisplayID {
+                guard let mirror = service.mirrors[other.notchDisplayID], mirror.model.shown,
+                      mirror.model.notice == notice, mirror.model.deck == nil,
+                      mirror.host.panel.isVisible,
+                      mirror.host.panel.screen?.notchDisplayID == other.notchDisplayID,
+                      mirror.model.size == service.mirrorNoticeSize(notice, on: mirror.model.geometry) else {
+                    failures.append("notification missing or mis-sized on \(other.localizedName)")
+                    continue
+                }
+                print("NOTICE COPY OK: \(screen.localizedName) → \(other.localizedName), physical=\(mirror.model.geometry.isNotched), size=\(mirror.model.size)")
+            }
+            service.notice = nil
+            service.refreshPresentation(animated: false)
+            if service.mirrors.values.contains(where: { $0.model.notice != nil }) { failures.append("dismissed notification stayed on another display") }
+        }
+        return failures
+    }
+}
+#endif
 
 extension NSScreen {
     var notchPersistentID: String {

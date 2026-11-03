@@ -1096,6 +1096,12 @@ enum NotchPresentationProbe {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         guard let screen = NSScreen.main else { print("NOTCH PROBE FAILED: no display"); exit(1) }
+        if CommandLine.arguments.contains("--connected-displays") {
+            app.finishLaunching()
+            let failures = NotchService.checkConnectedDisplayNotices()
+            print(failures.isEmpty ? "CONNECTED DISPLAY NOTICES OK" : "CONNECTED DISPLAY NOTICES FAILED\n" + failures.joined(separator: "\n"))
+            exit(failures.isEmpty ? 0 : 1)
+        }
         if CommandLine.arguments.contains("--viewport-motion") {
             app.finishLaunching()
             let failures = checkActivityViewportMotion()

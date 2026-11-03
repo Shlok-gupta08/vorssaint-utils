@@ -11,14 +11,28 @@ struct NotchMirrorView: View {
 
     var body: some View {
         Group {
-            if let deck = mirror.deck {
+            if let notice = mirror.notice {
+                if mirror.geometry.floats {
+                    NotchCapsuleNoticeView(notice: notice, geometry: mirror.geometry, size: mirror.size)
+                } else {
+                    NotchNoticeView(notice: notice, geometry: mirror.geometry, size: mirror.size)
+                }
+            } else if let deck = mirror.deck {
                 ZStack(alignment: .top) {
                     ForEach(deck.items) { item in
                         let primary = item.activity == mirror.activity
                         let geometry = primary ? mirror.geometry : (mirror.geometry.floats
                             ? mirror.geometry : NotchAttachedActivityLayout.satelliteGeometry(mirror.geometry))
-                        content(geometry: geometry, strip: primary ? mirror.strip : geometry,
-                                size: item.size, activity: item.activity)
+                        Group {
+                            if primary || service.widenedPillActivities.contains(item.activity) {
+                                content(geometry: geometry, strip: primary ? mirror.strip : geometry,
+                                        size: item.size, activity: item.activity)
+                            } else {
+                                NotchPillCompactMark(activity: item.activity, geometry: geometry,
+                                                     physicalSide: mirror.geometry.isNotched,
+                                                     onReadingShapeChange: { service.refreshPresentation() })
+                            }
+                        }
                             .modifier(NotchActivityViewport(size: item.size, x: item.x,
                                 geometry: geometry, focused: primary, cameraLevel: false))
                     }
