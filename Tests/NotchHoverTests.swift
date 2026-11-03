@@ -69,6 +69,10 @@ enum NotchHoverTests {
     /// The strip's track by title; the real snapshot also holds its cover and geometry.
     struct NotchCompactMusicSnapshot: Equatable { let title: String }
     class State {
+        var hidingExpandedForHover = false
+        var mirrorHoldsNotification = false
+        var mirrorNotificationHoverWork: [UInt32: DispatchWorkItem] = [:]
+
         var hasCallActivity = false
         var showsDictation = false
         func schedulePointerFollow() {}
@@ -134,6 +138,7 @@ enum NotchHoverTests {
         var openings = 0, closures = 0, feedbacks = 0
         var requestedModule: NotchModule?
         func open(_ module: NotchModule? = nil, takeFocus: Bool, activity: NotchCompactActivity? = nil) {
+            hidingExpandedForHover = false
             requestedModule = module
             openings += 1; expanded = true; openedByHover = !takeFocus
             hoverState.open(); hoverWork?.cancel(); hoverWork = nil
@@ -872,6 +877,23 @@ enum NotchHoverTests {
                    "leaving an opened preview closes it without touching the island's page")
         }
 
+        let withActivity = fixture(false)
+        withActivity.usesPillActivityDeck = true
+        arrive(withActivity)
+        withActivity.hover(true)
+        DispatchQueue.main.advance(0.26)
+        expect(withActivity.noticeExpanded && withActivity.openings == 0,
+               "a notification wins hover priority over the live activity underneath it")
+        leave(withActivity)
+        DispatchQueue.main.advance(0.2)
+
+        let reversingClose = fixture(true)
+        reversingClose.expanded = true
+        reversingClose.hidingExpandedForHover = true
+        reversingClose.hover(true)
+        expect(reversingClose.openings == 1 && !reversingClose.hidingExpandedForHover,
+               "returning to the hidden-hover activation area reverses withdrawal without a dead interval")
+
         let pass = fixture(false)
         arrive(pass)
         pass.hover(true)
@@ -890,13 +912,13 @@ enum NotchHoverTests {
         arrive(clickOnly)
         clickOnly.hover(true)
         DispatchQueue.main.advance(2)
-        expect(clickOnly.noticeWork == nil && clickOnly.notice != nil && !clickOnly.noticeExpanded && clickOnly.hoverWork == nil,
-               "click-only opening still holds the banner under the pointer without opening it")
+        expect(clickOnly.noticeWork == nil && clickOnly.notice != nil && clickOnly.noticeExpanded && clickOnly.hoverWork == nil,
+               "notifications expand for reading even when general island hover opening is off")
         leave(clickOnly)
         DispatchQueue.main.advance(0.2)
-        expect(clickOnly.notice != nil && clickOnly.noticeWork != nil, "the resumed banner counts from the moment the pointer left")
+        expect(clickOnly.notice == nil, "leaving the expanded notification dismisses it in click-only mode")
         DispatchQueue.main.advance(2.9)
-        expect(clickOnly.notice != nil, "the resumed banner keeps its full duration")
+        expect(clickOnly.notice == nil, "a dismissed preview does not return")
         DispatchQueue.main.advance(0.2)
         expect(clickOnly.notice == nil, "a held banner resumes its timer once the pointer leaves")
 

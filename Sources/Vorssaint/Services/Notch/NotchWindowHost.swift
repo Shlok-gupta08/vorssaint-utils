@@ -161,7 +161,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         let animate = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard !hidesWhenSettled || !animate else { return }
         present(size: CGSize(width: currentGeometry.collapsed.width, height: 0), geometry: currentGeometry,
-                animated: animate, transitionContent: canvas.backdropPresentation.separatesPills || transitionContent == .depart ? .depart : .dismiss,
+                animated: animate, transitionContent: .depart,
                 hideWhenSettled: true)
     }
 
@@ -384,6 +384,17 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
 
     private func settle() {
         let generation = animationGeneration
+        if hidesWhenSettled, canvas.remainingContentDepartureTime > 1.0 / 120 {
+            // The silhouette and independent cards can settle at different
+            // times. Never order the panel out while its content is fading.
+            canvas.stopMotion()
+            let remaining = canvas.remainingContentDepartureTime
+            DispatchQueue.main.asyncAfter(deadline: .now() + remaining) { [weak self] in
+                guard let self, self.animationGeneration == generation, self.isAnimating else { return }
+                self.settle()
+            }
+            return
+        }
         let gutter: CGFloat = quickAccessConfiguration == nil ? 0 : NotchQuickAccessLayout.gutter
         let bottom = quickAccessBottomInset(for: targetSize, geometry: currentGeometry)
         // A departing island is ordered out below; its released bounds are never shown.
@@ -1294,6 +1305,10 @@ private final class NotchCanvas: NSView {
 
     private static let motionKey = "notch.resize"
     private static let departureKey = "notchDeparture"
+    private var contentDepartureEndsAt: CFTimeInterval = 0
+    var remainingContentDepartureTime: CFTimeInterval {
+        departsContent ? max(0, contentDepartureEndsAt - CACurrentMediaTime()) : 0
+    }
     var departsContent: Bool {
         contentVisibility.animation(forKey: "notch.opacity")?.value(forKey: Self.departureKey) as? Bool == true
     }
@@ -1593,6 +1608,7 @@ private final class NotchCanvas: NSView {
                 animation.values = [currentOpacity, 0]
                 animation.keyTimes = [0, 1]
                 animation.duration = 0.16
+                contentDepartureEndsAt = CACurrentMediaTime() + animation.duration
                 animation.timingFunctions = [CAMediaTimingFunction(name: .easeIn)]
                 animation.fillMode = .forwards
                 animation.isRemovedOnCompletion = false
@@ -1632,6 +1648,7 @@ private final class NotchCanvas: NSView {
         opacity.calculationMode = .linear
         contentVisibility.opacity = visible ? 1 : 0
         if !visible {
+            contentDepartureEndsAt = now + duration
             opacity.fillMode = .forwards
             opacity.isRemovedOnCompletion = false
             opacity.setValue(true, forKey: Self.departureKey)

@@ -12,7 +12,12 @@ struct NotchMirrorView: View {
     var body: some View {
         Group {
             if let notice = mirror.notice {
-                if mirror.geometry.floats {
+                if mirror.noticeExpanded, let content = notice.notification {
+                    NotchNotificationPreviewView(notice: notice, content: content, service: service)
+                        .padding(.horizontal, NotchLayout.horizontalInset)
+                        .padding(.top, mirror.geometry.safeContentTop)
+                        .padding(.bottom, NotchLayout.bottomInset)
+                } else if mirror.geometry.floats {
                     NotchCapsuleNoticeView(notice: notice, geometry: mirror.geometry, size: mirror.size)
                 } else {
                     NotchNoticeView(notice: notice, geometry: mirror.geometry, size: mirror.size)
@@ -43,12 +48,12 @@ struct NotchMirrorView: View {
         }
             .frame(width: mirror.size.width, height: mirror.size.height, alignment: .top)
             .foregroundStyle(.white)
-            .allowsHitTesting(false)
+            .allowsHitTesting(mirror.noticeExpanded)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .environment(\.colorScheme, .dark)
             .environment(\.notchPresentation, true)
             .tint(.white)
-            .accessibilityHidden(true)
+            .accessibilityHidden(!mirror.noticeExpanded)
     }
 
     @ViewBuilder private func content(geometry: NotchGeometry, strip: NotchGeometry, size: CGSize,

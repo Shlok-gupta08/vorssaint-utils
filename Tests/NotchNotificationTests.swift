@@ -6,6 +6,7 @@ import Foundation
 
 enum NotchNotificationTests {
     class SizingState {
+        var hidingExpandedForHover = false
         var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
             safeAreaTop: 0, cameraWidth: 0, menuBarHeight: 32, compactSideRoom: 600, silhouette: .capsule)
         var hoverEmphasized = false
@@ -231,11 +232,8 @@ enum NotchNotificationTests {
         let heights = [short, conversation, long, flood].map { Layout.contentHeight(for: $0, width: width) }
         expect(heights[0] < heights[1] && heights[1] < heights[2] && heights[2] < heights[3],
                "the held preview grows with the conversation line and the message instead of scrolling them")
-        let lines = CGFloat(Layout.titleLines + Layout.subtitleLines + Layout.bodyLines)
-        let tallestLine = [Layout.titleFont, Layout.subtitleFont, Layout.bodyFont]
-            .map { ceil($0.ascender - $0.descender + $0.leading) }.max()!
-        expect(heights[3] <= Layout.headerHeight + Layout.actionHeight + Layout.spacing * 4 + lines * tallestLine + 3,
-               "a flood of text stops at the line limits the preview draws with")
+        expect(heights[3] > 956,
+               "long messages retain their natural height for scrolling instead of being truncated to six lines")
         expect(Layout.textHeight("", font: Layout.bodyFont, lines: Layout.bodyLines, width: width) == 0
                && Layout.textHeight("Hi", font: Layout.bodyFont, lines: Layout.bodyLines, width: 0) == 0,
                "empty text and no room take no space")

@@ -58,6 +58,7 @@ enum NotchDestinationContract {
     enum NotchLockScreenService { static var shared = LockScreen() }
 
     class State {
+        var hidingExpandedForHover = false
         var presentedMusic: Bool?
         var musicDeparturesFinished = 0
         func finishMusicDeparture() { musicDeparturesFinished += 1 }

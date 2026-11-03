@@ -37,8 +37,14 @@ enum NotchMusicVisibilityTests {
         let selectedTool = Tool()
         var onSelectionProgressChange: ((Bool) -> Void)?
     }
-    enum NotchContentTransition { case none, dismiss, replace }
-    struct Host { func containsHover(_ point: CGPoint) -> Bool { false } }
+    enum NotchContentTransition { case none, dismiss, replace, depart }
+    final class Host {
+        var hides = 0
+        var settled: [() -> Void] = []
+        func containsHover(_ point: CGPoint) -> Bool { false }
+        func hide(animated: Bool, transitionContent: NotchContentTransition) { hides += 1 }
+        func whenSettled(_ action: @escaping () -> Void) { settled.append(action) }
+    }
     struct Panel {
         var acceptsKeyFocus = false
         var level = 0
@@ -48,6 +54,9 @@ enum NotchMusicVisibilityTests {
     enum NSEvent { static let mouseLocation = CGPoint.zero }
 
     class State {
+        var hidingExpandedForHover = false
+        var completesHiddenHoverCollapse = false
+
         var liveActivitiesEnabledOnDisplay = true
         var copiesNeedMusic = false
         var hasCallActivity = false
@@ -137,6 +146,7 @@ enum NotchMusicVisibilityTests {
         var captureControlsLayout: NotchCaptureControlsLayout {
             NotchCaptureControlsLayout(geometry: geometry, titleWidth: 90, capturesAudio: false)
         }
+        func syncHiddenHoverMonitoring() {}
         func syncMenuSpaceMonitoring() {}
         func removeCaptureControlsClickThrough() {}
         func refreshPresentation() {}
@@ -386,6 +396,22 @@ enum NotchMusicVisibilityTests {
                && service.surfaceSize.width > service.geometry.notice.width,
                "a device notice widens the actual presentation beyond the compact level indicator")
         let priorGeometry = service.geometry
+        defaults.set(true, forKey: DefaultsKey.notchHideUntilHover)
+        defaults.set(true, forKey: DefaultsKey.notchOpenOnHover)
+        let hiddenPage = Service()
+        hiddenPage.expanded = true
+        let hiddenHost = Host()
+        hiddenPage.windowHost = hiddenHost
+        hiddenPage.collapse()
+        suite.expect(hiddenPage.expanded && hiddenPage.hidingExpandedForHover && hiddenHost.hides == 1,
+                     "hidden-until-hover keeps the expanded page alive during native withdrawal")
+        hiddenPage.collapse()
+        suite.expect(hiddenHost.hides == 1, "repeated hover exits cannot restart the closing animation")
+        hiddenHost.settled.removeFirst()()
+        suite.expect(!hiddenPage.expanded && !hiddenPage.hidingExpandedForHover,
+                     "the expanded page is released only once native withdrawal finishes")
+        defaults.set(false, forKey: DefaultsKey.notchHideUntilHover)
+        defaults.set(false, forKey: DefaultsKey.notchOpenOnHover)
         for physical in [false, true] {
             service.geometry = NotchGeometry(screen: priorGeometry.screen, safeAreaTop: physical ? 32 : 0,
                                              cameraWidth: physical ? 180 : 0, menuBarHeight: 32)

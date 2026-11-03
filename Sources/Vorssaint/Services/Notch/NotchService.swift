@@ -75,6 +75,8 @@ final class NotchService: ObservableObject {
     var expandedViewSize: CGSize { expandedViewLayout?.size ?? expandedSize }
     var expandedViewContentSize: CGSize { expandedViewLayout?.contentSize ?? contentSize }
     @Published private(set) var expanded = false
+    @Published private(set) var hidingExpandedForHover = false
+    private var completesHiddenHoverCollapse = false
     @Published private(set) var expandedPillActivity: NotchCompactActivity?
     @Published private(set) var showingCall = false
     @Published private(set) var dictationPhase: DictationPhase = .idle
@@ -239,6 +241,10 @@ final class NotchService: ObservableObject {
     private var hoveredPillActivity: NotchCompactActivity?
     private static let musicTitleDuration: TimeInterval = 4
     private var mirrors: [CGDirectDisplayID: NotchMirror] = [:]
+    private var mirrorNotificationHoverWork: [CGDirectDisplayID: DispatchWorkItem] = [:]
+    private var mirrorHoldsNotification: Bool {
+        mirrors.values.contains { $0.model.pointerInside && $0.model.notice?.notification != nil }
+    }
 #if VORSSAINT_DEVELOPMENT
     private var probingConnectedDisplays = false
 #endif
@@ -1042,7 +1048,7 @@ final class NotchService: ObservableObject {
     }
 
     private func unemphasizedPillSize(for activity: NotchCompactActivity) -> CGSize {
-        if expanded && activity == expandedPillActivity { return expandedSize }
+        if expanded && !hidingExpandedForHover && activity == expandedPillActivity { return expandedSize }
         guard activity == pillDeckPrimaryActivity else {
             return CGSize(width: pillSecondaryWidth(for: activity), height: geometry.stripHeight)
         }
@@ -1207,11 +1213,17 @@ final class NotchService: ObservableObject {
     var acceptsSystemFeedback: Bool {
         acceptsUserInteraction && (!hiddenInFullscreen || !geometry.isNotched)
     }
+    private var hasVisibleFeedbackCopy: Bool {
+        showsOnAllDisplays && eligibleScreens.contains {
+            $0.notchDisplayID != displayID && (!NotchSupport.hidesUntilHover() || $0.safeAreaInsets.top <= 0)
+        }
+    }
+
     var showsSystemFeedback: Bool {
-        // The display-aware default hides only persistent live/idle content;
-        // transient notifications and hardware feedback may still appear.
-        !hasCallActivity && acceptsSystemFeedback && (!userHiddenUntilHover || expanded || peeking
+        let primaryCanShow = acceptsSystemFeedback && (!userHiddenUntilHover || expanded || peeking
             || captureControls != nil || dragPlaceholder)
+        // A hidden hardware notch must not suppress a visible external copy.
+        return !hasCallActivity && acceptsUserInteraction && (primaryCanShow || hasVisibleFeedbackCopy)
     }
 
     var protectedWindowIDs: Set<CGWindowID> {
@@ -1351,6 +1363,7 @@ final class NotchService: ObservableObject {
     }
 
     private func tearDownPresentation() {
+        hidingExpandedForHover = false
         musicPauseHoldWork?.cancel(); musicPauseHoldWork = nil
         isMusicPausedHolding = false
         wasMusicPlaying = false
@@ -1478,6 +1491,7 @@ final class NotchService: ObservableObject {
             dictationPhase = .idle
         }
         guard NotchSupport.isEnabled(), !suspended else { return }
+        hidingExpandedForHover = false
         if !running || self.panel == nil { syncWithPreferences() }
         else { refreshModules() }
         guard let panel else { return }
@@ -1548,6 +1562,27 @@ final class NotchService: ObservableObject {
 
     func collapse() {
         guard captureControls == nil, !heldDrag else { return }
+        if userHiddenUntilHover, expanded, !showsDictation, !completesHiddenHoverCollapse, let windowHost {
+            guard !hidingExpandedForHover else { return }
+            // Keep the expanded page alive while its native contour closes.
+            // Independent card viewports get compact targets, retaining their
+            // current spring velocity instead of destroying the view tree.
+            hoverState.close(pointerInside: windowHost.containsHover(NSEvent.mouseLocation))
+            hidingExpandedForHover = true
+            syncHiddenHoverMonitoring()
+            hoverWork?.cancel(); hoverWork = nil
+            panel?.acceptsKeyFocus = false
+            panel?.resignKey()
+            windowHost.hide(animated: true, transitionContent: .depart)
+            windowHost.whenSettled { [weak self] in
+                guard let self, self.hidingExpandedForHover else { return }
+                self.hidingExpandedForHover = false
+                self.completesHiddenHoverCollapse = true
+                self.collapse()
+                self.completesHiddenHoverCollapse = false
+            }
+            return
+        }
         let closeCapture = detachCaptureIfClosingOnCollapse()
         hoverState.close(pointerInside: windowHost?.containsHover(NSEvent.mouseLocation) == true)
         pinned = false
@@ -1601,6 +1636,13 @@ final class NotchService: ObservableObject {
     func hover(_ entered: Bool) {
         guard running, !suspended else { removeHoverExitMonitors(); return }
         let point = NSEvent.mouseLocation
+        if hidingExpandedForHover, !hoverState.suppressed, geometry.contains(point, in: geometry.collapsed),
+           windowHost?.isConcealedForMissionControl == false {
+            // The pointer returned before withdrawal finished: reverse the
+            // current motion rather than waiting for the window to disappear.
+            open(takeFocus: false)
+            return
+        }
         let wasInside = inside
         let showedPicker = showsCompactActivityPicker
         inside = hiddenUntilHover ? geometry.contains(point, in: geometry.collapsed)
@@ -1627,6 +1669,13 @@ final class NotchService: ObservableObject {
             hoverWork?.cancel(); hoverWork = nil
             // A dialog or menu keeps the island, not a banner the pointer left.
             if !inside { releaseNotification() }
+            return
+        }
+        // Reading a notification is independent of the general island-hover
+        // preference, and takes priority over the activity pill underneath it.
+        if inside, holdsNotification, let id = notice?.notificationID {
+            if let hoverWork, !hoverWork.isCancelled { return }
+            holdNotification(id)
             return
         }
         // Start activity hover from the same native entry/move events as the
@@ -1748,14 +1797,12 @@ final class NotchService: ObservableObject {
     /// a deliberate hover opens its whole message in place.
     private func holdNotification(_ id: UUID) {
         noticeWork?.cancel(); noticeWork = nil
-        guard !noticeExpanded, !hoverState.suppressed,
-              opensOnHover else { return }
+        guard !noticeExpanded, !hoverState.suppressed else { return }
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.hoverWork = nil
             guard self.running, !self.suspended, self.inside, !self.hoverState.suppressed, !self.pinned, !self.heldDrag,
                   !self.keepsWorkingSurface, self.holdsNotification, self.notice?.notificationID == id, !self.noticeExpanded,
-                  self.opensOnHover,
                   self.geometry.contains(NSEvent.mouseLocation, in: self.surfaceSize) else { return }
             self.mutatePresentation(transitionContent: .reveal, animatesPills: self.usesPillActivityDeck) {
                 self.peeking = false; self.noticeExpanded = true
@@ -1770,6 +1817,7 @@ final class NotchService: ObservableObject {
     /// Leaving closes an opened preview; a banner that was only held gets its
     /// full time again, so a quick pass over it never cuts it short.
     private func releaseNotification() {
+        guard !mirrorHoldsNotification else { return }
         guard let notice, notice.notificationID != nil else { return }
         if noticeExpanded { dismissNotice() }
         else if noticeWork == nil { scheduleNoticeDismissal(after: notice.event.duration) }
@@ -2466,6 +2514,8 @@ final class NotchService: ObservableObject {
     }
 
     private func dismissNotice() {
+        mirrorNotificationHoverWork.values.forEach { $0.cancel() }
+        mirrorNotificationHoverWork.removeAll()
         noticeWork?.cancel(); noticeWork = nil
         endDeparture()
         let transition: NotchContentTransition = notice == nil || !noticeCanPresent ? .none
@@ -2709,6 +2759,10 @@ final class NotchService: ObservableObject {
     }
 
     func refreshPresentation(animated: Bool = true, transitionContent: NotchContentTransition = .none) {
+        if hidingExpandedForHover {
+            windowHost?.hide(animated: animated, transitionContent: .depart)
+            return
+        }
         let configuration = NotchQuickAccessConfiguration.current()
         if configuredQuickAccess != configuration {
             objectWillChange.send()
@@ -2825,7 +2879,7 @@ final class NotchService: ObservableObject {
     }
 
     private func syncHiddenHoverMonitoring() {
-        guard running, !suspended, hiddenUntilHover, windowHost != nil else {
+        guard running, !suspended, hiddenUntilHover || hidingExpandedForHover, windowHost != nil else {
             removeHiddenHoverMonitors()
             return
         }
@@ -2987,7 +3041,9 @@ final class NotchService: ObservableObject {
             }
             let (strip, stripSize) = mirrorSurface(on: base, activity: activity)
             let deck = mirroredNotice == nil ? activity.map { mirrorDeck(on: base, primary: $0, primarySize: stripSize) } : nil
-            let size = mirroredNotice.map { mirrorNoticeSize($0, on: base) } ?? deck?.size ?? stripSize
+            let previewExpanded = mirrors[id]?.model.noticeExpanded == true
+                && mirrors[id]?.model.notice?.notificationID == mirroredNotice?.notificationID
+            let size = mirroredNotice.map { mirrorNoticeSize($0, on: base, expanded: previewExpanded) } ?? deck?.size ?? stripSize
             let mirror = mirrors[id] ?? makeMirror(geometry: base, size: size)
             mirrors[id] = mirror
             if mirror.model.outline != outline || mirror.model.timerOutline != (activity == .timer) {
@@ -3000,19 +3056,26 @@ final class NotchService: ObservableObject {
             let revealing = !mirror.model.shown
             let previous = mirror.model.activity
             let previousNotice = mirror.model.notice
+            let changesPreview = mirror.model.presentedNoticeExpanded != previewExpanded
+            if previousNotice != mirroredNotice { mirrorNotificationHoverWork.removeValue(forKey: id)?.cancel() }
             guard mirror.model.update(geometry: base, strip: strip, size: size, activity: activity, deck: deck, notice: mirroredNotice) || revealing else { continue }
             mirror.model.shown = true
+            mirror.model.presentedNoticeExpanded = previewExpanded
             mirror.host.setSeparatesPills(deck != nil)
             // Shown at once where the island just left, so the two trade places.
             mirror.host.present(size: size, geometry: base, animated: !revealing,
-                                transitionContent: !revealing && (previous != activity || previousNotice?.event != mirroredNotice?.event) ? .replace : .none)
-            mirror.host.setActivationArea(CGRect(origin: .zero, size: size),
+                                transitionContent: !revealing && (changesPreview || previous != activity || previousNotice?.event != mirroredNotice?.event) ? .replace : .none)
+            mirror.host.setHoverHandler { [weak self] entered in self?.hoverMirrorNotification(entered, on: id) }
+            mirror.host.setActivationArea(mirror.model.noticeExpanded ? .zero : CGRect(origin: .zero, size: size),
                                           title: FeatureStrings.notch(L10n.shared.language).open,
                                           willPress: {}, activate: { [weak self] in
                                               if let mirroredNotice { self?.activateNotice(mirroredNotice) }
                                               else { self?.bringIsland(to: id) }
                                           })
             if !mirror.host.panel.isVisible { mirror.host.panel.orderFrontRegardless() }
+            if mirroredNotice?.notification != nil, mirror.host.containsHover(NSEvent.mouseLocation) {
+                hoverMirrorNotification(true, on: id)
+            }
         }
     }
 
@@ -3061,10 +3124,47 @@ final class NotchService: ObservableObject {
         return NotchActivityDeckPresentation(primary: primary, primarySize: primarySize, left: left, right: right)
     }
 
-    private func mirrorNoticeSize(_ notice: NotchNotice, on geometry: NotchGeometry) -> CGSize {
+    private func mirrorNoticeSize(_ notice: NotchNotice, on geometry: NotchGeometry, expanded: Bool = false) -> CGSize {
+        if expanded, notice.notification != nil {
+            return geometry.notificationPreviewSize(contentHeight: notice.previewContentHeight(width: geometry.notificationPreviewContentWidth))
+        }
         if geometry.floats { return capsuleNoticeSurface(notice, in: geometry) }
         return geometry.isNotched && notice.isLevelFeedback ? geometry.underNotchLevelSize
             : geometry.noticeSize(wingWidth: notice.preferredWingWidth)
+    }
+
+    /// Expand the copy in place; hovering a banner never swaps display hosts.
+    private func hoverMirrorNotification(_ entered: Bool, on id: CGDirectDisplayID) {
+        guard running, !suspended, let mirror = mirrors[id], mirror.model.shown,
+              let notice = mirror.model.notice, notice.notification != nil else { return }
+        let inside = mirror.host.containsHover(NSEvent.mouseLocation)
+            && !mirror.host.isConcealedForMissionControl
+        let wasInside = mirror.model.pointerInside
+        mirror.model.pointerInside = inside
+        if inside {
+            if !wasInside { mirrorNotificationHoverWork.removeValue(forKey: id)?.cancel() }
+            noticeWork?.cancel(); noticeWork = nil
+            guard !mirror.model.noticeExpanded, mirrorNotificationHoverWork[id] == nil else { return }
+        } else {
+            mirrorNotificationHoverWork.removeValue(forKey: id)?.cancel()
+        }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.mirrorNotificationHoverWork[id] = nil
+            guard self.running, !self.suspended, self.mirrors[id]?.model === mirror.model,
+                  mirror.model.notice == notice,
+                  mirror.host.containsHover(NSEvent.mouseLocation) == inside,
+                  !mirror.host.isConcealedForMissionControl else { return }
+            mirror.model.noticeExpanded = inside
+            self.syncMirrors()
+            if !inside, !self.inside, !self.mirrorHoldsNotification {
+                self.scheduleNoticeDismissal(after: notice.event.duration)
+            }
+        }
+        mirrorNotificationHoverWork[id] = work
+        let delay = inside ? NotchSupport.sanitizedHoverDelay(UserDefaults.standard.double(forKey: DefaultsKey.notchHoverDelay))
+            : NotchQuickAccessLayout.hoverExitDelay
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// Floating pills keep their own surface. Attached cutouts respect the
@@ -3129,6 +3229,8 @@ final class NotchService: ObservableObject {
     }
 
     private func closeMirrors() {
+        mirrorNotificationHoverWork.values.forEach { $0.cancel() }
+        mirrorNotificationHoverWork.removeAll()
         syncMirrorMenuMonitoring(needed: false)
         mirrorMenuReadings.removeAll()
         guard !mirrors.isEmpty else { return }
@@ -3837,6 +3939,7 @@ final class NotchService: ObservableObject {
         guard phase != dictationPhase else { return }
         let wasPresenting = dictationPhase.presentsIsland
         if phase.presentsIsland {
+            hidingExpandedForHover = false
             finishMusicDeparture()
             presentedMusic = nil
             endDeparture()
@@ -4284,6 +4387,7 @@ extension NotchService {
             service.notice = notice
             service.refreshPresentation(animated: false)
             for other in screens where other.notchDisplayID != screen.notchDisplayID {
+                if NotchSupport.hidesUntilHover(), other.safeAreaInsets.top > 0 { continue }
                 guard let mirror = service.mirrors[other.notchDisplayID], mirror.model.shown,
                       mirror.model.notice == notice, mirror.model.deck == nil,
                       mirror.host.panel.isVisible,
@@ -4293,6 +4397,24 @@ extension NotchService {
                     continue
                 }
                 print("NOTICE COPY OK: \(screen.localizedName) → \(other.localizedName), physical=\(mirror.model.geometry.isNotched), size=\(mirror.model.size)")
+                mirror.model.noticeExpanded = true
+                service.syncMirrors()
+                let preview = mirror.model.size
+                let expected = service.mirrorNoticeSize(notice, on: mirror.model.geometry, expanded: true)
+                if preview != expected || preview.height <= mirror.model.geometry.stripHeight
+                    || mirror.host.panel.screen?.notchDisplayID != other.notchDisplayID {
+                    failures.append("expanded notification missing or mis-sized on \(other.localizedName)")
+                }
+                let long = NotchNotice(event: .systemNotification, title: notice.title, detail: "Long message", symbol: notice.symbol,
+                    notification: NotchNotificationContent(app: "Test", title: "Long message", subtitle: "", body: String(repeating: "The expanded card fits this message. ", count: 100)))
+                let tall = service.mirrorNoticeSize(long, on: mirror.model.geometry, expanded: true)
+                if tall.height <= preview.height || tall.height > other.frame.height - 48 {
+                    failures.append("notification does not adapt to content on \(other.localizedName)")
+                }
+                print("NOTICE PREVIEW OK: \(other.localizedName), short=\(preview.height), long=\(tall.height)")
+                mirror.model.noticeExpanded = false
+                service.syncMirrors()
+
             }
             service.notice = nil
             service.refreshPresentation(animated: false)

@@ -24,6 +24,7 @@ enum NotchMirrorContract {
         }
         static func == (left: NSScreen, right: NSScreen) -> Bool { left === right }
     }
+    enum NSEvent { static var mouseLocation = CGPoint(x: -10000, y: -10000) }
     enum NotchContentTransition { case none, replace }
     final class Panel {
         var isVisible = false
@@ -34,6 +35,13 @@ enum NotchMirrorContract {
     final class Host {
         let panel = Panel()
         var presented: [(size: CGSize, geometry: NotchGeometry, animated: Bool, transition: NotchContentTransition)] = []
+        var isConcealedForMissionControl = false
+        var hoverHandler: ((Bool) -> Void)?
+        func setHoverHandler(_ handler: @escaping (Bool) -> Void) { hoverHandler = handler }
+        func containsHover(_ point: CGPoint) -> Bool {
+            guard panel.isVisible, let last = presented.last else { return false }
+            return last.geometry.frame(for: last.size).contains(point)
+        }
         var hides = 0, closes = 0
         var outline: (enabled: Bool, color: NSColor)?
         var activationRect = CGRect.zero
@@ -83,6 +91,11 @@ enum NotchMirrorContract {
             NotchPillActivityLayout.defaultSide(at: defaultIndex ?? 0)
         }
         func measureMirrorSideRoom(on screen: NSScreen, geometry: NotchGeometry) -> CGFloat? { nil }
+        var noticeWork: DispatchWorkItem?
+        var inside = false
+        var dismissalsScheduled = 0
+        func scheduleNoticeDismissal(after: TimeInterval) { dismissalsScheduled += 1 }
+        var mirrorNotificationHoverWork: [CGDirectDisplayID: DispatchWorkItem] = [:]
         var notice: NotchNotice?
         var activatedNotices: [NotchNotice] = []
         func activateNotice(_ notice: NotchNotice) { activatedNotices.append(notice) }
@@ -178,7 +191,8 @@ enum NotchMirrorContract {
         let satellite = capsule?.model.deck?.items.first(where: { $0.activity == .music })
         suite.expect(satellite?.x ?? 0 > 0 && satellite?.size.width == 70,
                      "the first secondary uses the same right side and compact width as the interactive island")
-        let banner = NotchNotice(event: .systemNotification, title: "Test", detail: "Connected display", symbol: "bell")
+        let banner = NotchNotice(event: .systemNotification, title: "Test", detail: "Connected display", symbol: "bell",
+                                notification: NotchNotificationContent(app: "Test", title: "Test", subtitle: "", body: "Connected display"))
         service.notice = banner
         service.syncMirrors()
         suite.expect(capsule?.model.notice == banner && capsule?.model.deck == nil
@@ -186,6 +200,29 @@ enum NotchMirrorContract {
                      "notifications replace compact activity on the external display using its own geometry")
         capsule?.host.activate?()
         suite.expect(service.activatedNotices == [banner], "a copied notification activates the same notification without waiting for a display handoff")
+        let externalFrame = capsule!.model.geometry.frame(for: capsule!.model.size)
+        NSEvent.mouseLocation = CGPoint(x: externalFrame.midX, y: externalFrame.midY)
+        service.hoverMirrorNotification(true, on: 2)
+        NSEvent.mouseLocation = CGPoint(x: -10000, y: -10000)
+        service.hoverMirrorNotification(false, on: 2)
+        let abortedExit = service.mirrorNotificationHoverWork[2]
+        NSEvent.mouseLocation = CGPoint(x: externalFrame.midX, y: externalFrame.midY)
+        service.hoverMirrorNotification(true, on: 2)
+        suite.expect(abortedExit?.isCancelled == true,
+                     "re-entering a copied banner cancels its exit and starts a fresh preview deadline")
+        let pending = service.mirrorNotificationHoverWork[2]
+        pending?.perform()
+        pending?.cancel()
+        suite.expect(capsule?.model.noticeExpanded == true
+                     && (capsule?.model.size.height ?? 0) > external2.stripHeight && service.moves.isEmpty,
+                     "hover expands a copy in place to its measured content without swapping display hosts")
+        NSEvent.mouseLocation = CGPoint(x: -10000, y: -10000)
+        service.hoverMirrorNotification(false, on: 2)
+        let leaving = service.mirrorNotificationHoverWork[2]
+        leaving?.perform()
+        leaving?.cancel()
+        suite.expect(capsule?.model.noticeExpanded == false && service.dismissalsScheduled == 1,
+                     "leaving a copied preview collapses it and resumes its dismissal timer")
         service.notice = nil
         service.activityOrder = []
         service.syncMirrors()

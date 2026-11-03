@@ -205,7 +205,7 @@ enum NotchNotificationPreviewLayout {
     static func contentHeight(for content: NotchNotificationContent, width: CGFloat) -> CGFloat {
         let blocks = [textHeight(content.title, font: titleFont, lines: titleLines, width: width),
                       textHeight(content.subtitle, font: subtitleFont, lines: subtitleLines, width: width),
-                      textHeight(content.body, font: bodyFont, lines: bodyLines, width: width)].filter { $0 > 0 }
+                      textHeight(content.body, font: bodyFont, lines: Int.max, width: width)].filter { $0 > 0 }
         return headerHeight + (blocks + [actionHeight]).reduce(0) { $0 + spacing + $1 }
     }
 

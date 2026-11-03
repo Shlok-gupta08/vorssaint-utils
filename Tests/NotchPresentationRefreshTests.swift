@@ -151,6 +151,8 @@ enum NotchPresentationRefreshContract {
         }
     }
     class State: ObservableObject {
+        var hasVisibleFeedbackCopy = false
+        var hidingExpandedForHover = false
         var expandedViewLayout: NotchExpandedViewLayout?
         var expandedSize: CGSize { surfaceSize }
         var hasCallActivity = false
@@ -630,6 +632,11 @@ enum NotchPresentationRefreshContract {
             hidden.refreshPresentation()
             suite.expect(hidden.panel?.isVisible == false, "ending the interaction hides the window again")
         }
+        let externalFeedback = Service()
+        externalFeedback.expanded = false
+        externalFeedback.hasVisibleFeedbackCopy = true
+        suite.expect(externalFeedback.showsSystemFeedback,
+                     "hidden hardware-notch mode does not suppress another display's readable notification")
         UserDefaults.standard.hides = false
         let physical = Service()
         physical.expanded = false

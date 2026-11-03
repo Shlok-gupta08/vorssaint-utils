@@ -796,6 +796,9 @@ final class NotchMirrorModel: ObservableObject {
     @Published private(set) var activity: NotchCompactActivity?
     @Published private(set) var deck: NotchActivityDeckPresentation?
     @Published private(set) var notice: NotchNotice?
+    @Published var noticeExpanded = false
+    var pointerInside = false
+    var presentedNoticeExpanded = false
     var shown = false
     /// The outline last drawn around it, and whether a timer's color tinted it.
     var outline: Bool?
@@ -817,6 +820,10 @@ final class NotchMirrorModel: ObservableObject {
         self.size = size
         self.activity = activity
         self.deck = deck
+        if notice == nil || self.notice?.notificationID != notice?.notificationID {
+            noticeExpanded = false
+            pointerInside = false
+        }
         self.notice = notice
         return true
     }
@@ -2319,7 +2326,7 @@ struct NotchGeometry: Equatable {
     }
     func notificationPreviewSize(contentHeight: CGFloat) -> CGSize {
         let height = safeContentTop + max(0, contentHeight) + NotchLayout.bottomInset
-        return CGSize(width: notificationPreviewWidth, height: min(height, screen.height - 48))
+        return CGSize(width: notificationPreviewWidth, height: min(height, max(0, screen.height - 48 - floatingDrop)))
     }
     var peek: CGSize {
         CGSize(width: min(screen.width - 24, max(cameraWidth + 110, 340)), height: safeContentTop + 52)
