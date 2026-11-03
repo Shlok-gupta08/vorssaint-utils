@@ -107,12 +107,12 @@ struct NotchClipboardPastePress: Equatable {
 
 enum NotchDisplay: String, CaseIterable {
     /// `pointer` moves the closed island to the display the pointer is on.
-    /// `automatic` and `all` do too, with a closed island on every other enabled display.
+    /// `automatic` and `all` keep an island on every enabled display.
     case automatic, builtIn, main, pointer, all
 
     /// Automatic adapts every enabled display; explicit modes can restrict it.
     var showsOnAllDisplays: Bool { self == .automatic || self == .all }
-    var followsPointer: Bool { showsOnAllDisplays || self == .pointer }
+    var followsPointer: Bool { self == .pointer }
 }
 
 /// How the island meets the top of a display without a camera housing: a

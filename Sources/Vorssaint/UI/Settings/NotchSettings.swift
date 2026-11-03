@@ -239,7 +239,7 @@ struct NotchSettings: View {
                     display = (all ? NotchDisplay.automatic : .builtIn).rawValue
                 }))
                 Text((NotchDisplay(rawValue: display) ?? .automatic).showsOnAllDisplays
-                     ? "Every enabled display is included. The interactive island follows the pointer."
+                     ? "Every enabled display keeps its island in place. Click an island to open controls there."
                      : "Single-display mode: only the selected display shows the island.")
                     .font(.caption).foregroundStyle(.secondary)
                 switchRow("arrow.up.left.and.arrow.down.right", text.hideInFullscreen, isOn: $hideInFullscreen)

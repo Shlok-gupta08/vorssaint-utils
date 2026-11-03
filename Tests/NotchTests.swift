@@ -2260,12 +2260,13 @@ enum NotchTests {
         suite.expect(shortTarget.height <= shortScreen.height - 48 && shortScreen.contains(shortMedia.frame(for: shortTarget)),
                "the larger media workspace preserves the screen margin on shorter displays")
         suite.expect(NotchDisplay.automatic.showsOnAllDisplays && NotchDisplay.all.showsOnAllDisplays
-                     && NotchDisplay.automatic.followsPointer && NotchDisplay.pointer.followsPointer
+                     && !NotchDisplay.automatic.followsPointer && !NotchDisplay.all.followsPointer
+                     && NotchDisplay.pointer.followsPointer
                      && !NotchDisplay.builtIn.showsOnAllDisplays && !NotchDisplay.main.showsOnAllDisplays,
-                     "automatic adapts all enabled displays while explicit single-display modes stay opt-in")
+                     "automatic and all-display modes keep stable islands; only Follow Pointer watches cursor crossings")
         suite.expect(NotchSupport.screenIndex(preference: .automatic, builtIn: [false, true],
                                              notched: [false, true], main: 0, pointer: 0) == 0,
-                     "automatic can move interaction to an external display instead of snapping back to the hardware notch")
+                     "automatic preserves explicit interaction on an external display instead of snapping back to the hardware notch")
         suite.expect(NotchSupport.screenIndex(preference: .automatic, builtIn: [false, true],
                                        notched: [false, true], main: 0) == 1,
                "automatic uses the notched built-in screen even with external main display")
@@ -2311,7 +2312,7 @@ enum NotchTests {
                                                       pointer: pointer)
                              == NotchSupport.screenIndex(preference: .pointer, builtIn: builtIn, notched: notched, main: main,
                                                          pointer: pointer),
-                             "with every display chosen, the island that responds follows the pointer")
+                             "with every display chosen, the island preserves its selected interaction display")
             }
         }
         suite.expect(NotchSupport.shouldReplace(.volume, with: .brightness), "continuous controls can replace each other")

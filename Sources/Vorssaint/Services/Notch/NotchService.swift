@@ -2950,9 +2950,9 @@ final class NotchService: ObservableObject {
         let model: NotchMirrorModel
     }
 
-    /// With the island on every display, it follows the pointer as it does
-    /// when it only follows it, and each other display shows a copy of what
-    /// it shows closed. The copies are drawn for their own displays, a
+    /// Every display keeps a stable island. Only explicit interaction moves
+    /// the interactive host; merely crossing displays never swaps windows.
+    /// Copies are drawn for their own displays, a
     /// capsule or a notch. Notices are shared, while expansion stays local.
     private func syncMirrors() {
         guard showsOnAllDisplays, running, !suspended, windowHost != nil else { closeMirrors(); return }
@@ -3369,8 +3369,9 @@ final class NotchService: ObservableObject {
 
         let preference = displayPreference
         var pointer: Int?
-        if preference.followsPointer {
-            // The island stays on its display until it can follow the pointer.
+        if preference.followsPointer || preference.showsOnAllDisplays {
+            // Preserve the last explicit interaction display in multi-display
+            // modes, without following ordinary cursor crossings.
             let mouse = NSEvent.mouseLocation
             pointer = screens.firstIndex { $0.notchDisplayID == displayID }
                 ?? screens.firstIndex { NSMouseInRect(mouse, $0.frame, false) }
