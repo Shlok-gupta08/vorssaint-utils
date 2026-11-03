@@ -122,6 +122,32 @@ enum NotchSilhouette: String, CaseIterable {
     }
 }
 
+/// Saved by the display UUID, which survives reconnects and resolution changes.
+/// A physical camera always uses its hardware contour, regardless of this preference.
+struct NotchDisplayPreference: Codable {
+    var enabled = true
+    var liveActivities = true
+    var silhouette: String? = nil
+
+    static func read(_ raw: String) -> [String: Self] {
+        guard let data = raw.data(using: .utf8) else { return [:] }
+        return (try? JSONDecoder().decode([String: Self].self, from: data)) ?? [:]
+    }
+
+    static func current(for id: String, in defaults: UserDefaults = .standard) -> Self {
+        read(defaults.string(forKey: DefaultsKey.notchDisplayPreferences) ?? "")[id] ?? Self()
+    }
+
+    static func updating(_ raw: String, id: String, change: (inout Self) -> Void) -> String {
+        var values = read(raw)
+        var value = values[id] ?? Self()
+        change(&value)
+        values[id] = value
+        guard let data = try? JSONEncoder().encode(values), let result = String(data: data, encoding: .utf8) else { return raw }
+        return result
+    }
+}
+
 enum NotchSize: String, CaseIterable {
     case compact, spacious, custom
 
@@ -764,6 +790,7 @@ final class NotchMirrorModel: ObservableObject {
     @Published private(set) var strip: NotchGeometry
     @Published private(set) var size: CGSize
     @Published private(set) var activity: NotchCompactActivity?
+    @Published private(set) var deck: NotchActivityDeckPresentation?
     var shown = false
     /// The outline last drawn around it, and whether a timer's color tinted it.
     var outline: Bool?
@@ -776,14 +803,15 @@ final class NotchMirrorModel: ObservableObject {
     }
 
     /// Whether anything it draws changed, so a copy is only resized when it did.
-    func update(geometry: NotchGeometry, strip: NotchGeometry, size: CGSize, activity: NotchCompactActivity?) -> Bool {
-        guard self.geometry != geometry || self.strip != strip || self.size != size || self.activity != activity else {
+    func update(geometry: NotchGeometry, strip: NotchGeometry, size: CGSize, activity: NotchCompactActivity?, deck: NotchActivityDeckPresentation? = nil) -> Bool {
+        guard self.deck != deck || self.geometry != geometry || self.strip != strip || self.size != size || self.activity != activity else {
             return false
         }
         self.geometry = geometry
         self.strip = strip
         self.size = size
         self.activity = activity
+        self.deck = deck
         return true
     }
 }

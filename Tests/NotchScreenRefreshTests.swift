@@ -86,6 +86,7 @@ enum NotchScreenRefreshContract {
     final class NSScreen {
         static var screens: [NSScreen] = []
         static var withMouse: NSScreen? { screens.first { $0.frame.contains(NSEvent.mouseLocation) } }
+        var notchPersistentID: String { "test-display-\(notchDisplayID)" }
         let notchDisplayID: CGDirectDisplayID
         let frame: CGRect
         init(_ id: CGDirectDisplayID, _ frame: CGRect) { notchDisplayID = id; self.frame = frame }

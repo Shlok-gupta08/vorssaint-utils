@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vorssaint
 
+import AppKit
 import SwiftUI
 import EventKit
 
@@ -30,6 +31,8 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchLiveEqualizer) private var liveEqualizer = false
     @AppStorage(DefaultsKey.notchEnabled) private var enabled = false
     @AppStorage(DefaultsKey.notchDisplay) private var display = NotchDisplay.automatic.rawValue
+    @AppStorage(DefaultsKey.notchDisplayPreferences) private var displayPreferences = ""
+    @AppStorage(DefaultsKey.notchPreferredDisplay) private var preferredDisplay = ""
     @AppStorage(DefaultsKey.notchSilhouette) private var silhouette = NotchSilhouette.capsule.rawValue
     @AppStorage(DefaultsKey.notchOpenOnHover) private var hover = false
     @AppStorage(DefaultsKey.notchHideInFullscreen) private var hideInFullscreen = false
@@ -86,6 +89,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.clipboardHistoryEnabled) private var clipboardHistoryEnabled = false
     @AppStorage(DefaultsKey.notchHoverExpands) private var hoverExpand = true
     @AppStorage(DefaultsKey.notchQuickAccessLayout) private var accessData = Data()
+    @State private var connectedScreens = NSScreen.screens
     @State private var tab = NotchSettingsTab.layout
     @State private var selectedModule = NotchModule.controls
     @State private var draggingModule: NotchModule?
@@ -97,7 +101,7 @@ struct NotchSettings: View {
 
     private var configuration: [String] {
         [String(enabled), String(callsEnabled), String(calendarEnabled), String(calendarCountdown), String(calendarTimeLeft), String(notificationsEnabled), String(dismissNativeNotifications), String(gesturesEnabled), String(lyricsEnabled), String(lyricsOnline), String(queueEnabled), String(liveEqualizer), String(showPlayingMusic), String(hideMusicWhenPlayerActive), String(includeOtherPlayers), idle, hiddenControls, controlOrder, size,
-         String(timerEnabled), String(timerSoundEnabled), String(cameraEnabled), String(accessoriesEnabled), String(outlineEnabled), String(customWidth), String(customHeight), String(cameraFitWidth), String(cameraFitHeight), String(capsuleFitWidth), String(capsuleFitHeight), String(capsuleFitDrop), String(hapticFeedback), String(shelfWindow), String(dragReveal), String(captureControls), String(quickPanel), String(appPanel), String(hoverExpand), String(hideUntilHover), String(autoHideWithoutNotch), String(hideInFullscreen), String(coversMenus), display, silhouette, String(hover), hidden, order, String(volume),
+         String(timerEnabled), String(timerSoundEnabled), String(cameraEnabled), String(accessoriesEnabled), String(outlineEnabled), String(customWidth), String(customHeight), String(cameraFitWidth), String(cameraFitHeight), String(capsuleFitWidth), String(capsuleFitHeight), String(capsuleFitDrop), String(hapticFeedback), String(shelfWindow), String(dragReveal), String(captureControls), String(quickPanel), String(appPanel), String(hoverExpand), String(hideUntilHover), String(autoHideWithoutNotch), String(hideInFullscreen), String(coversMenus), display, displayPreferences, preferredDisplay, silhouette, String(hover), hidden, order, String(volume),
          String(brightness), String(keyboardLight), String(microphone), String(battery), String(clipboard), String(clipboardWindow), String(capture), String(trackChange), captureAction, String(showInCaptures), String(returnHome), homeModule, String(opensActivity), String(scratchpad), String(agentsEnabled), String(watchEnabled), String(keepAwakeActivity), String(expandedScale)]
     }
 
@@ -142,6 +146,9 @@ struct NotchSettings: View {
         .onChange(of: configuration) { _, _ in sync() }
         .onChange(of: accessData) { _, _ in NotchService.shared.syncWithPreferences() }
         .onChange(of: tab) { _, _ in draggingModule = nil; draggingControl = nil }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            connectedScreens = NSScreen.screens
+        }
         .onAppear(perform: consumeModuleHint)
         .onChange(of: router.notchModule) { _, _ in consumeModuleHint() }
     }
@@ -151,6 +158,7 @@ struct NotchSettings: View {
             Group {
                 switch tab {
                 case .layout: layoutPage
+                case .displays: displaysPage
                 case .content: EmptyView()
                 case .activity: activityPage
                 case .behavior: behaviorPage
@@ -208,6 +216,80 @@ struct NotchSettings: View {
             SettingsCard {
                 switchRow("capsule", text.showOutline, isOn: $outlineEnabled)
             }
+        }
+    }
+
+    private var displaysPage: some View {
+        let editor = FeatureStrings.notchEditor(l10n.language)
+        return VStack(alignment: .leading, spacing: 20) {
+            Text("Choose where the island appears. All displays keeps live activity visible on each enabled screen; click a copy to open controls there. Appearance is resolved separately for each screen, at every resolution.")
+                .font(.callout).foregroundStyle(.secondary)
+            SettingsCard(title: text.display) {
+                switchRow("arrow.up.left.and.arrow.down.right", text.hideInFullscreen, isOn: $hideInFullscreen)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    // A mode this version no longer offers is treated as automatic, as the island does.
+                    choice(text.automatic, symbol: "display.2",
+                           selected: (NotchDisplay(rawValue: display) ?? .automatic) == .automatic) { preferredDisplay = ""; display = NotchDisplay.automatic.rawValue }
+                    choice(text.builtIn, symbol: "laptopcomputer", selected: display == NotchDisplay.builtIn.rawValue) { preferredDisplay = ""; display = NotchDisplay.builtIn.rawValue }
+                    choice(text.mainDisplay, symbol: "display", selected: display == NotchDisplay.main.rawValue && preferredDisplay.isEmpty) { preferredDisplay = ""; display = NotchDisplay.main.rawValue }
+                    choice(text.followPointer, symbol: "cursorarrow.motionlines",
+                           selected: display == NotchDisplay.pointer.rawValue) { preferredDisplay = ""; display = NotchDisplay.pointer.rawValue }
+                    choice(text.allDisplays, symbol: "rectangle.on.rectangle",
+                           selected: display == NotchDisplay.all.rawValue) { preferredDisplay = ""; display = NotchDisplay.all.rawValue }
+                }
+            }
+            if NotchSupport.hasDisplayWithoutNotch {
+                SettingsCard(title: text.withoutNotch) {
+                    switchRow("eye.slash", "Hide persistent island in full screen",
+                              caption: "On by default. In full-screen apps, hide idle content and live activities until you hover the island area. The island stays visible on the desktop. Notifications and volume or brightness feedback can still appear.",
+                              isOn: $autoHideWithoutNotch)
+                }
+            }
+            if NotchSupport.hasNotchedDisplay {
+                SettingsCard(title: "Displays with a notch") {
+                    switchRow("eye.slash", editor.hiddenUntilHover,
+                              caption: "Hide the hardware-notch island and all of its automatic feedback until you hover it.",
+                              isOn: Binding(get: { hover && hideUntilHover }, set: { hidden in
+                                  hideUntilHover = hidden
+                                  if hidden { hover = true; hoverExpand = true }
+                              }))
+                }
+            }
+
+            SettingsCard(title: "Connected displays") {
+                ForEach(connectedScreens, id: \.notchPersistentID) { screen in
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(screen.localizedName, systemImage: screen.safeAreaInsets.top > 0 ? "laptopcomputer" : "display")
+                            .font(.headline)
+                        Toggle("Enable on this display", isOn: displayBinding(screen, keyPath: \.enabled))
+                        Toggle("Show live activities", isOn: displayBinding(screen, keyPath: \.liveActivities))
+                        if screen.safeAreaInsets.top > 0 {
+                            Text("Physical notch · automatically fits content around the camera.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Picker("Appearance", selection: Binding(get: {
+                                NotchDisplayPreference.read(displayPreferences)[screen.notchPersistentID]?.silhouette ?? ""
+                            }, set: { value in
+                                displayPreferences = NotchDisplayPreference.updating(displayPreferences, id: screen.notchPersistentID) {
+                                    $0.silhouette = value.isEmpty ? nil : value
+                                }
+                            })) {
+                                Text("Use default").tag("")
+                                Text(text.capsuleShape).tag(NotchSilhouette.capsule.rawValue)
+                                Text(text.notchShape).tag(NotchSilhouette.notch.rawValue)
+                            }
+                        }
+                        Button("Use only this display") {
+                            displayPreferences = NotchDisplayPreference.updating(displayPreferences, id: screen.notchPersistentID) { $0.enabled = true }
+                            preferredDisplay = screen.notchPersistentID
+                            display = NotchDisplay.main.rawValue
+                        }
+                    }.padding(.vertical, 6)
+                    Divider()
+                }
+                Text("Display choices are remembered when a monitor reconnects. Activity types are configured in Activity; pages and controls are configured in Content. No additional permission is needed to show islands on multiple displays.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             // Only a display without a camera can float the island.
             if NotchSupport.hasDisplayWithoutNotch {
                 displayGroupHeader(text.withoutNotch, symbol: "display",
@@ -248,7 +330,16 @@ struct NotchSettings: View {
                     Text(text.cameraFitHint).font(.caption).foregroundStyle(.secondary)
                 }
             }
+
         }
+    }
+
+    private func displayBinding(_ screen: NSScreen, keyPath: WritableKeyPath<NotchDisplayPreference, Bool>) -> Binding<Bool> {
+        Binding(get: {
+            (NotchDisplayPreference.read(displayPreferences)[screen.notchPersistentID] ?? NotchDisplayPreference())[keyPath: keyPath]
+        }, set: { value in
+            displayPreferences = NotchDisplayPreference.updating(displayPreferences, id: screen.notchPersistentID) { $0[keyPath: keyPath] = value }
+        })
     }
 
     /// Whether the open island draws Liquid Glass, by the island's own rule.
@@ -603,37 +694,6 @@ struct NotchSettings: View {
                     .labelsHidden()
                 }
                 switchRow("livephoto", editor.openActivity, caption: editor.openActivityHint, isOn: $opensActivity)
-            }
-            SettingsCard(title: text.display) {
-                switchRow("arrow.up.left.and.arrow.down.right", text.hideInFullscreen, isOn: $hideInFullscreen)
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    // A mode this version no longer offers is treated as automatic, as the island does.
-                    choice(text.automatic, symbol: "display.2",
-                           selected: (NotchDisplay(rawValue: display) ?? .automatic) == .automatic) { display = NotchDisplay.automatic.rawValue }
-                    choice(text.builtIn, symbol: "laptopcomputer", selected: display == NotchDisplay.builtIn.rawValue) { display = NotchDisplay.builtIn.rawValue }
-                    choice(text.mainDisplay, symbol: "display", selected: display == NotchDisplay.main.rawValue) { display = NotchDisplay.main.rawValue }
-                    choice(text.followPointer, symbol: "cursorarrow.motionlines",
-                           selected: display == NotchDisplay.pointer.rawValue) { display = NotchDisplay.pointer.rawValue }
-                    choice(text.allDisplays, symbol: "rectangle.on.rectangle",
-                           selected: display == NotchDisplay.all.rawValue) { display = NotchDisplay.all.rawValue }
-                }
-            }
-            if NotchSupport.hasDisplayWithoutNotch {
-                SettingsCard(title: text.withoutNotch) {
-                    switchRow("eye.slash", "Hide persistent island in full screen",
-                              caption: "On by default. In full-screen apps, hide idle content and live activities until you hover the island area. The island stays visible on the desktop. Notifications and volume or brightness feedback can still appear.",
-                              isOn: $autoHideWithoutNotch)
-                }
-            }
-            if NotchSupport.hasNotchedDisplay {
-                SettingsCard(title: "Displays with a notch") {
-                    switchRow("eye.slash", editor.hiddenUntilHover,
-                              caption: "Hide the hardware-notch island and all of its automatic feedback until you hover it.",
-                              isOn: Binding(get: { hover && hideUntilHover }, set: { hidden in
-                                  hideUntilHover = hidden
-                                  if hidden { hover = true; hoverExpand = true }
-                              }))
-                }
             }
             SettingsCard(title: editor.destinations) {
                 destination(text.panel, symbol: "bubble.middle.top", value: $appPanel)

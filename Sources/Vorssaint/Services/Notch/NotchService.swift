@@ -239,6 +239,15 @@ final class NotchService: ObservableObject {
     private var hoveredPillActivity: NotchCompactActivity?
     private static let musicTitleDuration: TimeInterval = 4
     private var mirrors: [CGDirectDisplayID: NotchMirror] = [:]
+    private struct MirrorMenuReading {
+        let geometry: NotchGeometry
+        let pid: pid_t
+        let room: CGFloat?
+        let date: Date
+    }
+    private var mirrorMenuReadings: [CGDirectDisplayID: MirrorMenuReading] = [:]
+    private var mirrorMenuTimer: Timer?
+    private var pendingMirrorMenuReads: Set<CGDirectDisplayID> = []
     /// Displays showing a full-screen Space, read as Spaces change.
     private var fullscreenDisplays: Set<CGDirectDisplayID> = []
     private var pointerMonitors: [Any] = []
@@ -250,7 +259,7 @@ final class NotchService: ObservableObject {
     private init() {}
 
     private var userHiddenUntilHover: Bool {
-        UserDefaults.standard.bool(forKey: DefaultsKey.notchHideUntilHover)
+        geometry.isNotched && UserDefaults.standard.bool(forKey: DefaultsKey.notchHideUntilHover)
             && UserDefaults.standard.bool(forKey: DefaultsKey.notchOpenOnHover)
     }
 
@@ -337,6 +346,12 @@ final class NotchService: ObservableObject {
     var hasCallActivity: Bool { NotchCallSupport.isAvailable && NotchCallService.shared.primary != nil }
 
     var compactActivity: NotchCompactActivity? {
+        if let screen = NSScreen.screens.first(where: { $0.notchDisplayID == displayID }),
+           !NotchDisplayPreference.current(for: screen.notchPersistentID).liveActivities { return nil }
+        return sharedCompactActivity
+    }
+
+    private var sharedCompactActivity: NotchCompactActivity? {
         // A new song waiting for its notice is not drawn yet.
         let available = awaitsTrackNotice ? compactActivities.filter { $0 != .music } : compactActivities
         if available.contains(.call) { return .call }
@@ -1230,7 +1245,7 @@ final class NotchService: ObservableObject {
         }
         // Checked before any service starts, so each preference change while
         // the lid is closed does not start and stop them all again.
-        guard screenIndex(in: NSScreen.screens) != nil else { withdrawFromMissingScreen(); return }
+        guard screenIndex(in: eligibleScreens) != nil else { withdrawFromMissingScreen(); return }
         refreshModules()
         NotchDownloadService.shared.syncWithPreferences()
         NotchCalendarService.shared.syncWithPreferences()
@@ -2695,7 +2710,7 @@ final class NotchService: ObservableObject {
             return
         }
         let open = expanded || peeking || notice != nil || dragPlaceholder || captureControls != nil || showsDictation || hasCallActivity
-        guard open || (!hiddenAtRestInFullscreen && (geometry.isNotched || geometry.compactSideRoom != nil)) else {
+        guard open || (!hiddenAtRestInFullscreen && (geometry.isNotched || geometry.floats || geometry.compactSideRoom != nil)) else {
             finishMusicDeparture()
             presentedMusic = nil
             if heldMusic != nil { heldMusic = nil }
@@ -2858,7 +2873,8 @@ final class NotchService: ObservableObject {
         // Mission Control spans the displays; the island moves once it is back.
         guard running, !suspended, followsPointer, canFollowPointer,
               windowHost?.isConcealedForMissionControl == false,
-              let screen = NSScreen.withMouse, screen.notchDisplayID != displayID else { return }
+              let screen = NSScreen.withMouse, screen.notchDisplayID != displayID,
+              NotchDisplayPreference.current(for: screen.notchPersistentID).enabled else { return }
         move(to: screen)
     }
 
@@ -2911,7 +2927,8 @@ final class NotchService: ObservableObject {
     /// capsule or a notch, and they take no part in hovering or notices.
     private func syncMirrors() {
         guard showsOnAllDisplays, running, !suspended, windowHost != nil else { closeMirrors(); return }
-        let screens = NSScreen.screens
+        let screens = eligibleScreens
+        syncMirrorMenuMonitoring(needed: screens.count > 1 && !NotchSupport.coversMenus())
         for (id, mirror) in mirrors where !screens.contains(where: { $0.notchDisplayID == id }) {
             mirror.host.close()
             mirrors[id] = nil
@@ -2919,15 +2936,17 @@ final class NotchService: ObservableObject {
         // An island hidden until the pointer reaches it hides its copies as well.
         let hidesAtRest = NotchSupport.hidesUntilHover()
         let outline = UserDefaults.standard.bool(forKey: DefaultsKey.notchOutlineEnabled)
-        let activity = compactActivity
         for screen in screens {
+            let preference = NotchDisplayPreference.current(for: screen.notchPersistentID)
+            let activity = preference.liveActivities ? sharedCompactActivity : nil
             let id = screen.notchDisplayID
             var base: NotchGeometry?
-            if id != displayID, !hidesAtRest, !fullscreenDisplays.contains(id) {
+            if id != displayID, !fullscreenDisplays.contains(id) {
                 var geometry = baseGeometry(for: screen)
                 geometry.compactSideRoom = mirrorSideRoom(on: screen, geometry: geometry)
                 // A simulated island needs the menus' room at rest, as the island does.
-                if geometry.isNotched || geometry.compactSideRoom != nil { base = geometry }
+                if !(hidesAtRest && geometry.isNotched),
+                   geometry.isNotched || geometry.floats || geometry.compactSideRoom != nil { base = geometry }
             }
             guard let base else {
                 if let mirror = mirrors[id], mirror.model.shown {
@@ -2936,20 +2955,23 @@ final class NotchService: ObservableObject {
                 }
                 continue
             }
-            let (strip, size) = mirrorSurface(on: base, activity: activity)
+            let (strip, stripSize) = mirrorSurface(on: base, activity: activity)
+            let deck = activity.map { mirrorDeck(on: base, primary: $0, primarySize: stripSize) }
+            let size = deck?.size ?? stripSize
             let mirror = mirrors[id] ?? makeMirror(geometry: base, size: size)
             mirrors[id] = mirror
             if mirror.model.outline != outline || mirror.model.timerOutline != (activity == .timer) {
                 mirror.model.outline = outline
                 mirror.model.timerOutline = activity == .timer
-                mirror.host.setOutline(enabled: outline, color: activity == .timer ? .systemOrange : .white)
             }
+            mirror.host.setOutline(enabled: outline && deck == nil, color: activity == .timer ? .systemOrange : .white)
             let sharing: NSWindow.SharingType = NotchSupport.showsInCaptures() ? .readOnly : .none
             if mirror.host.panel.sharingType != sharing { mirror.host.panel.sharingType = sharing }
             let revealing = !mirror.model.shown
             let previous = mirror.model.activity
-            guard mirror.model.update(geometry: base, strip: strip, size: size, activity: activity) || revealing else { continue }
+            guard mirror.model.update(geometry: base, strip: strip, size: size, activity: activity, deck: deck) || revealing else { continue }
             mirror.model.shown = true
+            mirror.host.setSeparatesPills(deck != nil)
             // Shown at once where the island just left, so the two trade places.
             mirror.host.present(size: size, geometry: base, animated: !revealing,
                                 transitionContent: !revealing && previous != activity ? .replace : .none)
@@ -2964,19 +2986,80 @@ final class NotchService: ObservableObject {
     /// for that display, or the island at rest there.
     private func mirrorSurface(on base: NotchGeometry, activity: NotchCompactActivity?) -> (strip: NotchGeometry, size: CGSize) {
         guard let activity else { return (base, base.restingSize(showsContent: !base.floats && idleContent != .none)) }
-        let companion = compactCompanion
+        let companion: NotchCompactActivity? = nil
         if base.floats { return (base, capsuleStripSize(for: activity, companion: companion, geometry: base)) }
         let strip = compactGeometry(for: activity, companion: companion, base: base)
         return (strip, strip.compactActivitySize)
     }
 
-    /// Another display's menus are never measured. A copy covers them when
-    /// the island may, or where there are none, and otherwise gives way.
+    /// Fit the same activity set independently on each display. The primary
+    /// stays centered on the camera; satellites always use camera-free pills.
+    private func mirrorDeck(on base: NotchGeometry, primary: NotchCompactActivity,
+                            primarySize: CGSize) -> NotchActivityDeckPresentation {
+        let satellite = base.floats ? base : NotchAttachedActivityLayout.satelliteGeometry(base)
+        var left: [(NotchCompactActivity, CGSize)] = []
+        var right: [(NotchCompactActivity, CGSize)] = []
+        let available = base.floats ? base.screen.width - 24 : NotchCapsuleLayout.availableWidth(base)
+        for (index, activity) in pillActivityOrder.prefix(NotchPillActivityLayout.maximumVisible).enumerated() where activity != primary {
+            let size = capsuleStripSize(for: activity, companion: nil, geometry: satellite)
+            var nextLeft = left
+            var nextRight = right
+            if pillSide(for: activity, defaultIndex: index) == .left { nextLeft.append((activity, size)) }
+            else { nextRight.append((activity, size)) }
+            let candidate = NotchActivityDeckPresentation(primary: primary, primarySize: primarySize,
+                                                          left: nextLeft, right: nextRight)
+            if candidate.size.width <= available { left = nextLeft; right = nextRight }
+        }
+        return NotchActivityDeckPresentation(primary: primary, primarySize: primarySize, left: left, right: right)
+    }
+
+    /// Floating pills keep their own surface. Attached cutouts respect the
+    /// menu coverage policy and measure the target display independently.
     private func mirrorSideRoom(on screen: NSScreen, geometry: NotchGeometry) -> CGFloat? {
         let hasMenuBar = NSScreen.screensHaveSeparateSpaces || NSScreen.withMenuBar == screen
-        guard NotchSupport.coversMenus() || !hasMenuBar else { return nil }
+        guard NotchSupport.coversMenus() || !hasMenuBar || geometry.floats else {
+            return measureMirrorSideRoom(on: screen, geometry: geometry)
+        }
         return NotchMenuBarLayout.sideRoom(screen: geometry.screen, cameraWidth: geometry.cameraWidth,
                                            barHeight: geometry.menuBarHeight, occupied: [])
+    }
+
+    private func syncMirrorMenuMonitoring(needed: Bool) {
+        guard needed else {
+            mirrorMenuTimer?.invalidate()
+            mirrorMenuTimer = nil
+            return
+        }
+        guard mirrorMenuTimer == nil else { return }
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.syncMirrors() }
+        timer.tolerance = 0.2
+        mirrorMenuTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func measureMirrorSideRoom(on screen: NSScreen, geometry: NotchGeometry) -> CGFloat? {
+        guard AXIsProcessTrusted(), let pid = NSWorkspace.shared.menuBarOwningApplication?.processIdentifier
+                ?? (NSApp.isActive ? getpid() : nil) else { return nil }
+        let id = screen.notchDisplayID
+        let previous = mirrorMenuReadings[id]
+        let matches = previous.map { $0.pid == pid && $0.geometry.hasSameMenuBar(as: geometry) } ?? false
+        if matches, let previous, Date().timeIntervalSince(previous.date) < 1 { return previous.room }
+        if pendingMirrorMenuReads.insert(id).inserted {
+            let primaryTop = NSScreen.screens.first?.frame.maxY ?? geometry.screen.maxY
+            let ownWindow = mirrors[id]?.host.panel.windowNumber ?? -1
+            menuSpaceQueue.async { [weak self] in
+                let room = NotchMenuBarSpace.measure(pid: pid, geometry: geometry,
+                                                    primaryTop: primaryTop, ownWindow: ownWindow)
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.pendingMirrorMenuReads.remove(id)
+                    guard self.running, !self.suspended, self.showsOnAllDisplays else { return }
+                    self.mirrorMenuReadings[id] = MirrorMenuReading(geometry: geometry, pid: pid, room: room, date: Date())
+                    self.syncMirrors()
+                }
+            }
+        }
+        return matches ? previous?.room : nil
     }
 
     private func makeMirror(geometry: NotchGeometry, size: CGSize) -> NotchMirror {
@@ -2989,6 +3072,8 @@ final class NotchService: ObservableObject {
     }
 
     private func closeMirrors() {
+        syncMirrorMenuMonitoring(needed: false)
+        mirrorMenuReadings.removeAll()
         guard !mirrors.isEmpty else { return }
         mirrors.values.forEach { $0.host.close() }
         mirrors.removeAll()
@@ -3000,12 +3085,15 @@ final class NotchService: ObservableObject {
     /// Only the copies ask which displays are in full screen, and only when
     /// the island hides there; the island asks for its own display.
     private func updateFullscreenDisplays() {
-        guard showsOnAllDisplays, UserDefaults.standard.bool(forKey: DefaultsKey.notchHideInFullscreen),
+        guard showsOnAllDisplays,
+              UserDefaults.standard.bool(forKey: DefaultsKey.notchHideInFullscreen) || NotchSupport.autoHidesWithoutNotch(),
               let topology = SpaceWindowBridge.topology() else { fullscreenDisplays = []; return }
         let separate = NSScreen.screensHaveSeparateSpaces
-        fullscreenDisplays = Set(NSScreen.screens.map(\.notchDisplayID).filter {
-            topology.isFullscreen(on: $0, separateSpaces: separate)
-        })
+        fullscreenDisplays = Set(NSScreen.screens.filter { screen in
+            topology.isFullscreen(on: screen.notchDisplayID, separateSpaces: separate)
+                && (UserDefaults.standard.bool(forKey: DefaultsKey.notchHideInFullscreen)
+                    || (NotchSupport.autoHidesWithoutNotch() && !baseGeometry(for: screen).isNotched))
+        }.map(\.notchDisplayID))
     }
 
     /// A click on a copy brings the island to its display, open, closing it
@@ -3015,7 +3103,7 @@ final class NotchService: ObservableObject {
         if expanded || peeking { collapse() }
         windowHost?.whenSettled { [weak self] in
             guard let self, self.running, !self.suspended, self.canFollowPointer,
-                  let screen = NSScreen.screens.first(where: { $0.notchDisplayID == id }) else { return }
+                  let screen = self.eligibleScreens.first(where: { $0.notchDisplayID == id }) else { return }
             self.move(to: screen)
             self.open()
         }
@@ -3213,7 +3301,15 @@ final class NotchService: ObservableObject {
         NotchDisplay(rawValue: UserDefaults.standard.string(forKey: DefaultsKey.notchDisplay) ?? "") ?? .automatic
     }
 
+    private var eligibleScreens: [NSScreen] {
+        NSScreen.screens.filter { NotchDisplayPreference.current(for: $0.notchPersistentID).enabled }
+    }
+
     private func screenIndex(in screens: [NSScreen]) -> Int? {
+        if displayPreference == .main,
+           let id = UserDefaults.standard.string(forKey: DefaultsKey.notchPreferredDisplay),
+           let index = screens.firstIndex(where: { $0.notchPersistentID == id }) { return index }
+
         let preference = displayPreference
         var pointer: Int?
         if preference == .pointer || preference == .all {
@@ -3250,7 +3346,7 @@ final class NotchService: ObservableObject {
     }
 
     private func updateScreen() {
-        let screens = NSScreen.screens
+        let screens = eligibleScreens
         menuBarMeasurements.retainDisplays(screens.map(\.notchDisplayID))
         guard let index = screenIndex(in: screens) else { withdrawFromMissingScreen(); return }
         let screen = screens[index]
@@ -3306,7 +3402,9 @@ final class NotchService: ObservableObject {
                                 statusBarThickness: NSStatusBar.system.thickness),
                              customWidth: UserDefaults.standard.double(forKey: DefaultsKey.notchCustomWidth),
                              customHeight: UserDefaults.standard.double(forKey: DefaultsKey.notchCustomHeight),
-                             cameraFit: NotchCameraFit.current(), silhouette: NotchSilhouette.current(),
+                             cameraFit: NotchCameraFit.current(),
+                             silhouette: NotchDisplayPreference.current(for: screen.notchPersistentID).silhouette
+                                .flatMap(NotchSilhouette.init(rawValue:)) ?? NotchSilhouette.current(),
                              capsuleFit: NotchCapsuleFit.current(),
                              outline: UserDefaults.standard.bool(forKey: DefaultsKey.notchOutlineEnabled),
                              expandedScale: UserDefaults.standard.object(forKey: DefaultsKey.notchExpandedScale) as? Double
@@ -4074,7 +4172,7 @@ final class NotchService: ObservableObject {
         let musicWanted = modules.contains(.music) && ((expanded && (selected == .music || (selected == .controls && NotchSupport.controls().contains(.music)))
             && !showingAppPanel && !showingSections)
             || (!hiddenUntilHover && (NotchSupport.watchesMusicActivity() || NotchSupport.routes(.track))))
-        if musicWanted { NotchMusicService.shared.start() } else { NotchMusicService.shared.stop() }
+        if musicWanted || (showsOnAllDisplays && eligibleScreens.count > 1 && NotchSupport.watchesMusicActivity()) { NotchMusicService.shared.start() } else { NotchMusicService.shared.stop() }
         let needs = expanded && selected == .system && selectedMetric == nil && modules.contains(.system) && !showingAppPanel && !showingSections
         var detailNeeds = expanded && !showingSections ? selectedMetric?.monitorNeeds ?? .none : .none
         if needs, AppFeature.monitorDisk.isAvailable { detailNeeds.disk = true }
@@ -4095,6 +4193,13 @@ final class NotchService: ObservableObject {
 }
 
 extension NSScreen {
+    var notchPersistentID: String {
+        guard let uuid = CGDisplayCreateUUIDFromDisplayID(notchDisplayID)?.takeRetainedValue() else {
+            return "display-\(notchDisplayID)"
+        }
+        return CFUUIDCreateString(nil, uuid) as String
+    }
+
     var notchDisplayID: CGDirectDisplayID {
         (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
     }

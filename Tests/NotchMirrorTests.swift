@@ -13,6 +13,7 @@ enum NotchMirrorContract {
         static var screens: [NSScreen] = []
         static var screensHaveSeparateSpaces = true
         static var withMenuBar: NSScreen? { screens.first }
+        var notchPersistentID: String { "test-display-\(notchDisplayID)" }
         let notchDisplayID: CGDirectDisplayID
         let frame: CGRect
         let notched: Bool
@@ -42,6 +43,7 @@ enum NotchMirrorContract {
         func present(size: CGSize, geometry: NotchGeometry, animated: Bool, transitionContent: NotchContentTransition) {
             presented.append((size, geometry, animated, transitionContent))
         }
+        func setSeparatesPills(_ enabled: Bool) {}
         func hide(animated: Bool) { hides += 1; panel.isVisible = false }
         func close() { closes += 1; panel.isVisible = false }
         func setOutline(enabled: Bool, color: NSColor) { outline = (enabled, color) }
@@ -71,6 +73,16 @@ enum NotchMirrorContract {
         var displayID: CGDirectDisplayID? = 1
         var mirrors: [CGDirectDisplayID: NotchMirror] = [:]
         var fullscreenDisplays: Set<CGDirectDisplayID> = []
+        var mirrorMenuReadings: [Int: Int] = [:]
+        func syncMirrorMenuMonitoring(needed: Bool) {}
+        var eligibleScreens: [NSScreen] { NSScreen.screens }
+        var sharedCompactActivity: NotchCompactActivity? { compactActivity }
+        var activityOrder: [NotchCompactActivity] = []
+        var pillActivityOrder: [NotchCompactActivity] { activityOrder.isEmpty ? compactActivity.map { [$0] } ?? [] : activityOrder }
+        func pillSide(for activity: NotchCompactActivity, defaultIndex: Int? = nil) -> NotchPillSide {
+            NotchPillActivityLayout.defaultSide(at: defaultIndex ?? 0)
+        }
+        func measureMirrorSideRoom(on screen: NSScreen, geometry: NotchGeometry) -> CGFloat? { nil }
         var compactActivity: NotchCompactActivity?
         var compactCompanion: NotchCompactActivity?
         var idleContent = NotchIdleContent.none
@@ -114,6 +126,13 @@ enum NotchMirrorContract {
             NSScreen.screensHaveSeparateSpaces = true
             SpaceWindowBridge.fullscreen = []
         }
+        let saved = NotchDisplayPreference.updating("", id: "monitor") {
+            $0.enabled = false; $0.liveActivities = false; $0.silhouette = NotchSilhouette.notch.rawValue
+        }
+        let restored = NotchDisplayPreference.read(saved)["monitor"]
+        suite.expect(restored?.enabled == false && restored?.liveActivities == false && restored?.silhouette == "notch"
+                     && NotchDisplayPreference.read("invalid").isEmpty,
+                     "per-display controls round-trip together and invalid saved data falls back safely")
         let builtIn = NSScreen(1, CGRect(x: 0, y: 0, width: 1470, height: 956), notched: true)
         let external = NSScreen(2, CGRect(x: 1470, y: -86, width: 1920, height: 1080))
         NSScreen.screens = [builtIn, external]
@@ -141,8 +160,16 @@ enum NotchMirrorContract {
         suite.expect(capsule?.host.presented.count == 2 && capsule?.host.presented.last?.transition == .replace
                      && capsule?.host.presented.last?.animated == true
                      && capsule?.model.size.width == external2.restingSize(showsContent: false).width + 40
-                     && capsule?.host.outline?.enabled == true && capsule?.host.outline?.color == .systemOrange,
+                     && capsule?.model.outline == true && capsule?.host.outline?.enabled == false,
                      "a timer starting reshapes each copy as the island does, in the timer's outline")
+
+        service.activityOrder = [.timer, .music, .agents]
+        service.syncMirrors()
+        suite.expect(capsule?.model.deck?.items.count == 3
+                     && (capsule?.model.size.width ?? 0) <= external.frame.width - 24,
+                     "secondary displays fit the live activity set using their own width budget")
+        service.activityOrder = []
+        service.syncMirrors()
 
         // The island follows the pointer to the external display.
         service.displayID = 2
@@ -186,8 +213,8 @@ enum NotchMirrorContract {
         service.coversMenus = false
         service.displayID = 1
         service.syncMirrors()
-        suite.expect(service.mirrors[2]?.model.shown == false,
-                     "a capsule never covers menus it cannot measure on another display")
+        suite.expect(service.mirrors[2]?.model.shown == true,
+                     "a floating capsule remains available independently of attached-notch menu measurements")
         service.displayID = 2
         service.syncMirrors()
         suite.expect(service.mirrors[1]?.model.shown == true && service.mirrors[1]?.model.geometry.compactSideRoom == nil,

@@ -660,8 +660,10 @@ def main():
     write("NotchMirrors.swift", "import AppKit\nextension NotchMirrorContract {\nfinal class Service: State {\n"
           + "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
               "    private func syncMirrors()", "    private func mirrorSurface(", "    private func mirrorSideRoom(",
+              "    private func mirrorDeck(",
               "    private func closeMirrors()", "    private func updateFullscreenDisplays()",
               "    private func bringIsland("])
+          .replace("NotchSupport.autoHidesWithoutNotch()", "false")
           .replace("NotchSupport.hidesUntilHover()", "hidesUntilHover")
           .replace("NotchSupport.coversMenus()", "coversMenus")
           .replace("NotchSupport.showsInCaptures()", "showsInCaptures")
