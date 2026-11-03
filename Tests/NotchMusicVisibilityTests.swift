@@ -48,6 +48,8 @@ enum NotchMusicVisibilityTests {
     enum NSEvent { static let mouseLocation = CGPoint.zero }
 
     class State {
+        var liveActivitiesEnabledOnDisplay = true
+        var copiesNeedMusic = false
         var hasCallActivity = false
         var showingCall = false
         var dictationPhase = DictationPhase.idle

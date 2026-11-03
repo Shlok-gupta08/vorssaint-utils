@@ -19,17 +19,8 @@ struct NotchMirrorView: View {
                             ? mirror.geometry : NotchAttachedActivityLayout.satelliteGeometry(mirror.geometry))
                         content(geometry: geometry, strip: primary ? mirror.strip : geometry,
                                 size: item.size, activity: item.activity)
-                            .frame(width: item.size.width, height: item.size.height, alignment: .top)
-                            .background(Color.black, in: NotchShape.island(height: item.size.height, geometry: geometry))
-                            .clipShape(NotchShape.island(height: item.size.height, geometry: geometry))
-                            .overlay {
-                                if mirror.outline == true {
-                                    NotchShape.island(height: item.size.height, geometry: geometry)
-                                        .stroke(item.activity == .timer ? Color.orange : Color.white,
-                                                lineWidth: NotchLayout.outlineWidth)
-                                }
-                            }
-                            .offset(x: item.x)
+                            .modifier(NotchActivityViewport(size: item.size, x: item.x,
+                                geometry: geometry, focused: primary, cameraLevel: false))
                     }
                 }
             } else {

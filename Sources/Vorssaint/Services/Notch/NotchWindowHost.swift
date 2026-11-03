@@ -702,6 +702,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     var separatesPillsProbe: Bool { canvas.backdropPresentation.separatesPills }
     var independentSurfaceProbe: Bool { canvas.backdropPresentation.separatesPills && canvas.layer?.mask == nil }
     var handoffShellProbeFrame: CGRect? { canvas.handoffShellProbeFrame }
+    var contentProbeTranslationY: CGFloat { canvas.contentProbeTranslationY }
     var contentProbeAnimating: Bool { canvas.contentProbeAnimating }
     var contentProbeTransitionCount: Int { canvas.contentTransitionCount }
     var contentProbeAlpha: CGFloat { canvas.contentProbeAlpha }
@@ -1256,6 +1257,10 @@ private final class NotchCanvas: NSView {
     }
 
 #if VORSSAINT_DEVELOPMENT
+    var contentProbeTranslationY: CGFloat {
+        let layer = host.layer?.presentation() ?? host.layer
+        return (layer?.value(forKeyPath: "transform.translation.y") as? NSNumber)?.doubleValue ?? 0
+    }
     var contentProbeOpacity: Float { contentVisibility.presentation()?.opacity ?? contentVisibility.opacity }
     var handoffShellProbeFrame: CGRect? {
         activityHandoffShell.opacity > 0 ? activityHandoffShell.path?.boundingBoxOfPath : nil
@@ -1519,6 +1524,12 @@ private final class NotchCanvas: NSView {
         endArrival()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        if !backdropPresentation.separatesPills {
+            deckVisibility = NotchSpringChannel(1)
+            deckVisibilityStarted = CACurrentMediaTime()
+            host.layer?.removeAnimation(forKey: Self.deckTranslationKey)
+            host.layer?.setValue(0, forKeyPath: "transform.translation.y")
+        }
         if backdropPresentation.separatesPills,
            kind == .depart || revealsHidden || (wasDeparting && (kind == .reveal || kind == .replace)) {
             animateDeckVisibility(visible: kind != .depart, revealsHidden: revealsHidden)
@@ -1534,11 +1545,23 @@ private final class NotchCanvas: NSView {
             contentVisibility.add(fade, forKey: "notch.opacity")
         } else if kind == .replace {
             contentVisibility.opacity = 1
-            let transition = CATransition()
-            transition.type = .fade
-            transition.duration = replacementDuration
-            transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            host.layer?.add(transition, forKey: kCATransition)
+            if currentOpacity < 0.999 {
+                // An interrupted reveal/departure already supplies the fade.
+                // Snapshotting that translucent frame creates a second ghost
+                // while snapping the mask to opaque flashes the incoming page.
+                let fade = CABasicAnimation(keyPath: "opacity")
+                fade.fromValue = currentOpacity
+                fade.toValue = 1
+                fade.duration = replacementDuration
+                fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                contentVisibility.add(fade, forKey: "notch.opacity")
+            } else {
+                let transition = CATransition()
+                transition.type = .fade
+                transition.duration = replacementDuration
+                transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                host.layer?.add(transition, forKey: kCATransition)
+            }
         } else {
             // Mask only the content pixels. A black overlay would obscure the
             // glass; alphaValue would remove the hosting view's AX/hit frame.
@@ -1629,6 +1652,14 @@ private final class NotchCanvas: NSView {
         guard departsContent else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        if backdropPresentation.separatesPills {
+            // The departure owns both opacity and vertical travel. Returning
+            // only opacity leaves a transparent model and an offset surface.
+            animateDeckVisibility(visible: true, revealsHidden: false)
+            CATransaction.commit()
+            return
+        }
+        contentVisibility.opacity = 1
         let animation = CABasicAnimation(keyPath: "opacity")
         animation.fromValue = 0
         animation.toValue = 1

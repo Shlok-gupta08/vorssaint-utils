@@ -491,7 +491,7 @@ def main():
                         scope="struct NotchQuickAccessConfiguration:")
           + "}\n")
     write("NotchNotificationSizing.swift", "import AppKit\nextension NotchNotificationTests {\nfinal class SizingService: SizingState {\n"
-          + "".join(declaration(notch, prefix) for prefix in ["    func pillSize(",
+          + "".join(declaration(notch, prefix) for prefix in ["    func pillSize(", "    private func unemphasizedPillSize(",
               "    private func capsuleNoticeSize(", "    func capsuleNoticeSurface("])
           + "}\n}\n")
     write("NotchFullscreen.swift", "import CoreGraphics\nimport Foundation\nextension NotchFullscreenTests {\n"
@@ -605,6 +605,7 @@ def main():
           + "}\n}\n")
     music_visibility = "var pillActivityOrder: [NotchCompactActivity] { NotchPillActivityLayout.ordered(compactActivities, preferred: activitySelection.preferred) }\n" + "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
         "    private var hiddenUntilHover:", "    var fullscreenCompact:", "    var idleContent:", "    var hasMusicActivity:", "    var compactActivity:",
+        "    private var sharedCompactActivity:",
         "    var compactActivityGeometry:", "    func compactGeometry(", "    var compactActivities:",
         "    var compactCompanion:",
         "    var surfaceSize:", "    func collapse(",

@@ -8,6 +8,8 @@ enum NotchNotificationTests {
     class SizingState {
         var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
             safeAreaTop: 0, cameraWidth: 0, menuBarHeight: 32, compactSideRoom: 600, silhouette: .capsule)
+        var hoverEmphasized = false
+        var peeking = false
         var expanded = false
         var expandedPillActivity: NotchCompactActivity?
         var expandedSize: CGSize { geometry.expanded }
@@ -200,6 +202,20 @@ enum NotchNotificationTests {
         service.noticeExpanded = false
         suite.expect(service.pillSize(for: .music) == service.geometry.noticeSize(wingWidth: service.notice!.preferredWingWidth),
             "a hardware-notch notification keeps both measured message wings instead of a compact music budget")
+        service.notice = nil
+        let resting = service.pillSize(for: .music)
+        service.hoverEmphasized = true
+        let hovered = service.pillSize(for: .music)
+        suite.expect(hovered == NotchHoverEmphasis.size(from: resting, geometry: service.geometry)
+                     && hovered.width > resting.width && hovered.height > resting.height,
+            "physical activity strips keep their slight hover expansion before opening")
+        suite.expect(service.pillSize(for: .timer).width == 80,
+            "primary hover emphasis does not expand unrelated side activities")
+        service.expanded = true
+        service.expandedPillActivity = .music
+        suite.expect(service.pillSize(for: .music) == service.expandedSize,
+            "opening the page replaces hover emphasis with the existing expanded size")
+
     }
 
     private static func previewLayoutContracts(expect: (Bool, String) -> Void) {

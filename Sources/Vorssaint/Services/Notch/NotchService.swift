@@ -345,9 +345,17 @@ final class NotchService: ObservableObject {
 
     var hasCallActivity: Bool { NotchCallSupport.isAvailable && NotchCallService.shared.primary != nil }
 
+    private var liveActivitiesEnabledOnDisplay: Bool {
+        guard let screen = NSScreen.screens.first(where: { $0.notchDisplayID == displayID }) else { return true }
+        return NotchDisplayPreference.current(for: screen.notchPersistentID).liveActivities
+    }
+
+    private var copiesNeedMusic: Bool {
+        showsOnAllDisplays && eligibleScreens.count > 1 && NotchSupport.watchesMusicActivity()
+    }
+
     var compactActivity: NotchCompactActivity? {
-        if let screen = NSScreen.screens.first(where: { $0.notchDisplayID == displayID }),
-           !NotchDisplayPreference.current(for: screen.notchPersistentID).liveActivities { return nil }
+        guard liveActivitiesEnabledOnDisplay else { return nil }
         return sharedCompactActivity
     }
 
@@ -1023,6 +1031,13 @@ final class NotchService: ObservableObject {
     }
 
     func pillSize(for activity: NotchCompactActivity) -> CGSize {
+        let size = unemphasizedPillSize(for: activity)
+        guard hoverEmphasized, activity == pillDeckPrimaryActivity, !expanded,
+              !peeking, notice == nil else { return size }
+        return NotchHoverEmphasis.size(from: size, geometry: geometry)
+    }
+
+    private func unemphasizedPillSize(for activity: NotchCompactActivity) -> CGSize {
         if expanded && activity == expandedPillActivity { return expandedSize }
         guard activity == pillDeckPrimaryActivity else {
             return CGSize(width: pillSecondaryWidth(for: activity), height: geometry.stripHeight)
@@ -4172,7 +4187,7 @@ final class NotchService: ObservableObject {
         let musicWanted = modules.contains(.music) && ((expanded && (selected == .music || (selected == .controls && NotchSupport.controls().contains(.music)))
             && !showingAppPanel && !showingSections)
             || (!hiddenUntilHover && (NotchSupport.watchesMusicActivity() || NotchSupport.routes(.track))))
-        if musicWanted || (showsOnAllDisplays && eligibleScreens.count > 1 && NotchSupport.watchesMusicActivity()) { NotchMusicService.shared.start() } else { NotchMusicService.shared.stop() }
+        if musicWanted || copiesNeedMusic { NotchMusicService.shared.start() } else { NotchMusicService.shared.stop() }
         let needs = expanded && selected == .system && selectedMetric == nil && modules.contains(.system) && !showingAppPanel && !showingSections
         var detailNeeds = expanded && !showingSections ? selectedMetric?.monitorNeeds ?? .none : .none
         if needs, AppFeature.monitorDisk.isAvailable { detailNeeds.disk = true }

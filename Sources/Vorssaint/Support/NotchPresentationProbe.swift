@@ -1015,6 +1015,27 @@ enum NotchPresentationProbe {
         if host.resizeCount != resizes || host.contentProbeTransitionCount != transitions || host.contentProbeOpacity != 1 {
             failures.append("unchanged split-pill refreshes restarted presentation work (resizes \(resizes)/\(host.resizeCount), transitions \(transitions)/\(host.contentProbeTransitionCount))")
         }
+        // A notice leaving a split deck swaps its content after the fade;
+        // completing that handoff must restore both model opacity and travel.
+        host.present(size: size, geometry: geometry, animated: true, transitionContent: .depart)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        host.finishDeparture()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        if host.contentProbeOpacity != 1 || abs(host.contentProbeTranslationY) > 0.5 || host.departsContent {
+            failures.append("finishing a split-deck departure left a hidden or displaced activity")
+        }
+        // Interrupt a partial departure with different content, then switch
+        // to a central panel before the deck's travel has finished.
+        host.present(size: size, geometry: geometry, animated: true, transitionContent: .depart)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.04))
+        host.present(size: size, geometry: geometry, animated: true, transitionContent: .replace)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.03))
+        host.setSeparatesPills(false)
+        host.present(size: geometry.expanded, geometry: geometry, animated: true, transitionContent: .replace)
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        if host.contentProbeOpacity != 1 || abs(host.contentProbeTranslationY) > 0.5 {
+            failures.append("deck-to-panel interruption retained a departure transform")
+        }
         host.close()
         return failures
     }
