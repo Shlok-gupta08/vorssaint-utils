@@ -1228,7 +1228,66 @@ enum NotchControlSetupRequirement: Equatable {
 
 enum NotchControlItem: String, CaseIterable, Identifiable {
     case volume, brightness, music, mixer, keepAwake, timer, calendar, microphone, screenshot, recording, speedTest, panel, commandBar, scratchpad, agents
-    static let defaultHidden = "microphone,screenshot,recording,speedTest,panel,commandBar,scratchpad,agents"
+    case clipboard, dictation, captures, files, system, tools, notifications, camera, downloads, watch
+    case dictate, clipboardHistory, cameraPreview, cleaner, toggles, screenOCR, colorPicker, windowLayout, cleaning, homebrew, media, urlCleaner, uninstaller
+    static let additionalItems: [Self] = [.clipboard, .dictation, .captures, .files, .system, .tools, .notifications, .camera, .downloads, .watch,
+                                          .dictate, .clipboardHistory, .cameraPreview, .cleaner, .toggles, .screenOCR, .colorPicker, .windowLayout, .cleaning, .homebrew, .media, .urlCleaner, .uninstaller]
+    static let defaultHidden = (["microphone", "screenshot", "recording", "speedTest", "panel", "commandBar", "scratchpad", "agents"]
+        + additionalItems.map(\.rawValue)).joined(separator: ",")
+
+    /// Page destinations are shared by the extension picker and Control Center.
+    var destinationModule: NotchModule? {
+        switch self {
+        case .music: return .music
+        case .mixer: return .mixer
+        case .timer: return .timer
+        case .calendar: return .calendar
+        case .agents: return .agents
+        case .clipboard: return .clipboard
+        case .dictation: return .dictation
+        case .captures: return .captures
+        case .files: return .files
+        case .system: return .system
+        case .tools: return .tools
+        case .notifications: return .notifications
+        case .camera: return .camera
+        case .downloads: return .downloads
+        case .watch: return .watch
+        default: return nil
+        }
+    }
+
+    var utilityFeature: AppFeature? {
+        switch self {
+        case .dictate: return .dictation
+        case .clipboardHistory: return .clipboardHistory
+        case .cameraPreview: return .cameraPreview
+        case .cleaner: return .cleaner
+        case .toggles: return .quickToggles
+        case .screenOCR: return .screenOCR
+        case .colorPicker: return .colorPicker
+        case .windowLayout: return .windowLayout
+        case .cleaning: return .cleaningMode
+        case .homebrew: return .homebrew
+        case .media: return .mediaTools
+        case .urlCleaner: return .urlCleaner
+        case .uninstaller: return .uninstaller
+        default: return nil
+        }
+    }
+
+    var usesUtilityHost: Bool { utilityFeature != nil && self != .dictate && self != .clipboardHistory && self != .cameraPreview }
+
+    static func migrateAdditionalItems(in defaults: UserDefaults) {
+        guard !defaults.bool(forKey: DefaultsKey.notchUnifiedControlsInitialized) else { return }
+        if let saved = defaults.string(forKey: DefaultsKey.notchHiddenControls) {
+            let ordered = Set((defaults.string(forKey: DefaultsKey.notchControlOrder) ?? "").split(separator: ",").map(String.init))
+            var hidden = Set(saved.split(separator: ",").map(String.init))
+            hidden.formUnion(additionalItems.map(\.rawValue).filter { !ordered.contains($0) })
+            defaults.set(hidden.sorted().joined(separator: ","), forKey: DefaultsKey.notchHiddenControls)
+        }
+        defaults.set(true, forKey: DefaultsKey.notchUnifiedControlsInitialized)
+    }
     var id: String { rawValue }
 
     var symbol: String {
@@ -1249,6 +1308,20 @@ enum NotchControlItem: String, CaseIterable, Identifiable {
         case .timer: return NotchModule.timer.symbol
         case .calendar: return NotchModule.calendar.symbol
         case .agents: return NotchModule.agents.symbol
+        case .dictate: return "waveform"
+        case .clipboardHistory: return "doc.on.clipboard"
+        case .cameraPreview: return "web.camera"
+        case .cleaner: return "sparkles"
+        case .toggles: return "switch.2"
+        case .screenOCR: return "text.viewfinder"
+        case .colorPicker: return "eyedropper"
+        case .windowLayout: return "rectangle.split.2x2"
+        case .cleaning: return "hand.raised.fill"
+        case .homebrew: return "shippingbox"
+        case .media: return "photo.on.rectangle"
+        case .urlCleaner: return "link"
+        case .uninstaller: return "trash"
+        default: return destinationModule?.symbol ?? "square.grid.2x2"
         }
     }
 
@@ -1269,6 +1342,10 @@ enum NotchControlItem: String, CaseIterable, Identifiable {
         case .timer: return .page(.timer, feature: .notchTimer)
         case .calendar: return .page(.calendar, feature: .notchCalendar)
         case .agents: return .page(.agents, feature: .notchAgents)
+        default:
+            if let module = destinationModule { return .page(module, feature: module.setupFeature()) }
+            if usesUtilityHost && !AppFeature.quickLauncher.isAvailable { return .feature(.quickLauncher) }
+            return utilityFeature.map(NotchControlSetupRequirement.feature) ?? .none
         }
     }
 
@@ -1289,6 +1366,53 @@ enum NotchControlItem: String, CaseIterable, Identifiable {
         case .timer: return NotchSupport.modules(in: defaults).contains(.timer)
         case .calendar: return NotchSupport.modules(in: defaults).contains(.calendar)
         case .agents: return NotchAgentSupport.isEnabled(in: defaults)
+        case .dictate: return AppFeature.dictation.isAvailable(in: defaults) && defaults.bool(forKey: DefaultsKey.dictationEnabled)
+        default:
+            if let module = destinationModule { return NotchSupport.modules(in: defaults).contains(module) }
+            return utilityFeature?.isAvailable(in: defaults) == true
+                && (!usesUtilityHost || AppFeature.quickLauncher.isAvailable(in: defaults))
+        }
+    }
+}
+
+/// Canonical choices: pages appear once, actions keep their own intent.
+enum NotchCustomizationCatalog {
+    static let pageActions = NotchModule.allCases.map(NotchQuickAction.module)
+    static var quickActions: [NotchQuickAction] {
+        [.pin] + NotchControlItem.allCases.filter { $0.destinationModule == nil }.map(NotchQuickAction.control)
+    }
+    static var extensionActions: [NotchQuickAction] { [.explore, .settings] + pageActions + quickActions }
+}
+
+extension NotchModule {
+    /// Multi-source pages offer a valid setup route without treating one source
+    /// as mandatory when another is already enabled.
+    func setupFeature(in defaults: UserDefaults = .standard) -> AppFeature? {
+        if let requiredFeature { return requiredFeature }
+        guard !isAvailable(in: defaults) else { return nil }
+        switch self {
+        case .captures: return .screenshot
+        case .system: return .monitorCPU
+        default: return nil
+        }
+    }
+
+    var requiredFeature: AppFeature? {
+        switch self {
+        case .controls, .music, .captures, .system: return nil
+        case .mixer: return .mixer
+        case .clipboard: return .clipboardHistory
+        case .dictation: return .dictation
+        case .files: return .shelf
+        case .tools: return .quickLauncher
+        case .calendar: return .notchCalendar
+        case .notifications: return .notchNotifications
+        case .timer: return .notchTimer
+        case .camera: return .cameraPreview
+        case .downloads: return .notchDownloads
+        case .scratchpad: return .scratchpad
+        case .agents: return .notchAgents
+        case .watch: return .notchWatch
         }
     }
 }
@@ -1323,9 +1447,15 @@ enum NotchQuickAction: Hashable, Identifiable {
         }
     }
 
+    /// Keep legacy saved IDs, but highlight their canonical destination in
+    /// editors instead of showing duplicate entries for the same page.
+    var canonical: Self {
+        if case .control(let item) = self, let module = item.destinationModule { return .module(module) }
+        return self
+    }
+
     static var optionalActions: [Self] {
-        [.explore, .settings, .pin] + NotchModule.allCases.map(Self.module)
-            + NotchControlItem.allCases.filter { $0 != .volume && $0 != .brightness }.map(Self.control)
+        NotchCustomizationCatalog.extensionActions
     }
 
     func isAvailable(in defaults: UserDefaults = .standard) -> Bool {

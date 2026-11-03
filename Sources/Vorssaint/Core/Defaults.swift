@@ -775,6 +775,7 @@ enum DefaultsKey {
     static let notchInitialExtensionsInstalled = "notchInitialExtensionsInstalled" // local first-install marker; never backed up
     static let notchIdleContent = "notchIdleContent"
     static let notchHiddenControls = "notchHiddenControls"
+    static let notchUnifiedControlsInitialized = "notchUnifiedControlsInitialized"
     // Travels with the controls so old backups migrate and later choices survive.
     static let notchScratchpadControlHidden = "notchScratchpadControlHidden"
     static let notchControlOrder = "notchControlOrder"
@@ -1374,6 +1375,7 @@ enum Defaults {
         DefaultsKey.notchIncludeOtherPlayers: false,
         DefaultsKey.notchIdleContent: NotchIdleContent.music.rawValue,
         DefaultsKey.notchHiddenControls: NotchControlItem.defaultHidden,
+        DefaultsKey.notchUnifiedControlsInitialized: false,
         DefaultsKey.notchScratchpadControlHidden: false,
         DefaultsKey.notchControlOrder: "",
         DefaultsKey.notchSize: NotchSize.spacious.rawValue,
@@ -1889,6 +1891,7 @@ enum Defaults {
     static func register() {
         let defaults = UserDefaults.standard
         migrateExistingNotchDefaults(in: defaults)
+        NotchControlItem.migrateAdditionalItems(in: defaults)
         migrateLiquidGlassIsland(in: defaults)
         migrateFanControlVisibility(in: defaults)
         migrateScrollInverterAxes(in: defaults)

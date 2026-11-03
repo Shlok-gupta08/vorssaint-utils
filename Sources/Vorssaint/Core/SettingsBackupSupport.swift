@@ -221,6 +221,15 @@ enum SettingsBackupSupport {
     /// earlier development build, restores as the automatic choice.
     private static func portableNotchDisplay(_ settings: [String: Any]) -> [String: Any] {
         var result = settings
+        if let saved = result[DefaultsKey.notchHiddenControls] as? String,
+           result[DefaultsKey.notchUnifiedControlsInitialized] as? Bool != true {
+            var hidden = Set(saved.split(separator: ",").map(String.init))
+            let selected = Set((result[DefaultsKey.notchControlOrder] as? String ?? "").split(separator: ",").map(String.init))
+            hidden.formUnion(NotchControlItem.additionalItems.map(\.rawValue).filter { !selected.contains($0) })
+            result[DefaultsKey.notchHiddenControls] = hidden.sorted().joined(separator: ",")
+            result[DefaultsKey.notchUnifiedControlsInitialized] = true
+        }
+
         if let mode = result[DefaultsKey.notchDisplay] as? String, NotchDisplay(rawValue: mode) == nil {
             result[DefaultsKey.notchDisplay] = NotchDisplay.automatic.rawValue
         }

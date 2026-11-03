@@ -124,17 +124,17 @@ struct NotchLayoutEditor: View {
                 }
                 .coordinateSpace(name: "island.editor")
             }
-            .frame(height: Self.canvasHeight)
+            .frame(height: canvasHeight)
             .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: configuration)
             Text(editor.layoutHint).font(.callout).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    /// The preview keeps the island's real proportions at half size, so the
-    /// canvas fits the tallest custom island with its bottom drop zone below.
+    /// Keep real proportions at half size, with room for the bottom drop zone.
+    /// Compact islands do not reserve the tallest custom island's empty space.
     private static let previewScale: CGFloat = 0.5
-    private static let canvasHeight: CGFloat = NotchSize.heightRange.upperBound * previewScale + 20 + 58 + 2
+    private var canvasHeight: CGFloat { max(236, actualHeight * Self.previewScale + 80) }
     private var layout: NotchSize { NotchSize(rawValue: size) ?? .spacious }
     private var actualWidth: CGFloat {
         previewGeometry.expandedWidth
@@ -273,8 +273,8 @@ struct NotchLayoutEditor: View {
             Color.clear.contentShape(NotchShape.island(height: actualHeight, geometry: previewGeometry))
         }
         .buttonStyle(.plain)
-        .help(editor.content)
-        .accessibilityLabel(editor.content)
+        .help(NotchSettingsTab.content.title(l10n.language))
+        .accessibilityLabel(NotchSettingsTab.content.title(l10n.language))
         .overlay {
             VStack(spacing: NotchLayout.spacing) {
                 HStack(spacing: 0) {
@@ -401,8 +401,8 @@ struct NotchActionChooser: View {
                         Text(FeatureStrings.clipboard(l10n.language).noResults)
                             .foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120)
                     }
-                    group(editor.sectionActions, actions: [.explore, .settings] + NotchModule.allCases.map(NotchQuickAction.module))
-                    group(editor.quickActions, actions: [.pin] + NotchControlItem.allCases.filter { $0 != .volume && $0 != .brightness }.map(NotchQuickAction.control))
+                    group(editor.sectionActions, actions: [.explore, .settings] + NotchCustomizationCatalog.pageActions)
+                    group(editor.quickActions, actions: NotchCustomizationCatalog.quickActions)
                 }.padding(2)
             }.frame(height: 200)
         }.padding(title.isEmpty ? 0 : 16).frame(width: title.isEmpty ? nil : 340)
@@ -410,7 +410,6 @@ struct NotchActionChooser: View {
     }
 
     private func matchesQuery(_ action: NotchQuickAction) -> Bool {
-        guard action.isAvailable() else { return false }
         let term = CommandBarSearch.normalized(query)
         return term.isEmpty || CommandBarSearch.normalized(action.title(l10n) + " " + action.id).contains(term)
     }
@@ -422,12 +421,23 @@ struct NotchActionChooser: View {
                 Text(title).font(.caption).foregroundStyle(.secondary)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
                     ForEach(matches) { action in
-                        Button { choose(action) } label: {
-                            Label(action.title(l10n), systemImage: action.symbol)
-                                .font(.system(size: 11)).lineLimit(2)
-                                .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading).padding(.horizontal, 8)
-                                .background(selected == action ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
-                        }.buttonStyle(.plain).disabled(!action.isAvailable())
+                        Button {
+                            if action.isAvailable() { choose(action) }
+                            else { action.openSetup() }
+                        } label: {
+                            HStack(alignment: .top, spacing: 7) {
+                                Image(systemName: action.symbol).frame(width: 16)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(action.title(l10n)).lineLimit(2)
+                                    if !action.isAvailable() {
+                                        Text(action.setupHint(l10n)).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+                                    }
+                                }
+                            }
+                                .font(.system(size: 11))
+                                .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading).padding(8)
+                                .background(selected?.canonical == action.canonical ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+                        }.buttonStyle(.plain).help(action.isAvailable() ? action.title(l10n) : action.setupHint(l10n))
                     }
                 }
             }

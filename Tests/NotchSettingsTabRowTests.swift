@@ -20,11 +20,19 @@ enum NotchSettingsTabRowTests {
             let narrow = NSHostingController(rootView: row)
                 .sizeThatFits(in: CGSize(width: narrowestRow, height: 200)).width
             suite.expect(narrow > 0 && narrow <= narrowestRow
-                            && (segmented <= narrowestRow || !drawsSegments(row, width: narrowestRow)),
+                            && !drawsSegments(row, width: narrowestRow),
                          "\(language.rawValue): the Dynamic Island tabs fit the narrowest Settings page "
                          + "(\(Int(segmented)) points as segments, \(Int(narrowestRow)) available)")
-            suite.expect(drawsSegments(row, width: 2000),
-                         "\(language.rawValue): the Dynamic Island tabs stay segmented where they fit")
+            suite.expect(!drawsSegments(row, width: 2000),
+                         "\(language.rawValue): compact settings navigation always uses an accessible category menu")
+            suite.expect(NotchSettingsTab.layout.matches(FeatureStrings.notch(language).showOutline, language: language)
+                         && NotchSettingsTab.behavior.matches(FeatureStrings.notchEditor(language).activationTime, language: language),
+                         "\(language.rawValue): setting labels find their containing task")
+            suite.expect(NotchSettingsTab.allCases.allSatisfy { !$0.detail(language).isEmpty },
+                         "\(language.rawValue): every task explains its settings")
+            let titles = NotchSettingsTab.allCases.map { $0.title(language) }
+            suite.expect(titles.allSatisfy { !$0.isEmpty } && Set(titles).count == titles.count,
+                         "\(language.rawValue): every settings task has a distinct translated navigation label")
         }
     }
 

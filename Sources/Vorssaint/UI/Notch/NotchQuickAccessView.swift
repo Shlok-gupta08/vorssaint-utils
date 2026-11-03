@@ -265,6 +265,48 @@ struct NotchQuickAccessDrop: Shape {
 }
 
 extension NotchQuickAction {
+    func setupHint(_ l10n: L10n) -> String {
+        let editor = FeatureStrings.notchEditor(l10n.language)
+        switch self {
+        case .module(let module):
+            if let feature = module.setupFeature(), !feature.isAvailable {
+                return editor.enableFeature(feature.hubTitle(l10n.s, hub: FeatureStrings.hub(l10n.language)))
+            }
+            return editor.showPage(module.title(l10n.language))
+        case .control(let control):
+            switch control.setupRequirement {
+            case .feature(let feature): return editor.enableFeature(feature.hubTitle(l10n.s, hub: FeatureStrings.hub(l10n.language)))
+            case .page(let module, let feature):
+                if let feature, !feature.isAvailable { return editor.enableFeature(feature.hubTitle(l10n.s, hub: FeatureStrings.hub(l10n.language))) }
+                return editor.showPage(module.title(l10n.language))
+            case .none: return FeatureStrings.notch(l10n.language).disabled
+            }
+        default: return ""
+        }
+    }
+
+    func openSetup() {
+        let module: NotchModule?
+        switch self {
+        case .module(let page): module = page
+        case .control(let control):
+            if case .feature(let feature) = control.setupRequirement {
+                SettingsRouter.shared.request(feature.settingsDestination)
+                return
+            }
+            module = control.destinationModule
+        default: module = nil
+        }
+        if let module {
+            if let feature = module.setupFeature(), !feature.isAvailable {
+                SettingsRouter.shared.request(feature.settingsDestination)
+            } else {
+                SettingsRouter.shared.notchModule = module
+                SettingsRouter.shared.request(FeatureSettingsDestination(.notch))
+            }
+        }
+    }
+
     var symbol: String {
         switch self {
         case .explore: return "square.grid.2x2"

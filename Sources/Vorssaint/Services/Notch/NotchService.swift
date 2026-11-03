@@ -1996,8 +1996,22 @@ final class NotchService: ObservableObject {
             case .commandBar: perform { CommandBarService.shared.show() }
             case .scratchpad: openScratchpad()
             case .volume, .brightness: select(.controls)
+            case .dictate: DictationService.shared.toggle()
+            case .clipboardHistory: perform { ClipboardHistoryService.shared.showHistoryWindow() }
+            case .cameraPreview: perform { CameraPreviewService.shared.show() }
+            default:
+                if let module = item.destinationModule { select(module) }
+                else if item.usesUtilityHost { openLauncherUtility(item) }
             }
         }
+    }
+
+    private func openLauncherUtility(_ control: NotchControlItem) {
+        guard let utility = QuickLauncherItem(rawValue: control.rawValue) else { return }
+        // Both extension buttons and Control Center use this same execution path.
+        // Hosted utilities keep their normal quick-panel routing and lifecycle.
+        QuickLauncherService.shared.show()
+        QuickLauncherService.shared.run(utility)
     }
 
     func select(_ module: NotchModule) {

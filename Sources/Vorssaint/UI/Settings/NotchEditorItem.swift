@@ -51,3 +51,40 @@ struct NotchEditorItem: View {
         }.help(unavailableReason ?? title)
     }
 }
+
+/// A compact, searchable control entry. Setup guidance only takes space when needed.
+struct NotchControlCatalogRow: View {
+    let symbol: String
+    let title: String
+    @Binding var included: Bool
+    var available = true
+    var unavailableReason: String?
+    var unavailableAction: (() -> Void)?
+
+    var body: some View {
+        Button {
+            if available { included.toggle() } else { unavailableAction?() }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: symbol).font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(included && available ? Color.accentColor : .secondary)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.callout.weight(.medium)).lineLimit(2)
+                    if !available, let unavailableReason {
+                        Text(unavailableReason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: available ? (included ? "checkmark.circle.fill" : "plus.circle") : "arrow.up.right.circle")
+                    .foregroundStyle(included && available ? Color.accentColor : .secondary)
+            }
+            .padding(10).frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+            .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(included && available ? Color.accentColor.opacity(0.45) : .clear) }
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain).disabled(!available && unavailableAction == nil)
+        .accessibilityAddTraits(included && available ? .isSelected : [])
+        .help(available ? title : unavailableReason ?? title)
+    }
+}

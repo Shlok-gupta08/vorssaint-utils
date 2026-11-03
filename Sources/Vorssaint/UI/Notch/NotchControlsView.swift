@@ -154,6 +154,10 @@ struct NotchControlsView: View {
         case .agents:
             NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.select(.agents) }
         case .volume, .brightness, .music: EmptyView()
+        default:
+            NotchActionTile(symbol: item.symbol, title: item.title(l10n)) {
+                service.activateQuickAction(.control(item))
+            }
         }
     }
 }
@@ -176,6 +180,10 @@ extension NotchControlItem {
         case .timer: return NotchModule.timer.title(l10n.language)
         case .calendar: return NotchModule.calendar.title(l10n.language)
         case .agents: return NotchModule.agents.title(l10n.language)
+        default:
+            if let module = destinationModule { return module.title(l10n.language) }
+            if self == .dictate { return DictationStrings.localized(l10n.language).start }
+            return utilityFeature?.hubTitle(l10n.s, hub: FeatureStrings.hub(l10n.language)) ?? rawValue
         }
     }
 }
