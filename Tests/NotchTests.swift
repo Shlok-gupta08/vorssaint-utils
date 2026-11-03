@@ -2259,6 +2259,13 @@ enum NotchTests {
         let shortTarget = shortMedia.expandedSize(module: .files, fileMediaHeight: 600)
         suite.expect(shortTarget.height <= shortScreen.height - 48 && shortScreen.contains(shortMedia.frame(for: shortTarget)),
                "the larger media workspace preserves the screen margin on shorter displays")
+        suite.expect(NotchDisplay.automatic.showsOnAllDisplays && NotchDisplay.all.showsOnAllDisplays
+                     && NotchDisplay.automatic.followsPointer && NotchDisplay.pointer.followsPointer
+                     && !NotchDisplay.builtIn.showsOnAllDisplays && !NotchDisplay.main.showsOnAllDisplays,
+                     "automatic adapts all enabled displays while explicit single-display modes stay opt-in")
+        suite.expect(NotchSupport.screenIndex(preference: .automatic, builtIn: [false, true],
+                                             notched: [false, true], main: 0, pointer: 0) == 0,
+                     "automatic can move interaction to an external display instead of snapping back to the hardware notch")
         suite.expect(NotchSupport.screenIndex(preference: .automatic, builtIn: [false, true],
                                        notched: [false, true], main: 0) == 1,
                "automatic uses the notched built-in screen even with external main display")

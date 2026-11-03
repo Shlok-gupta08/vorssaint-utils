@@ -79,6 +79,7 @@ struct MetricsTests {
             }),
             ("command-bar", { CommandBarFeatureTests.run(suite) }),
             ("notch", {
+                NotchActivityObservationTests.run(suite)
                 NotchTests.run(suite)
                 NotchCompactTests.run(suite)
                 NotchCapsuleTests.run(suite)

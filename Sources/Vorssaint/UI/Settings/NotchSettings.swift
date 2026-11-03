@@ -222,9 +222,26 @@ struct NotchSettings: View {
     private var displaysPage: some View {
         let editor = FeatureStrings.notchEditor(l10n.language)
         return VStack(alignment: .leading, spacing: 20) {
-            Text("Choose where the island appears. All displays keeps live activity visible on each enabled screen; click a copy to open controls there. Appearance is resolved separately for each screen, at every resolution.")
+            Text("Automatic shows the island on every enabled display, fitting each screen independently. Click an island to open its controls on that display.")
                 .font(.callout).foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 16)], alignment: .leading, spacing: 16) {
+                ForEach(connectedScreens, id: \.notchPersistentID) { screen in
+                    displayCard(screen)
+                }
+            }
+            Text("Display choices are remembered when a monitor reconnects. Configure activity types in Activity and pages in Content.")
+                .font(.caption).foregroundStyle(.secondary)
             SettingsCard(title: text.display) {
+                Toggle("Show on all displays", isOn: Binding(get: {
+                    (NotchDisplay(rawValue: display) ?? .automatic).showsOnAllDisplays
+                }, set: { all in
+                    preferredDisplay = ""
+                    display = (all ? NotchDisplay.automatic : .builtIn).rawValue
+                }))
+                Text((NotchDisplay(rawValue: display) ?? .automatic).showsOnAllDisplays
+                     ? "Every enabled display is included. The interactive island follows the pointer."
+                     : "Single-display mode: only the selected display shows the island.")
+                    .font(.caption).foregroundStyle(.secondary)
                 switchRow("arrow.up.left.and.arrow.down.right", text.hideInFullscreen, isOn: $hideInFullscreen)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                     // A mode this version no longer offers is treated as automatic, as the island does.
@@ -256,40 +273,6 @@ struct NotchSettings: View {
                 }
             }
 
-            SettingsCard(title: "Connected displays") {
-                ForEach(connectedScreens, id: \.notchPersistentID) { screen in
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label(screen.localizedName, systemImage: screen.safeAreaInsets.top > 0 ? "laptopcomputer" : "display")
-                            .font(.headline)
-                        Toggle("Enable on this display", isOn: displayBinding(screen, keyPath: \.enabled))
-                        Toggle("Show live activities", isOn: displayBinding(screen, keyPath: \.liveActivities))
-                        if screen.safeAreaInsets.top > 0 {
-                            Text("Physical notch · automatically fits content around the camera.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            Picker("Appearance", selection: Binding(get: {
-                                NotchDisplayPreference.read(displayPreferences)[screen.notchPersistentID]?.silhouette ?? ""
-                            }, set: { value in
-                                displayPreferences = NotchDisplayPreference.updating(displayPreferences, id: screen.notchPersistentID) {
-                                    $0.silhouette = value.isEmpty ? nil : value
-                                }
-                            })) {
-                                Text("Use default").tag("")
-                                Text(text.capsuleShape).tag(NotchSilhouette.capsule.rawValue)
-                                Text(text.notchShape).tag(NotchSilhouette.notch.rawValue)
-                            }
-                        }
-                        Button("Use only this display") {
-                            displayPreferences = NotchDisplayPreference.updating(displayPreferences, id: screen.notchPersistentID) { $0.enabled = true }
-                            preferredDisplay = screen.notchPersistentID
-                            display = NotchDisplay.main.rawValue
-                        }
-                    }.padding(.vertical, 6)
-                    Divider()
-                }
-                Text("Display choices are remembered when a monitor reconnects. Activity types are configured in Activity; pages and controls are configured in Content. No additional permission is needed to show islands on multiple displays.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             // Only a display without a camera can float the island.
             if NotchSupport.hasDisplayWithoutNotch {
                 displayGroupHeader(text.withoutNotch, symbol: "display",
@@ -332,6 +315,58 @@ struct NotchSettings: View {
             }
 
         }
+    }
+
+    private func displayCard(_ screen: NSScreen) -> some View {
+        let physical = screen.safeAreaInsets.top > 0
+        let preference = NotchDisplayPreference.read(displayPreferences)[screen.notchPersistentID] ?? NotchDisplayPreference()
+        let shape = preference.silhouette.flatMap(NotchSilhouette.init(rawValue:))
+            ?? NotchSilhouette(rawValue: silhouette) ?? .capsule
+        let mode = NotchDisplay(rawValue: display) ?? .automatic
+        let included = preference.enabled && (mode.showsOnAllDisplays
+            || (mode == .builtIn && CGDisplayIsBuiltin(screen.notchDisplayID) != 0)
+            || (mode == .main && (preferredDisplay.isEmpty ? screen == NSScreen.withMenuBar : preferredDisplay == screen.notchPersistentID))
+            || mode == .pointer)
+        return VStack(alignment: .leading, spacing: 12) {
+            NotchDisplayIllustration(physical: physical, silhouette: shape, enabled: included)
+                .frame(height: 124)
+            HStack {
+                Text(screen.localizedName).font(.headline).lineLimit(1)
+                Spacer()
+                Circle().fill(included ? Color.green : Color.secondary).frame(width: 7, height: 7)
+            }
+            Text(included ? (mode == .pointer ? "Follows pointer" : "Included") : "Excluded by display settings")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("Show island", isOn: Binding(get: { preference.enabled }, set: { value in
+                displayPreferences = NotchDisplayPreference.updating(displayPreferences, id: screen.notchPersistentID) { $0.enabled = value }
+                if value && !mode.showsOnAllDisplays { preferredDisplay = ""; display = NotchDisplay.all.rawValue }
+            }))
+            Toggle("Live activities", isOn: displayBinding(screen, keyPath: \.liveActivities))
+                .disabled(!preference.enabled)
+            if physical {
+                Label("Physical notch · automatic fit", systemImage: "camera.fill")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(height: 28)
+            } else {
+                Picker("Shape", selection: Binding(get: { preference.silhouette ?? "" }, set: { value in
+                    displayPreferences = NotchDisplayPreference.updating(displayPreferences, id: screen.notchPersistentID) {
+                        $0.silhouette = value.isEmpty ? nil : value
+                    }
+                })) {
+                    Text("Default").tag("")
+                    Text(text.capsuleShape).tag(NotchSilhouette.capsule.rawValue)
+                    Text(text.notchShape).tag(NotchSilhouette.notch.rawValue)
+                }.pickerStyle(.menu)
+            }
+            Button("Use only this display") {
+                displayPreferences = NotchDisplayPreference.updating(displayPreferences, id: screen.notchPersistentID) { $0.enabled = true }
+                preferredDisplay = screen.notchPersistentID
+                display = NotchDisplay.main.rawValue
+            }.buttonStyle(.bordered).frame(maxWidth: .infinity)
+        }
+        .padding(16)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 16))
+        .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(included ? Color.accentColor.opacity(0.5) : .clear) }
     }
 
     private func displayBinding(_ screen: NSScreen, keyPath: WritableKeyPath<NotchDisplayPreference, Bool>) -> Binding<Bool> {

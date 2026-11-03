@@ -20,6 +20,8 @@ cd vorssaint-utils
 
 To install and launch the separate Developer app, use `./build.sh --dev --install`.
 It has its own preferences and permissions and does not replace the official app.
+For daily use or animation performance checks, add `--optimized` to compile the
+Developer variant with release optimization while retaining its identity and probes.
 A plain `./build.sh` builds the optimized variant used by CI; its health check is
 `./build/Vorssaint --selftest`.
 

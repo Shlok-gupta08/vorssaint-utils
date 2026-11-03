@@ -2,12 +2,13 @@
 // Copyright (C) 2026 Vorssaint
 
 import AppKit
+import Combine
 import SwiftUI
 
 struct NotchView: View {
     @ObservedObject var service: NotchService
     @ObservedObject private var l10n = L10n.shared
-    @ObservedObject private var music = NotchMusicService.shared
+    private let music = NotchMusicService.shared
     @ObservedObject private var launcher = QuickLauncherService.shared
     @ObservedObject private var updates = UpdateService.shared
     @AppStorage(DefaultsKey.notchLiquidGlassEnabled) private var glass = false
@@ -1149,18 +1150,51 @@ struct NotchAttachedActivityContent<Mark: View, Signal: View>: View {
     }
 }
 
+/// Each compact pill listens only to its own activity. A playback tick must
+/// not invalidate every timer, download and agent card during a spring.
+private final class NotchActivityObservation: ObservableObject {
+    let objectWillChange = ObservableObjectPublisher()
+    private var subscription: AnyCancellable?
+
+    init(_ activity: NotchCompactActivity) {
+        let changes: ObservableObjectPublisher
+        switch activity {
+        case .music: changes = NotchMusicService.shared.objectWillChange
+        case .timer: changes = NotchTimerService.shared.objectWillChange
+        case .downloads: changes = NotchDownloadService.shared.objectWillChange
+        case .agents: changes = AgentUsageService.shared.objectWillChange
+        case .watch: changes = NotchWatchService.shared.objectWillChange
+        case .keepAwake: changes = KeepAwakeManager.shared.objectWillChange
+        case .calendar: changes = NotchCalendarService.shared.objectWillChange
+        case .call: changes = NotchCallService.shared.objectWillChange
+        }
+        subscription = changes.sink { [weak self] _ in self?.objectWillChange.send() }
+    }
+}
+
 private struct NotchPillCompactMark: View {
     let activity: NotchCompactActivity
     let geometry: NotchGeometry
     var physicalSide = false
     var onReadingShapeChange: () -> Void = {}
-    @ObservedObject private var music = NotchMusicService.shared
-    @ObservedObject private var timer = NotchTimerService.shared
-    @ObservedObject private var downloads = NotchDownloadService.shared
-    @ObservedObject private var usage = AgentUsageService.shared
-    @ObservedObject private var watch = NotchWatchService.shared
-    @ObservedObject private var awake = KeepAwakeManager.shared
-    @ObservedObject private var calendar = NotchCalendarService.shared
+    private let music = NotchMusicService.shared
+    private let timer = NotchTimerService.shared
+    private let downloads = NotchDownloadService.shared
+    private let usage = AgentUsageService.shared
+    private let watch = NotchWatchService.shared
+    private let awake = KeepAwakeManager.shared
+    private let calendar = NotchCalendarService.shared
+
+    @StateObject private var observation: NotchActivityObservation
+
+    init(activity: NotchCompactActivity, geometry: NotchGeometry, physicalSide: Bool = false,
+         onReadingShapeChange: @escaping () -> Void = {}) {
+        self.activity = activity
+        self.geometry = geometry
+        self.physicalSide = physicalSide
+        self.onReadingShapeChange = onReadingShapeChange
+        _observation = StateObject(wrappedValue: NotchActivityObservation(activity))
+    }
 
     private var tint: Color {
         switch activity {

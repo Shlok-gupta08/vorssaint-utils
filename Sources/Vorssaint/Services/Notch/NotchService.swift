@@ -1268,8 +1268,8 @@ final class NotchService: ObservableObject {
         NotchNotificationService.shared.syncWithPreferences()
         NotchAudioLevelService.shared.syncWithPreferences()
         AgentUsageService.shared.syncWithPreferences()
-        followsPointer = displayPreference == .pointer || displayPreference == .all
-        showsOnAllDisplays = displayPreference == .all
+        followsPointer = displayPreference.followsPointer
+        showsOnAllDisplays = displayPreference.showsOnAllDisplays
         updateFullscreenDisplays()
         updateScreen()
         syncPointerFollowing()
@@ -3327,7 +3327,7 @@ final class NotchService: ObservableObject {
 
         let preference = displayPreference
         var pointer: Int?
-        if preference == .pointer || preference == .all {
+        if preference.followsPointer {
             // The island stays on its display until it can follow the pointer.
             let mouse = NSEvent.mouseLocation
             pointer = screens.firstIndex { $0.notchDisplayID == displayID }

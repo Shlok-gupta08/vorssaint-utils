@@ -486,6 +486,10 @@ def main():
           + declaration(shelf, "    func completeInternalDrag(")
           + "}\n}\n")
     notch = "Sources/Vorssaint/Services/Notch/NotchService.swift"
+    write("NotchActivityObservation.swift", "import Combine\nextension NotchActivityObservationTests {\n"
+          + declaration("Sources/Vorssaint/UI/Notch/NotchView.swift", "private final class NotchActivityObservation:")
+              .replace("private final class NotchActivityObservation", "final class Observation", 1)
+          + "}\n")
     write("NotchQuickAccessOccupancy.swift", "extension NotchPresentationRefreshContract.NotchQuickAccessConfiguration {\n"
           + declaration("Sources/Vorssaint/Services/Notch/NotchSupport.swift", "    func avoidingActivityPills(",
                         scope="struct NotchQuickAccessConfiguration:")
