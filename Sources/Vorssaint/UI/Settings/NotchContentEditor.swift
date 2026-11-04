@@ -285,7 +285,7 @@ struct NotchSectionListRow: View {
                     .padding(.vertical, 5)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(NotchSettingsButtonStyle())
                 .help(editor.summary(module))
                 .accessibilityLabel(title)
                 .accessibilityValue(editor.summary(module))

@@ -86,7 +86,7 @@ struct NotchLayoutEditor: View {
                                     .background(.background, in: Circle())
                                     .overlay { Circle().strokeBorder(Color.accentColor.opacity(0.65), style: StrokeStyle(lineWidth: 1, dash: [3, 3])) }
                             }
-                            .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                            .buttonStyle(NotchSettingsButtonStyle()).foregroundStyle(Color.accentColor)
                             .help(editor.addButton)
                             .accessibilityLabel(editor.addButton + ", " + side.title(l10n))
                             .popover(isPresented: Binding(get: { addingSide == side }, set: { if !$0 { addingSide = nil } }),
@@ -212,7 +212,7 @@ struct NotchLayoutEditor: View {
                 .overlay { Circle().strokeBorder(editingID == button.id ? Color.accentColor : .white.opacity(0.2), lineWidth: 1.5) }
                 .shadow(color: .black.opacity(0.12), radius: 3, y: 2)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(NotchSettingsButtonStyle())
         .help(title)
         .accessibilityLabel(editor.editButton + ", " + title)
         .popover(isPresented: Binding(get: { editingID == button.id }, set: { if !$0 { editingID = nil } }),
@@ -272,7 +272,7 @@ struct NotchLayoutEditor: View {
         return Button(action: editContents) {
             Color.clear.contentShape(NotchShape.island(height: actualHeight, geometry: previewGeometry))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(NotchSettingsButtonStyle())
         .help(NotchSettingsTab.content.title(l10n.language))
         .accessibilityLabel(NotchSettingsTab.content.title(l10n.language))
         .overlay {
@@ -437,7 +437,7 @@ struct NotchActionChooser: View {
                                 .font(.system(size: 11))
                                 .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading).padding(8)
                                 .background(selected?.canonical == action.canonical ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
-                        }.buttonStyle(.plain).help(action.isAvailable() ? action.title(l10n) : action.setupHint(l10n))
+                        }.buttonStyle(NotchSettingsButtonStyle()).help(action.isAvailable() ? action.title(l10n) : action.setupHint(l10n))
                     }
                 }
             }

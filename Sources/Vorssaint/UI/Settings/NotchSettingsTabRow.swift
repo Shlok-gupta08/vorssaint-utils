@@ -80,34 +80,83 @@ enum NotchSettingsTab: Int, CaseIterable, Identifiable {
     }
 }
 
-/// Compact navigation for narrow settings windows. The desktop layout uses
-/// a task sidebar; ten categories must never become a squeezed segment strip.
+/// A small set of user decisions, with specialist editors inside each area.
+enum NotchSettingsWorkspace: Int, CaseIterable, Identifiable {
+    case overview, design, content, activity, behavior, privacy
+    var id: Int { rawValue }
+    var sections: [NotchSettingsTab] {
+        switch self {
+        case .overview: return [.overview]
+        case .design: return [.displays, .layout]
+        case .content: return [.content, .shortcuts]
+        case .activity: return [.activity, .notifications]
+        case .behavior: return [.behavior, .routing]
+        case .privacy: return [.privacy]
+        }
+    }
+    static func containing(_ section: NotchSettingsTab) -> Self {
+        allCases.first { $0.sections.contains(section) } ?? .overview
+    }
+    var symbol: String { sections[0].symbol }
+    func title(_ language: AppLanguage) -> String {
+        if language == .enUS {
+            return ["Quick setup", "Design & displays", "Content & buttons", "Activities & alerts", "Behavior", "Privacy"][rawValue]
+        }
+        return sections[0].title(language)
+    }
+}
+
+/// A single shared style makes the entire padded label a hit target, including
+/// otherwise transparent space. Used for navigation, cards and choices.
+struct NotchSettingsButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+struct NotchSettingsNavigationButton: View {
+    let title: String
+    let symbol: String
+    let selected: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+                .padding(.horizontal, 10)
+                .background(selected ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 9))
+        }.buttonStyle(NotchSettingsButtonStyle()).accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// Compact menu retained for callers that need a single navigation control.
 struct NotchSettingsTabRow: View {
     @Binding var tab: NotchSettingsTab
     let language: AppLanguage
     let canOpen: Bool
     var showsOpenButton = true
     let open: () -> Void
-
     var body: some View {
-        let text = FeatureStrings.notch(language)
         HStack {
-            Image(systemName: tab.symbol).foregroundStyle(Color.accentColor)
-            picker.pickerStyle(.menu).controlSize(.large)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Menu {
+                ForEach(NotchSettingsWorkspace.allCases) { group in
+                    Section(group.title(language)) {
+                        ForEach(group.sections) { section in
+                            Button(section.title(language)) { tab = section }
+                        }
+                    }
+                }
+            } label: {
+                Label(tab.title(language), systemImage: tab.symbol)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(8).contentShape(Rectangle())
+            }.menuStyle(.borderlessButton)
             if showsOpenButton {
                 Button(action: open) { Image(systemName: "arrow.up.forward.app") }
-                    .buttonStyle(.bordered).disabled(!canOpen).help(text.open).accessibilityLabel(text.open)
+                    .disabled(!canOpen).accessibilityLabel(FeatureStrings.notch(language).open)
             }
         }
-    }
-
-    private var picker: some View {
-        Picker(FeatureStrings.notch(language).title, selection: $tab) {
-            ForEach(NotchSettingsTab.allCases) { section in
-                Text(section.title(language)).tag(section)
-            }
-        }
-        .labelsHidden()
     }
 }

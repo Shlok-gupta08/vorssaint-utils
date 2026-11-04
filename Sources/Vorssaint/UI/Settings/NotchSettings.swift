@@ -93,6 +93,7 @@ struct NotchSettings: View {
     @State private var tab = NotchSettingsTab.overview
     @State private var settingsQuery = ""
     @State private var controlQuery = ""
+    @State private var pageQuery = ""
     @State private var selectedModule = NotchModule.controls
     @State private var draggingModule: NotchModule?
     @State private var draggingControl: NotchControlItem?
@@ -123,7 +124,7 @@ struct NotchSettings: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(text.title).font(.title2.bold())
@@ -149,19 +150,28 @@ struct NotchSettings: View {
             TextField("\(l10n.s.settingsSearchPlaceholder) · \(text.title)", text: $settingsQuery)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("notch.settings.search")
+            workspaceNavigation
+            if NotchSettingsWorkspace.containing(tab).sections.count > 1 && settingsQuery.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(NotchSettingsWorkspace.containing(tab).sections) { section in
+                        Button { tab = section } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label(section.title(l10n.language), systemImage: section.symbol).font(.headline)
+                                Text(section.detail(l10n.language)).font(.caption).foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading).padding(12)
+                            .background(tab == section ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(tab == section ? Color.accentColor.opacity(0.5) : .clear) }
+                        }.buttonStyle(NotchSettingsButtonStyle()).accessibilityAddTraits(tab == section ? .isSelected : [])
+                    }
+                }
+            }
             GeometryReader { proxy in
                 if !settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     settingsSearchResults
-                } else if proxy.size.width >= 900 {
-                    HStack(alignment: .top, spacing: 24) {
-                        settingsNavigation.frame(width: 178)
-                        settingsDetail.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    }
                 } else {
-                    VStack(alignment: .leading, spacing: 16) {
-                        NotchSettingsTabRow(tab: $tab, language: l10n.language, canOpen: enabled, showsOpenButton: false) { NotchService.shared.open() }
-                        settingsDetail
-                    }
+                    settingsDetail
                 }
             }
 
@@ -179,24 +189,20 @@ struct NotchSettings: View {
 
     @ViewBuilder private var settingsDetail: some View {
         if tab == .content {
-            GeometryReader { proxy in contentEditor(in: CGSize(width: min(proxy.size.width, 1180), height: proxy.size.height)) }
+            GeometryReader { proxy in contentEditor(in: proxy.size) }
         } else {
             pageScroll
         }
     }
 
-    private var settingsNavigation: some View {
-        ScrollView {
-            VStack(spacing: 4) {
-                ForEach(NotchSettingsTab.allCases) { section in
-                    Button { tab = section } label: {
-                        Label(section.title(l10n.language), systemImage: section.symbol)
-                            .font(.system(size: 12, weight: tab == section ? .semibold : .regular))
-                            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-                            .padding(.horizontal, 10).padding(.vertical, 4)
-                            .background(tab == section ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 9))
-                    }.buttonStyle(.plain).accessibilityAddTraits(tab == section ? .isSelected : [])
+    private var workspaceNavigation: some View {
+        NotchSettingsColumns(minimumWidth: 140, maximumColumns: 6) {
+            ForEach(NotchSettingsWorkspace.allCases) { group in
+                let selected = NotchSettingsWorkspace.containing(tab) == group
+                NotchSettingsNavigationButton(title: group.title(l10n.language), symbol: group.symbol, selected: selected) {
+                    tab = group.sections[0]; settingsQuery = ""
                 }
+                    .accessibilityIdentifier("notch.workspace.\(group.rawValue)")
             }
         }
     }
@@ -216,9 +222,9 @@ struct NotchSettings: View {
                         Label(module.title(l10n.language) + " · " + NotchSettingsTab.content.title(l10n.language), systemImage: module.symbol)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                             .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(NotchSettingsButtonStyle())
                 }
-            }.frame(maxWidth: 860, alignment: .leading)
+            }.frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -239,16 +245,38 @@ struct NotchSettings: View {
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, minHeight: 66, alignment: .leading).padding(16)
                 .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
-        }.buttonStyle(.plain)
+        }.buttonStyle(NotchSettingsButtonStyle())
     }
 
     private var overviewPage: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            NotchDisplayIllustration(physical: notch.geometry.isNotched,
-                                    silhouette: NotchSilhouette(rawValue: silhouette) ?? .capsule, enabled: enabled)
-                .frame(height: 130).frame(maxWidth: .infinity)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 14)], alignment: .leading, spacing: 14) {
-                ForEach(NotchSettingsTab.allCases.filter { $0 != .overview }) { section in navigationCard(section) }
+        NotchSettingsColumns(maximumColumns: 2) {
+            SettingsCard(title: "Where it appears") {
+                HStack {
+                    NotchDisplayIllustration(physical: notch.geometry.isNotched,
+                        silhouette: NotchSilhouette(rawValue: silhouette) ?? .capsule, enabled: enabled)
+                        .frame(width: 212, height: 118).scaleEffect(0.65).frame(width: 140, height: 80)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("\(connectedScreens.count) connected display\(connectedScreens.count == 1 ? "" : "s")").font(.headline)
+                        Text("Each screen keeps its own shape and activity preferences.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                navigationCard(.displays)
+            }
+            SettingsCard(title: "How it opens") {
+                switchRow("cursorarrow", editor.hoverExpand, caption: "Open on hover, or turn this off to use a click.", isOn: Binding(get: { hover && hoverExpand }, set: { hover = $0; hoverExpand = $0; hideUntilHover = false }))
+                switchRow("waveform.path", text.hapticFeedback, isOn: $hapticFeedback)
+                navigationCard(.behavior)
+            }
+            SettingsCard(title: "What stays visible") {
+                switchRow("music.note", text.playingMusic, isOn: $showPlayingMusic)
+                switchRow("bell", NotchModule.notifications.title(l10n.language), isOn: moduleBinding(.notifications))
+                    .disabled(!AppFeature.notchNotifications.isAvailable)
+                navigationCard(.activity)
+            }
+            SettingsCard(title: "Make it yours") {
+                navigationCard(.content)
+                navigationCard(.shortcuts)
+                navigationCard(.layout)
             }
         }
     }
@@ -256,7 +284,7 @@ struct NotchSettings: View {
     private var pageScroll: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if tab != .overview {
+                if tab != .overview && NotchSettingsWorkspace.containing(tab).sections.count == 1 {
                     Label(tab.title(l10n.language), systemImage: tab.symbol).font(.title3.bold())
                     Text(tab.detail(l10n.language)).font(.callout).foregroundStyle(.secondary)
                 }
@@ -274,8 +302,7 @@ struct NotchSettings: View {
                     case .privacy: privacyPage
                     }
                 }
-            }.frame(maxWidth: tab == .shortcuts ? 960 : 860, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 22)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 22)
         }.id(tab)
     }
 
@@ -302,9 +329,7 @@ struct NotchSettings: View {
     }
 
     private var layoutPage: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            displayGroupHeader("Common appearance", symbol: "circle.grid.cross",
-                               caption: "These options follow the island on every display.")
+        NotchSettingsColumns {
             SettingsCard(title: text.size) {
                 expandedSizeSlider
                 Divider()
@@ -340,13 +365,16 @@ struct NotchSettings: View {
         return VStack(alignment: .leading, spacing: 20) {
             Text("Automatic shows the island on every enabled display, fitting each screen independently. Click an island to open its controls on that display.")
                 .font(.callout).foregroundStyle(.secondary)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 16)], alignment: .leading, spacing: 16) {
+            NotchSettingsColumns {
+            SettingsCard(title: text.display) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: min(2, max(1, connectedScreens.count))), alignment: .leading, spacing: 16) {
                 ForEach(connectedScreens, id: \.notchPersistentID) { screen in
                     displayCard(screen)
                 }
             }
             Text("Display choices are remembered when a monitor reconnects. Configure activity types in \(NotchSettingsTab.activity.title(l10n.language)) and pages in \(NotchSettingsTab.content.title(l10n.language)).")
                 .font(.caption).foregroundStyle(.secondary)
+            }
             SettingsCard(title: text.display) {
                 Toggle("Show on all displays", isOn: Binding(get: {
                     (NotchDisplay(rawValue: display) ?? .automatic).showsOnAllDisplays
@@ -437,6 +465,7 @@ struct NotchSettings: View {
                 }
             }
 
+            }
         }
     }
 
@@ -515,63 +544,74 @@ struct NotchSettings: View {
     /// in a column that never scrolls away. Narrow windows use a page picker
     /// and collapsible page arrangement and preview, keeping options in view.
     private func contentEditor(in size: CGSize) -> some View {
-        if size.width < 680 {
-            return AnyView(VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Picker(editor.sections, selection: $selectedModule) {
-                        ForEach(orderedModules) { module in Text(module.title(l10n.language)).tag(module) }
-                    }.pickerStyle(.menu)
-                    Toggle(selectedModule.title(l10n.language), isOn: selectedModule.isAvailable() ? moduleBinding(selectedModule) : .constant(false))
-                        .labelsHidden().toggleStyle(.switch).disabled(!selectedModule.isAvailable())
-                }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        NotchSectionHeader(module: selectedModule, shown: isShown(selectedModule),
-                            reason: selectedModule.isAvailable() ? nil : moduleFeature(selectedModule).map(enableFeatureReason) ?? text.disabled) {
-                            router.request(FeatureSettingsDestination(.features), targetFeature: moduleFeature(selectedModule))
-                        }
-                        DisclosureGroup(editor.sections) { sectionList.frame(height: 300) }
-                        DisclosureGroup(editor.preview) { preview(width: size.width, limit: 240) }
-                        if selectedModule.isAvailable(), hasOptions(selectedModule) {
-                            SettingsCard { moduleOptions(selectedModule) }
-                        }
-                    }.padding(.bottom, 22)
-                }
-            })
-        }
-        let wide = size.width >= 940
-        let listWidth: CGFloat = wide ? 216 : 196
-        let previewWidth = wide ? min(560, ((size.width - listWidth - 32) * 0.5).rounded()) : 0
-        let detailWidth = max(0, size.width - listWidth - 16 - (wide ? previewWidth + 16 : 0))
-        return AnyView(HStack(alignment: .top, spacing: 16) {
-            sectionList
-                .frame(width: listWidth, height: size.height, alignment: .top)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    let module = selectedModule
-                    let available = module.isAvailable()
-                    NotchSectionHeader(module: module, shown: isShown(module),
-                                       reason: available ? nil : moduleFeature(module).map(enableFeatureReason) ?? text.disabled) {
-                        SettingsRouter.shared.request(FeatureSettingsDestination(.features), targetFeature: moduleFeature(module))
-                    }
-                    if !wide {
-                        DisclosureGroup(editor.preview) { preview(width: detailWidth, limit: 280) }
-                    }
-                    if available, hasOptions(module) {
-                        SettingsCard { moduleOptions(module) }
-                    } else if available {
-                        Text(editor.noOptions).font(.callout).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.bottom, 22)
-            }
-            .id(selectedModule)
-            .frame(width: detailWidth)
+        let wide = size.width >= 900
+        return AnyView(Group {
             if wide {
-                preview(width: previewWidth, limit: size.height)
-                    .frame(width: previewWidth)
+                HStack(alignment: .top, spacing: 20) {
+                    pageLibrary.frame(width: max(290, size.width * 0.32))
+                    pageInspector(width: size.width * 0.68 - 20)
+                        .frame(maxWidth: .infinity)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Picker(editor.sections, selection: $selectedModule) {
+                            ForEach(orderedModules) { module in Text(module.title(l10n.language)).tag(module) }
+                        }.pickerStyle(.menu)
+                        Toggle(selectedModule.title(l10n.language), isOn: selectedModule.isAvailable() ? moduleBinding(selectedModule) : .constant(false))
+                            .labelsHidden().toggleStyle(.switch).disabled(!selectedModule.isAvailable())
+                    }
+                    DisclosureGroup(editor.sections) { pageLibrary.frame(height: min(320, size.height * 0.5)) }
+                    pageInspector(width: size.width)
+                }
             }
         })
+    }
+
+    private var pageLibrary: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            TextField(editor.findAction, text: $pageQuery).textFieldStyle(.roundedBorder)
+            ScrollView {
+                VStack(spacing: 6) {
+                    ForEach(orderedModules.filter { pageQuery.isEmpty || $0.title(l10n.language).localizedStandardContains(pageQuery) }) { module in
+                        HStack(spacing: 8) {
+                            Button { selectedModule = module } label: {
+                                HStack(spacing: 10) {
+                                    NotchSectionTile(module: module, shown: isShown(module), side: 30)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(module.title(l10n.language)).font(.callout.weight(.semibold))
+                                        Text(editor.summary(module)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                    }
+                                    Spacer(minLength: 0)
+                                }.frame(maxWidth: .infinity, minHeight: 50, alignment: .leading).contentShape(Rectangle())
+                            }.buttonStyle(NotchSettingsButtonStyle())
+                            Toggle(module.title(l10n.language), isOn: module.isAvailable() ? moduleBinding(module) : .constant(false))
+                                .labelsHidden().toggleStyle(.checkbox).disabled(!module.isAvailable())
+                        }.padding(10)
+                            .background(selectedModule == module ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    DisclosureGroup(editor.reorderHint) { sectionList.frame(height: 340) }
+                        .padding(.top, 8)
+                }
+            }
+        }
+    }
+
+    private func pageInspector(width: CGFloat) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                NotchSectionHeader(module: selectedModule, shown: isShown(selectedModule),
+                    reason: selectedModule.isAvailable() ? nil : moduleFeature(selectedModule).map(enableFeatureReason) ?? text.disabled) {
+                    router.request(FeatureSettingsDestination(.features), targetFeature: moduleFeature(selectedModule))
+                }
+                if selectedModule.isAvailable(), hasOptions(selectedModule) {
+                    SettingsCard { moduleOptions(selectedModule) }
+                } else if selectedModule.isAvailable() {
+                    Text(editor.noOptions).font(.callout).foregroundStyle(.secondary)
+                }
+                DisclosureGroup(editor.preview) { preview(width: width, limit: 360) }
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 22)
+        }.id(selectedModule)
     }
 
     private func preview(width: CGFloat, limit: CGFloat) -> some View {
@@ -626,7 +666,7 @@ struct NotchSettings: View {
         switch module {
         case .controls:
             let primary = [NotchControlItem.music, .volume, .brightness]
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 116), spacing: 8)], spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 8)], spacing: 8) {
                 ForEach(primary) { item in
                     toggleCard(item.title(l10n), symbol: item.symbol, value: controlBinding(item), available: item.isAvailable(),
                                reason: controlReason(item), reservesReason: !primary.allSatisfy { $0.isAvailable() },
@@ -646,26 +686,14 @@ struct NotchSettings: View {
                     }
                 }
             }
-            Divider()
-            let activities = FeatureStrings.notchActivities(l10n.language)
-            switchRow("phone.fill", "Call live activity",
-                      caption: "Paused while macOS provides its persistent call notification. The implementation is retained for future use.", isOn: $callsEnabled)
-                .disabled(!NotchCallSupport.isAvailable)
-            switchRow(NotchControlItem.keepAwake.symbol, activities.keepAwakeActivity,
-                      caption: activities.keepAwakeActivityHint, isOn: $keepAwakeActivity)
-                .disabled(!AppFeature.keepAwake.isAvailable)
         case .music:
             let music = FeatureStrings.notchMusicExtras(l10n.language)
-            switchRow("music.note", text.playingMusic, isOn: $showPlayingMusic)
-            if showPlayingMusic {
-                switchRow("eye.slash", music.hideWhenPlayerActive,
-                          caption: music.hideWhenPlayerActiveHint,
-                          isOn: $hideMusicWhenPlayerActive)
-                    .padding(.leading, settingsRowTextInset)
-                pauseTimeoutSlider(music)
-                    .padding(.leading, settingsRowTextInset)
+            Button { tab = .activity } label: {
+                Label(NotchSettingsTab.activity.title(l10n.language), systemImage: "livephoto")
             }
-            switchRow("play.rectangle", music.includeOtherPlayers, isOn: $includeOtherPlayers)
+            DisclosureGroup(l10n.s.tabAdvanced) {
+                switchRow("play.rectangle", music.includeOtherPlayers, isOn: $includeOtherPlayers)
+            }
             switchRow("text.quote", music.enableLyrics, isOn: $lyricsEnabled)
                 .disabled(!AppFeature.notchLyrics.isAvailable)
             if lyricsEnabled, AppFeature.notchLyrics.isAvailable {
@@ -744,7 +772,7 @@ struct NotchSettings: View {
     }
 
     private var activityPage: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        NotchSettingsColumns {
             SettingsCard(title: editor.activity) {
                 switchRow("music.note", text.playingMusic, isOn: $showPlayingMusic)
                 switchRow("cup.and.saucer", FeatureStrings.notchActivities(l10n.language).keepAwakeActivity,
@@ -776,15 +804,24 @@ struct NotchSettings: View {
             if NotchSupport.modules().contains(.music) {
                 let music = FeatureStrings.notchMusicExtras(l10n.language)
                 SettingsCard(title: FeatureStrings.radialMenu(l10n.language).mediaNowPlaying) {
-                    pauseTimeoutSlider(music)
+                    if showPlayingMusic {
+                        switchRow("eye.slash", music.hideWhenPlayerActive, caption: music.hideWhenPlayerActiveHint, isOn: $hideMusicWhenPlayerActive)
+                        pauseTimeoutSlider(music)
+                    }
                 }
             }
-
+            DisclosureGroup(l10n.s.tabAdvanced) {
+                SettingsCard {
+                    switchRow("phone.fill", "Call live activity",
+                              caption: "Paused while macOS provides its persistent call notification. The implementation is retained for future use.", isOn: $callsEnabled)
+                        .disabled(!NotchCallSupport.isAvailable)
+                }
+            }
         }
     }
 
     private var behaviorPage: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        NotchSettingsColumns {
             SettingsCard(title: editor.opening) {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                     choice(editor.clickOpen, symbol: "cursorarrow", selected: !hover) { hideUntilHover = false; hover = false }
@@ -792,11 +829,8 @@ struct NotchSettings: View {
                     choice(editor.hoverExpand, symbol: "arrow.up.left.and.arrow.down.right", selected: hover && hoverExpand && !hideUntilHover) { hideUntilHover = false; hover = true; hoverExpand = true }
                 }
                 if hover { hoverDelayControl }
-                switchRow("hand.draw", FeatureStrings.notchGestures(l10n.language).title,
-                          caption: gesturesEnabled ? FeatureStrings.notchGestures(l10n.language).hint : nil,
-                          isOn: $gesturesEnabled)
-                    .disabled(!AppFeature.notchGestures.isAvailable)
-                switchRow("waveform.path", text.hapticFeedback, isOn: $hapticFeedback)
+            }
+            SettingsCard(title: editor.reopening) {
                 SettingsRow(symbol: "arrow.uturn.backward", title: editor.reopening) {
                     Picker(editor.reopening, selection: Binding(get: {
                         guard returnHome else { return "" }
@@ -823,11 +857,19 @@ struct NotchSettings: View {
                 switchRow("livephoto", editor.openActivity, caption: editor.openActivityHint, isOn: $opensActivity)
             }
 
+            SettingsCard(title: FeatureStrings.notchGestures(l10n.language).title) {
+                switchRow("hand.draw", FeatureStrings.notchGestures(l10n.language).title,
+                          caption: gesturesEnabled ? FeatureStrings.notchGestures(l10n.language).hint : nil,
+                          isOn: $gesturesEnabled)
+                    .disabled(!AppFeature.notchGestures.isAvailable)
+                switchRow("waveform.path", text.hapticFeedback, isOn: $hapticFeedback)
+            }
+
         }
     }
 
     private var notificationsPage: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        NotchSettingsColumns {
             SettingsCard(title: NotchModule.notifications.title(l10n.language)) {
                 Toggle(NotchModule.notifications.title(l10n.language), isOn: moduleBinding(.notifications))
                     .disabled(!AppFeature.notchNotifications.isAvailable)
@@ -853,7 +895,7 @@ struct NotchSettings: View {
                 let reserves = ![volumeAvailable, brightnessAvailable, keyboardLightAvailable, microphoneAvailable,
                                  batteryAvailable || !hasBattery, accessoriesAvailable, clipboardAvailable, capturesAvailable,
                                  musicAvailable].allSatisfy { $0 }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 116), spacing: 10)], spacing: 10) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 10)], spacing: 10) {
                     toggleCard(text.volume, symbol: "speaker.wave.2", value: $volume, available: volumeAvailable,
                                reason: enableFeatureReason(.mixer), reservesReason: reserves,
                                unavailableAction: { showFeature(.mixer) })
@@ -908,12 +950,14 @@ struct NotchSettings: View {
     }
 
     private var routingPage: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            SettingsCard(title: editor.destinations) {
+        NotchSettingsColumns {
+            SettingsCard(title: text.panel) {
                 destination(text.panel, symbol: "bubble.middle.top", value: $appPanel)
                 Text(editor.appPanelHint).font(.caption).foregroundStyle(.secondary)
                 switchRow("menubar.rectangle", editor.hideMenuBarIcon, caption: editor.hideMenuBarIconHint,
                           isOn: $hidesMenuBarIcon)
+            }
+            SettingsCard(title: editor.destinations) {
                 destination(text.tools, symbol: "square.grid.2x2", value: $quickPanel, available: AppFeature.quickLauncher.isAvailable)
                 destination(FeatureStrings.clipboard(l10n.language).title, symbol: "doc.on.clipboard", value: $clipboardWindow, available: AppFeature.clipboardHistory.isAvailable)
                 destination(text.files, symbol: "tray.full", value: $shelfWindow, available: AppFeature.shelf.isAvailable)
@@ -924,7 +968,7 @@ struct NotchSettings: View {
     }
 
     private var privacyPage: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        NotchSettingsColumns {
             SettingsCard(title: editor.privacy) {
                 switchRow("camera.viewfinder", text.showInCaptures, isOn: $showInCaptures)
             }
@@ -975,7 +1019,7 @@ struct NotchSettings: View {
                 .foregroundStyle(selected ? Color.accentColor : .primary)
                 .background(selected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
                 .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? Color.accentColor.opacity(0.7) : .clear, lineWidth: 1) }
-        }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+        }.buttonStyle(NotchSettingsButtonStyle()).accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     /// Each outline in a slice of menu bar, drawn as the island draws it.
@@ -989,7 +1033,7 @@ struct NotchSettings: View {
                 .foregroundStyle(selected ? Color.accentColor : .primary)
                 .background(selected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
                 .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? Color.accentColor.opacity(0.7) : .clear, lineWidth: 1) }
-        }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+        }.buttonStyle(NotchSettingsButtonStyle()).accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func enableFeatureReason(_ feature: AppFeature) -> String {
@@ -1053,11 +1097,9 @@ struct NotchSettings: View {
 
     private func toggleCard(_ title: String, symbol: String, value: Binding<Bool>, available: Bool, reason: String? = nil,
                             reservesReason: Bool = false, unavailableAction: (() -> Void)? = nil) -> some View {
-        NotchEditorItem(symbol: symbol, title: title, included: value, available: available,
-                        unavailableReason: available ? nil : reason ?? text.disabled,
-                        unavailableAction: unavailableAction, reservesReason: reservesReason) {
-            value.wrappedValue.toggle()
-        }
+        NotchControlCatalogRow(symbol: symbol, title: title, included: value, available: available,
+                              unavailableReason: available ? nil : reason ?? text.disabled,
+                              unavailableAction: unavailableAction)
     }
 
     private var offersAgentsResting: Bool { agentsEnabled && NotchAgentSupport.isEnabled() }
@@ -1085,7 +1127,7 @@ struct NotchSettings: View {
                 Text(title).font(.system(size: 11, weight: .medium))
             }.frame(maxWidth: .infinity).padding(.vertical, 14)
                 .background(restingChoice == item ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-        }.buttonStyle(.plain).accessibilityAddTraits(restingChoice == item ? .isSelected : [])
+        }.buttonStyle(NotchSettingsButtonStyle()).accessibilityAddTraits(restingChoice == item ? .isSelected : [])
     }
 
     private func destination(_ title: String, symbol: String, value: Binding<Bool>, available: Bool = true) -> some View {

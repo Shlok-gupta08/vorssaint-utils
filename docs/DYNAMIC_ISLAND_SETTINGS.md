@@ -1,10 +1,22 @@
 # Dynamic Island settings organization
 
 The redesign keeps the existing preference keys and saved extension button IDs,
-labels, positions and order. The Overview starts with tasks. Wide windows use
-section navigation; compact windows use a category menu. Settings search links
-to task categories and individual pages. Reading columns are bounded instead of
-stretching every card across a large monitor.
+labels, positions and order. Six workspaces replace the nested task sidebar:
+Quick setup; Design & displays; Content & buttons; Activities & alerts;
+Behavior; Privacy. Specialist editors are secondary choices within their workspace.
+
+Quick setup exposes everyday choices. Content uses a searchable page library and
+an inspector; page ordering and previews are available on demand. Controls only
+contains button configuration. Music activity visibility, player suppression and
+pause timing live together in Activities. Fitting and dormant call support stay
+inside Advanced disclosures.
+
+The workspace fills its viewport. Related groups flow into one, two or three
+columns as space permits, placing the next group in the shorter column instead
+of reserving blank space under a shorter card. Navigation uses up to six columns. No detail pane has a fixed maximum width. Every navigation button uses
+the same full-label hit area, including transparent padding. The development
+probe dispatches three padding clicks to an owned test window and renders all
+editors at 540, 900, 1440 and 2048 points without desktop input.
 
 | Task | Options retained |
 | --- | --- |

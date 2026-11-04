@@ -11,6 +11,13 @@ import SwiftUI
 /// the style the row draws there.
 enum NotchSettingsTabRowTests {
     static func run(_ suite: TestSuite) {
+        let grouped = NotchSettingsWorkspace.allCases.flatMap(\.sections)
+        suite.expect(Set(grouped) == Set(NotchSettingsTab.allCases) && grouped.count == NotchSettingsTab.allCases.count,
+                     "every specialist page belongs to exactly one main workspace")
+        suite.expect(NotchSettingsColumns.columnCount(width: 540, items: 4) == 1
+                     && NotchSettingsColumns.columnCount(width: 1180, items: 4) == 2
+                     && NotchSettingsColumns.columnCount(width: 2048, items: 4) == 3,
+                     "settings groups use additional columns at half-screen and full-screen widths")
         // The narrowest page row: the Settings window's minimum width, less the
         // sidebar at its widest and the page's margins.
         let narrowestRow = CGFloat(SettingsWindowSupport.minContentWidth) - 240 - 22 * 2
