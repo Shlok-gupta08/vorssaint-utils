@@ -116,6 +116,40 @@ struct NotchSettingsButtonStyle: ButtonStyle {
     }
 }
 
+/// The disclosure's whole header is a button, rather than only its chevron.
+/// Applying this to the settings root also covers nested feature editors.
+struct NotchSettingsDisclosureStyle: DisclosureGroupStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                    configuration.isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    configuration.label
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(NotchSettingsButtonStyle())
+            .accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
+            if configuration.isExpanded {
+                configuration.content
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 struct NotchSettingsNavigationButton: View {
     let title: String
     let symbol: String

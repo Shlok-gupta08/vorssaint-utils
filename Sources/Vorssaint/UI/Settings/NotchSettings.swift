@@ -176,6 +176,7 @@ struct NotchSettings: View {
             }
 
         }
+        .disclosureGroupStyle(NotchSettingsDisclosureStyle())
         .padding(.horizontal, 22).padding(.top, 22)
         .onChange(of: configuration) { _, _ in sync() }
         .onChange(of: accessData) { _, _ in NotchService.shared.syncWithPreferences() }
