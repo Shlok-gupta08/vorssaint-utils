@@ -112,7 +112,7 @@ enum NotchDisplay: String, CaseIterable {
 
     /// Automatic adapts every enabled display; explicit modes can restrict it.
     var showsOnAllDisplays: Bool { self == .automatic || self == .all }
-    var followsPointer: Bool { self == .pointer }
+    var followsPointer: Bool { showsOnAllDisplays || self == .pointer }
 }
 
 /// How the island meets the top of a display without a camera housing: a

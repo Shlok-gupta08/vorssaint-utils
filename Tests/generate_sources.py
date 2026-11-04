@@ -666,7 +666,7 @@ def main():
           + "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
               "    private func syncMirrors()", "    private func mirrorSurface(", "    private func mirrorSideRoom(",
               "    private func mirrorDeck(", "    private func mirrorNoticeSize(",
-              "    private func hoverMirrorNotification(", "    private var mirrorHoldsNotification:",
+              "    private func hoverMirrorNotification(", "    private func hoverMirrorIsland(", "    private var mirrorHoldsNotification:",
               "    private func closeMirrors()", "    private func updateFullscreenDisplays()",
               "    private func bringIsland("])
           .replace("NotchSupport.autoHidesWithoutNotch()", "false")

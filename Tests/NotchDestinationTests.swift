@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vorssaint
 
+import AppKit
 import Foundation
 import Carbon.HIToolbox
 
@@ -118,6 +119,7 @@ enum NotchDestinationContract {
         func endCaptureControls() {}
         func clearCapture() { captureControlsCancel = nil; captureClose = nil }
         func tearDownPresentation() { expanded = false; presentationTearDowns += 1 }
+        func routeDictationDisplay() {}
     }
 
     static func run(_ suite: TestSuite) {

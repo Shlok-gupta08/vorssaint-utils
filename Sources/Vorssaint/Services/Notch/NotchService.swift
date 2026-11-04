@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vorssaint
 
 import AppKit
+import ApplicationServices
 import Combine
 import IOKit.ps
 import SwiftUI
@@ -3079,7 +3080,14 @@ final class NotchService: ObservableObject {
             // Shown at once where the island just left, so the two trade places.
             mirror.host.present(size: size, geometry: base, animated: !revealing,
                                 transitionContent: !revealing && (changesPreview || previous != activity || previousNotice?.event != mirroredNotice?.event) ? .replace : .none)
-            mirror.host.setHoverHandler { [weak self] entered in self?.hoverMirrorNotification(entered, on: id) }
+            mirror.host.setHoverHandler { [weak self] entered in
+                guard let self else { return }
+                if let mirroredNotice, mirroredNotice.notification != nil {
+                    self.hoverMirrorNotification(entered, on: id)
+                } else if entered {
+                    self.hoverMirrorIsland(on: id)
+                }
+            }
             mirror.host.setActivationArea(mirror.model.noticeExpanded ? .zero : CGRect(origin: .zero, size: size),
                                           title: FeatureStrings.notch(L10n.shared.language).open,
                                           willPress: {}, activate: { [weak self] in
@@ -3179,6 +3187,17 @@ final class NotchService: ObservableObject {
         let delay = inside ? NotchSupport.sanitizedHoverDelay(UserDefaults.standard.double(forKey: DefaultsKey.notchHoverDelay))
             : NotchQuickAccessLayout.hoverExitDelay
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// A pointer entering a mirror brings the interactive island there at once,
+    /// so the island responds to hover expansion and clicks on whichever display
+    /// the user visits.
+    private func hoverMirrorIsland(on id: CGDirectDisplayID) {
+        guard running, !suspended, showsOnAllDisplays, id != displayID,
+              let screen = eligibleScreens.first(where: { $0.notchDisplayID == id }) else { return }
+        pointerFollowWork?.cancel(); pointerFollowWork = nil
+        move(to: screen)
+        hover(true)
     }
 
     /// Floating pills keep their own surface. Attached cutouts respect the
@@ -3485,9 +3504,7 @@ final class NotchService: ObservableObject {
 
         let preference = displayPreference
         var pointer: Int?
-        if preference.followsPointer || preference.showsOnAllDisplays {
-            // Preserve the last explicit interaction display in multi-display
-            // modes, without following ordinary cursor crossings.
+        if preference.followsPointer {
             let mouse = NSEvent.mouseLocation
             pointer = screens.firstIndex { $0.notchDisplayID == displayID }
                 ?? screens.firstIndex { NSMouseInRect(mouse, $0.frame, false) }
@@ -3949,6 +3966,78 @@ final class NotchService: ObservableObject {
         appDelegate()?.showUpdatePreview()
     }
 
+    /// Finds the screen containing the active text field, focused element, or focused window.
+    private func screenForFocusedInput() -> NSScreen? {
+        let screens = eligibleScreens
+        guard screens.count > 1 else { return screens.first }
+
+        guard let frontApp = NSWorkspace.shared.frontmostApplication,
+              frontApp.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            return NSScreen.withMouse ?? screens.first
+        }
+
+        let app = AXUIElementCreateApplication(frontApp.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.25)
+
+        let displayBounds = screens.map { CGDisplayBounds($0.notchDisplayID) }
+
+        // 1. Try focused UI element (e.g. text field, text view)
+        var focusedElementValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focusedElementValue) == .success,
+           let element = focusedElementValue, CFGetTypeID(element) == AXUIElementGetTypeID() {
+            let axElement = element as! AXUIElement
+            var posValue: CFTypeRef?
+            if AXUIElementCopyAttributeValue(axElement, kAXPositionAttribute as CFString, &posValue) == .success,
+               let pos = posValue, CFGetTypeID(pos) == AXValueGetTypeID() {
+                var point = CGPoint.zero
+                if AXValueGetValue(pos as! AXValue, .cgPoint, &point) {
+                    for (index, bounds) in displayBounds.enumerated() {
+                        if bounds.contains(point) { return screens[index] }
+                    }
+                }
+            }
+        }
+
+        // 2. Try focused window or main window
+        for attribute in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+            var windowValue: CFTypeRef?
+            if AXUIElementCopyAttributeValue(app, attribute as CFString, &windowValue) == .success,
+               let win = windowValue, CFGetTypeID(win) == AXUIElementGetTypeID() {
+                let axWindow = win as! AXUIElement
+                var posValue: CFTypeRef?
+                var sizeValue: CFTypeRef?
+                var point = CGPoint.zero
+                var size = CGSize.zero
+                let hasPos = AXUIElementCopyAttributeValue(axWindow, kAXPositionAttribute as CFString, &posValue) == .success
+                    && posValue != nil && AXValueGetValue(posValue as! AXValue, .cgPoint, &point)
+                let hasSize = AXUIElementCopyAttributeValue(axWindow, kAXSizeAttribute as CFString, &sizeValue) == .success
+                    && sizeValue != nil && AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+                if hasPos {
+                    if hasSize && size.width > 0 && size.height > 0 {
+                        let winFrame = CGRect(origin: point, size: size)
+                        if let index = SwitcherSupport.displayIndex(showingMostOf: winFrame, displayBounds: displayBounds) {
+                            return screens[index]
+                        }
+                    } else {
+                        for (index, bounds) in displayBounds.enumerated() {
+                            if bounds.contains(point) { return screens[index] }
+                        }
+                    }
+                }
+            }
+        }
+
+        return NSScreen.withMouse ?? screens.first
+    }
+
+    private func routeDictationDisplay() {
+        guard showsOnAllDisplays || followsPointer else { return }
+        if let targetScreen = screenForFocusedInput(), targetScreen.notchDisplayID != displayID {
+            if expanded { collapse() }
+            move(to: targetScreen)
+        }
+    }
+
     private func receiveDictationPhase(_ phase: DictationPhase) {
         guard phase != dictationPhase else { return }
         let wasPresenting = dictationPhase.presentsIsland
@@ -3962,6 +4051,8 @@ final class NotchService: ObservableObject {
             notice = nil
             departingNotice = nil
             peeking = false
+
+            routeDictationDisplay()
         }
         // Resolve the incoming surface before closing a page. Closing first
         // sent a resize to the compact activity deck, immediately reversed by

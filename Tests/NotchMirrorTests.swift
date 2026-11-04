@@ -138,6 +138,10 @@ enum NotchMirrorContract {
         func collapse() { collapses += 1; expanded = false; peeking = false }
         func open() { opened += 1; expanded = true }
         func move(to screen: NSScreen) { displayID = screen.notchDisplayID; moves.append(screen.notchDisplayID) }
+        var pointerFollowWork: DispatchWorkItem?
+        func dismissNotice() { notice = nil }
+        var hovers: [Bool] = []
+        func hover(_ entered: Bool) { hovers.append(entered) }
     }
 
     static func run(_ suite: TestSuite) {
