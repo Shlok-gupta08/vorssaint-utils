@@ -164,7 +164,6 @@ final class DictationService: ObservableObject {
     func begin(fromShortcut: Bool = false) {
         guard isEnabled, !phase.isBusy else { return }
         guard !IsSecureEventInputEnabled() else { fail("Finish entering your password before starting dictation."); return }
-        guard NotchService.shared.captureControls == nil else { fail("Finish screen capture before starting dictation."); return }
         guard let model = DictationModelStore.shared.selectedURL else {
             fail("Download or import a speech model in Dictation settings first."); return
         }

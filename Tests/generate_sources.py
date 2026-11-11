@@ -738,6 +738,7 @@ def main():
           + "final class Service: State {\n"
           + "func syncWithPreferences() { presentationSyncs += 1; refreshModules(); syncVisibleConsumers(); NotchTimerService.shared.syncWithPreferences() }\n"
           + declaration(notch, "    var usesPillActivityDeck:")
+          + declaration(notch, "    private func prepareDictationPresentation(").replace("    private ", "    ", 1)
           + declaration(notch, "    private func receiveDictationPhase(").replace("    private ", "    ", 1)
           + availability_declaration(notch, "    private func metricIsAvailable(")
           + declaration(notch, "    private func refreshModules(")

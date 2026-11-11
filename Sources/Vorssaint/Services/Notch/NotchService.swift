@@ -262,6 +262,7 @@ final class NotchService: ObservableObject {
     private var fullscreenDisplays: Set<CGDirectDisplayID> = []
     private var pointerMonitors: [Any] = []
     private var pointerFollowWork: DispatchWorkItem?
+    private var dictationRouteGeneration = UUID()
     /// How long the pointer stays on another display before the island
     /// follows, so passing over a display edge does not move it.
     private static let pointerFollowDelay: TimeInterval = 0.2
@@ -1230,7 +1231,7 @@ final class NotchService: ObservableObject {
             && windowHost?.isConcealedForMissionControl != true
     }
     var acceptsSystemFeedback: Bool {
-        acceptsUserInteraction && (!hiddenInFullscreen || !geometry.isNotched)
+        !showsDictation && acceptsUserInteraction && (!hiddenInFullscreen || !geometry.isNotched)
     }
     private var hasVisibleFeedbackCopy: Bool {
         showsOnAllDisplays && eligibleScreens.contains {
@@ -1655,7 +1656,7 @@ final class NotchService: ObservableObject {
     }
 
     func hover(_ entered: Bool) {
-        guard running, !suspended else { removeHoverExitMonitors(); return }
+        guard running, !suspended, !showsDictation else { removeHoverExitMonitors(); return }
         let point = NSEvent.mouseLocation
         if hidingExpandedForHover, !hoverState.suppressed, geometry.contains(point, in: geometry.collapsed),
            windowHost?.isConcealedForMissionControl == false {
@@ -2130,7 +2131,7 @@ final class NotchService: ObservableObject {
     }
 
     func fileDragChanged(_ active: Bool, internalDrag: Bool = false) {
-        guard running, !suspended, internalDrag || NotchSupport.routesShelf() else { return }
+        guard running, !suspended, !showsDictation, internalDrag || NotchSupport.routesShelf() else { return }
         heldDrag = active && internalDrag
         if active, !internalDrag, NotchSupport.revealsShelfDrag(), !expanded {
             mutatePresentation { dragPlaceholder = true; peeking = false }
@@ -2402,7 +2403,7 @@ final class NotchService: ObservableObject {
 
     @discardableResult
     func show(_ incoming: NotchNotice) -> Bool {
-        guard showsSystemFeedback, NotchSupport.routes(incoming.event),
+        guard !showsDictation, showsSystemFeedback, NotchSupport.routes(incoming.event),
               NotchSupport.shouldReplace(notice?.event, with: incoming.event, held: noticeExpanded) else { return false }
         noticeWork?.cancel(); noticeWork = nil
         var incoming = incoming
@@ -2577,7 +2578,7 @@ final class NotchService: ObservableObject {
     }
 
     private var noticeCanPresent: Bool {
-        !expanded && !dragPlaceholder && captureControls == nil
+        !showsDictation && !expanded && !dragPlaceholder && captureControls == nil
     }
 
     func presentCapture(id: UUID, content: AnyView, actions: AnyView? = nil, height: CGFloat,
@@ -2816,7 +2817,7 @@ final class NotchService: ObservableObject {
             schedulePointerFollow()
             syncMirrors()
         }
-        if hiddenUntilHover || (captureControls != nil && captureSelectionInProgress) {
+        if !showsDictation && (hiddenUntilHover || (captureControls != nil && captureSelectionInProgress)) {
             finishMusicDeparture()
             presentedMusic = nil
             // Hiding the strip ends a hold, as rememberPresentedMusic does, so
@@ -3986,20 +3987,12 @@ final class NotchService: ObservableObject {
         appDelegate()?.showUpdatePreview()
     }
 
-    /// Finds the screen containing the active text field, focused element, or focused window.
-    private func screenForFocusedInput() -> NSScreen? {
-        let screens = eligibleScreens
-        guard screens.count > 1 else { return screens.first }
-
-        guard let frontApp = NSWorkspace.shared.frontmostApplication,
-              frontApp.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
-            return NSScreen.withMouse ?? screens.first
-        }
-
-        let app = AXUIElementCreateApplication(frontApp.processIdentifier)
+    /// Accessibility may wait on another process. Resolve focus off the audio
+    /// and UI queues; routing must never hold up a dictation shortcut.
+    private static func focusedInputDisplay(pid: pid_t, displayBounds: [CGRect]) -> Int? {
+        let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.25)
 
-        let displayBounds = screens.map { CGDisplayBounds($0.notchDisplayID) }
 
         // 1. Try focused UI element (e.g. text field, text view)
         var focusedElementValue: CFTypeRef?
@@ -4012,7 +4005,7 @@ final class NotchService: ObservableObject {
                 var point = CGPoint.zero
                 if AXValueGetValue(pos as! AXValue, .cgPoint, &point) {
                     for (index, bounds) in displayBounds.enumerated() {
-                        if bounds.contains(point) { return screens[index] }
+                        if bounds.contains(point) { return index }
                     }
                 }
             }
@@ -4036,54 +4029,76 @@ final class NotchService: ObservableObject {
                     if hasSize && size.width > 0 && size.height > 0 {
                         let winFrame = CGRect(origin: point, size: size)
                         if let index = SwitcherSupport.displayIndex(showingMostOf: winFrame, displayBounds: displayBounds) {
-                            return screens[index]
+                            return index
                         }
                     } else {
                         for (index, bounds) in displayBounds.enumerated() {
-                            if bounds.contains(point) { return screens[index] }
+                            if bounds.contains(point) { return index }
                         }
                     }
                 }
             }
         }
 
-        return NSScreen.withMouse ?? screens.first
+        return nil
     }
 
     private func routeDictationDisplay() {
+        dictationRouteGeneration = UUID()
         guard showsOnAllDisplays || followsPointer else { return }
-        if let targetScreen = screenForFocusedInput(), targetScreen.notchDisplayID != displayID {
-            if expanded { collapse() }
-            move(to: targetScreen)
+        let generation = dictationRouteGeneration
+        let screens = eligibleScreens
+        let ids = screens.map(\.notchDisplayID)
+        let bounds = ids.map { CGDisplayBounds($0) }
+        let fallback = NSScreen.withMouse?.notchDisplayID
+        let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let index = pid.flatMap { $0 == ProcessInfo.processInfo.processIdentifier ? nil : Self.focusedInputDisplay(pid: $0, displayBounds: bounds) }
+            let id = index.map { ids[$0] } ?? fallback ?? ids.first
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.dictationRouteGeneration == generation, self.showsDictation,
+                      let screen = self.eligibleScreens.first(where: { $0.notchDisplayID == id }), screen.notchDisplayID != self.displayID else { return }
+                self.move(to: screen)
+            }
         }
+    }
+
+    private func prepareDictationPresentation() {
+        hidingExpandedForHover = false
+        hoverWork?.cancel(); hoverWork = nil
+        pillHoverWork?.cancel(); pillHoverWork = nil
+        hoveredPillActivity = nil
+        pointerFollowWork?.cancel(); pointerFollowWork = nil
+        mirrorNotificationHoverWork.values.forEach { $0.cancel() }
+        mirrorNotificationHoverWork.removeAll()
+        noticeWork?.cancel(); noticeWork = nil
+        trackWork?.cancel(); trackWork = nil
+        musicPauseHoldWork?.cancel(); musicPauseHoldWork = nil
+        isMusicPausedHolding = false
+        heldMusic = nil; awaitsTrackNotice = false
+        finishMusicDeparture(); presentedMusic = nil; endDeparture()
+        notice = nil; noticeExpanded = false; departingNotice = nil
+        peeking = false; expanded = false; expandedPillActivity = nil
+        pinned = false; showingCall = false; showingSections = false; showingAppPanel = false
+        selectedMetric = nil; dragPlaceholder = false; heldDrag = false; openedByHover = false
+        panel?.acceptsKeyFocus = false
+        panel?.resignKey()
+        windowHost?.interruptForDictation()
     }
 
     private func receiveDictationPhase(_ phase: DictationPhase) {
         guard phase != dictationPhase else { return }
         let wasPresenting = dictationPhase.presentsIsland
-        if phase.presentsIsland {
-            hidingExpandedForHover = false
-            finishMusicDeparture()
-            presentedMusic = nil
-            endDeparture()
-            hoverWork?.cancel(); hoverWork = nil
-            noticeWork?.cancel(); noticeWork = nil
-            notice = nil
-            departingNotice = nil
-            peeking = false
-
-            routeDictationDisplay()
-        }
-        // Resolve the incoming surface before closing a page. Closing first
-        // sent a resize to the compact activity deck, immediately reversed by
-        // a second resize to dictation, with two different backdrop modes.
         dictationPhase = phase
-        if phase.presentsIsland, expanded, captureControls == nil, !heldDrag {
-            collapse()
+        if phase.presentsIsland && (!wasPresenting || phase == .requestingPermission) {
+            prepareDictationPresentation()
+            // Dictation takes the surface immediately, without waiting for a
+            // reveal, departure, paused track, or an expanded page to finish.
+            refreshPresentation(animated: false, transitionContent: .replace)
+            routeDictationDisplay()
             return
         }
-        refreshPresentation(transitionContent: !wasPresenting && phase.presentsIsland ? .reveal
-                            : wasPresenting && !phase.presentsIsland ? .dismiss : .none)
+        refreshPresentation(transitionContent: wasPresenting && !phase.presentsIsland ? .dismiss : .none)
     }
 
     private func bindEvents() {

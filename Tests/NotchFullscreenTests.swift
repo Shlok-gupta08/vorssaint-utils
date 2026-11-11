@@ -54,6 +54,7 @@ enum NotchFullscreenTests {
         static func topology() -> Topology? { reads += 1; return value }
     }
     class State {
+        var showsDictation = false
         var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1920, height: 1080), safeAreaTop: 32, cameraWidth: 180)
         var running = true, suspended = false, hiddenInFullscreen = false
         var hoverEmphasized = false

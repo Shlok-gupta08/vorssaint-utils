@@ -14,8 +14,13 @@ enum NotchDestinationContract {
         var isKeyWindow = true
         var acceptsKeyFocus = false
         func makeKey() {}
+        func resignKey() {}
     }
-    final class Host { func containsHover(_ point: CGPoint) -> Bool { false } }
+    final class Host {
+        var interruptions = 0
+        func interruptForDictation() { interruptions += 1 }
+        func containsHover(_ point: CGPoint) -> Bool { false }
+    }
     enum NSEvent { static let mouseLocation = CGPoint.zero }
     final class AppDelegate { func closePopover(preservingNotch: Bool) {} }
     struct Application { let delegate: AnyObject? = nil }
@@ -59,6 +64,15 @@ enum NotchDestinationContract {
     enum NotchLockScreenService { static var shared = LockScreen() }
 
     class State {
+        var pillHoverWork: DispatchWorkItem?
+        var hoveredPillActivity: NotchCompactActivity?
+        var pointerFollowWork: DispatchWorkItem?
+        var mirrorNotificationHoverWork: [UInt32: DispatchWorkItem] = [:]
+        var trackWork: DispatchWorkItem?
+        var musicPauseHoldWork: DispatchWorkItem?
+        var isMusicPausedHolding = false
+        var heldMusic: Bool?
+        var awaitsTrackNotice = false
         var hidingExpandedForHover = false
         var presentedMusic: Bool?
         var musicDeparturesFinished = 0
@@ -76,7 +90,11 @@ enum NotchDestinationContract {
         var phasesAtCollapse: [DictationPhase] = []
         var presentationTransitions: [NotchContentTransition] = []
         func collapse() { phasesAtCollapse.append(dictationPhase); expanded = false }
-        func refreshPresentation(transitionContent: NotchContentTransition) { presentationTransitions.append(transitionContent) }
+        var presentationAnimation: [Bool] = []
+        func refreshPresentation(animated: Bool = true, transitionContent: NotchContentTransition) {
+            presentationAnimation.append(animated)
+            presentationTransitions.append(transitionContent)
+        }
         var hiddenInFullscreen = false
         var running = true
         var session = NotchSessionState()
@@ -148,20 +166,36 @@ enum NotchDestinationContract {
         recording.receiveDictationPhase(.recording)
         suite.expect(recording.presentedMusic == nil && recording.musicDeparturesFinished == 1 && pendingHover.isCancelled,
                      "dictation immediately preempts a paused-music departure and pending hover work")
-        suite.expect(recording.phasesAtCollapse == [.recording] && !recording.peeking
-                     && recording.presentationTransitions.isEmpty,
+        suite.expect(recording.phasesAtCollapse.isEmpty && !recording.peeking && !recording.expanded
+                     && recording.presentationTransitions == [.replace] && recording.presentationAnimation == [false],
                      "dictation replaces an open page directly without first resizing back to compact activities")
         recording.receiveDictationPhase(.processing)
         recording.receiveDictationPhase(.processing)
-        suite.expect(recording.presentationTransitions == [.none],
+        suite.expect(recording.presentationTransitions == [.replace, .none],
                      "dictation phase updates do not restart activation or repeat unchanged phase transitions")
         recording.receiveDictationPhase(.idle)
         suite.expect(recording.presentationTransitions.last == .dismiss,
                      "dictation dismissal explicitly transitions back to the resting surface")
         let restingRecording = Service()
         restingRecording.receiveDictationPhase(.recording)
-        suite.expect(restingRecording.presentationTransitions == [.reveal],
-                     "dictation activation from rest uses the normal native reveal")
+        suite.expect(restingRecording.presentationTransitions == [.replace] && restingRecording.presentationAnimation == [false],
+                     "dictation activation from rest appears immediately without an arrival delay")
+        let priority = Service()
+        priority.dictationPhase = .completed
+        priority.expanded = true; priority.pinned = true; priority.heldDrag = true
+        priority.dragPlaceholder = true; priority.noticeExpanded = true; priority.isMusicPausedHolding = true
+        priority.captureControls = NSObject()
+        let work = DispatchWorkItem {}
+        priority.pillHoverWork = work; priority.trackWork = work; priority.pointerFollowWork = work
+        priority.mirrorNotificationHoverWork[1] = work
+        priority.receiveDictationPhase(.requestingPermission)
+        suite.expect(work.isCancelled && priority.mirrorNotificationHoverWork.isEmpty
+                     && !priority.expanded && !priority.pinned && !priority.heldDrag && !priority.dragPlaceholder
+                     && !priority.noticeExpanded && !priority.isMusicPausedHolding,
+                     "a new dictation session preempts all queued activity, notification, drag and pointer work")
+        suite.expect(priority.windowHost?.interruptions == 1 && priority.presentationAnimation == [false]
+                     && priority.captureControls != nil,
+                     "dictation interrupts native motion immediately while retaining the underlying capture session")
         let idle = Service()
         suite.expect(!idle.usesPillActivityDeck,
                      "an idle island retains the native panel motion instead of entering the independent activity renderer")
