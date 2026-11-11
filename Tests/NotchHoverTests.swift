@@ -94,6 +94,7 @@ enum NotchHoverTests {
         var heldMusic: NotchCompactMusicSnapshot?
         var compactActivity: NotchCompactActivity?
         var compactActivities: [NotchCompactActivity] = []
+        var expandedPillActivity: NotchCompactActivity?
         var usesPillActivityDeck = false
         var pillHoverWork: DispatchWorkItem?
         var hoveredPillActivity: NotchCompactActivity?
@@ -140,12 +141,14 @@ enum NotchHoverTests {
         func open(_ module: NotchModule? = nil, takeFocus: Bool, activity: NotchCompactActivity? = nil) {
             hidingExpandedForHover = false
             requestedModule = module
+            expandedPillActivity = activity
             openings += 1; expanded = true; openedByHover = !takeFocus
             hoverState.open(); hoverWork?.cancel(); hoverWork = nil
             updateBounds()
         }
         func collapse() {
             closures += 1; expanded = false; peeking = false; openedByHover = false
+            expandedPillActivity = nil
             hoverState.close(pointerInside: windowHost?.containsHover(NSEvent.mouseLocation) == true)
             hoverWork?.cancel(); hoverWork = nil
             updateBounds()
@@ -257,6 +260,61 @@ enum NotchHoverTests {
             DispatchQueue.main.advance(0.03)
             expect(crossing.openings == 1 && crossing.requestedModule == .music,
                    "movement from a side activity opens the centre on its own short deadline")
+        }
+
+        for physical in [false, true] {
+            let handoff = fixture(physical: physical)
+            handoff.usesPillActivityDeck = true
+            handoff.compactActivity = .music
+            handoff.compactActivities = [.music, .agents, .timer]
+            handoff.open(.agents, takeFocus: false, activity: .agents)
+            for target in [NotchCompactActivity.music, .timer, .agents] {
+                handoff.pointerPill = target
+                handoff.hover(false) // Direct movement; no overall island exit.
+                DispatchQueue.main.advance(0.061)
+                expect(handoff.expandedPillActivity == target && handoff.requestedModule == target.module && handoff.closures == 0,
+                       "an expanded deck hands off between right, middle and left without collapsing the entire island")
+            }
+            let openings = handoff.openings
+            handoff.pointerPill = .timer
+            handoff.hoverPillActivity(.timer, entered: true)
+            DispatchQueue.main.advance(0.03)
+            handoff.pointerPill = .agents
+            handoff.hoverPillActivity(.agents, entered: true)
+            DispatchQueue.main.advance(0.061)
+            expect(handoff.openings == openings && handoff.expandedPillActivity == .agents,
+                   "returning to the current expanded pill cancels a pending neighbour handoff")
+            handoff.pointerPill = .timer
+            handoff.hoverPillActivity(.timer, entered: true)
+            DispatchQueue.main.advance(0.03)
+            handoff.pointerPill = .music
+            handoff.hoverPillActivity(.music, entered: true)
+            handoff.hoverPillActivity(.timer, entered: false)
+            DispatchQueue.main.advance(0.061)
+            expect(handoff.expandedPillActivity == .music && handoff.openings == openings + 1,
+                   "rapid handoffs and stale exit events only open the latest hovered pill")
+            for protected in ["pinned", "drag", "dialog"] {
+                handoff.pinned = protected == "pinned"
+                handoff.heldDrag = protected == "drag"
+                handoff.keepsWorkingSurface = protected == "dialog"
+                handoff.pointerPill = .timer
+                handoff.hoverPillActivity(.timer, entered: true)
+                DispatchQueue.main.advance(0.061)
+                expect(handoff.expandedPillActivity == .music,
+                       "hover handoffs preserve a pinned, dragged or modal working surface")
+            }
+            handoff.pinned = false; handoff.heldDrag = false; handoff.keepsWorkingSurface = false
+            handoff.pointerPill = .timer
+            handoff.hoverPillActivity(.timer, entered: true)
+            handoff.collapse()
+            DispatchQueue.main.advance(0.061)
+            expect(!handoff.expanded, "a queued handoff cannot reopen a deck after it was closed")
+            handoff.open(.music, takeFocus: false, activity: .music)
+            handoff.pointerPill = nil
+            NSEvent.mouseLocation = CGPoint(x: handoff.geometry.screen.midX, y: handoff.geometry.screen.midY)
+            handoff.hover(false)
+            DispatchQueue.main.advance(NotchQuickAccessLayout.hoverExitDelay + 0.01)
+            expect(!handoff.expanded, "leaving the entire expanded pill deck still closes it normally")
         }
 
         let levelTray = fixture(physical: true)

@@ -566,32 +566,50 @@ final class NotchService: ObservableObject {
             }
             return
         }
-        guard !expanded else { return }
-        guard let activity = pillActivityUnderPointer() else { return }
-        if entered {
-            if hoveredPillActivity == activity, let pillHoverWork, !pillHoverWork.isCancelled { return }
-#if VORSSAINT_DEVELOPMENT
-            NotchHoverTrace.mark("activity deadline scheduled")
-#endif
-            hoveredPillActivity = activity
-            pillHoverWork?.cancel()
-            let work = DispatchWorkItem { [weak self] in
-                guard let self, self.hoveredPillActivity == activity, self.usesPillActivityDeck,
-                      !self.expanded, self.pillActivityUnderPointer() == activity,
-                      self.visiblePillActivities.contains(activity) else { return }
-#if VORSSAINT_DEVELOPMENT
-                NotchHoverTrace.mark("activity deadline fired")
-#endif
-                self.pillHoverWork = nil
-                guard self.notice == nil || activity != self.compactActivity else { return }
-                self.open(activity.module, takeFocus: false, activity: activity)
-            }
-            pillHoverWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + NotchPillActivityLayout.hoverDelay, execute: work)
-        } else if hoveredPillActivity == activity {
+        guard usesPillActivityDeck, !pinned, !heldDrag, !keepsWorkingSurface,
+              captureControls == nil, !hidingExpandedForHover else { return }
+        guard let activity = pillActivityUnderPointer() else {
             hoveredPillActivity = nil
             pillHoverWork?.cancel(); pillHoverWork = nil
+            return
         }
+        // Staying on the open card must also cancel a pending handoff back
+        // from a neighbour. No exit from the overall island is required.
+        if expanded, expandedPillActivity == activity {
+            hoveredPillActivity = nil
+            pillHoverWork?.cancel(); pillHoverWork = nil
+            return
+        }
+        guard !expanded || expandedPillActivity != nil else { return }
+        if hoveredPillActivity == activity, let pillHoverWork, !pillHoverWork.isCancelled { return }
+#if VORSSAINT_DEVELOPMENT
+        NotchHoverTrace.mark("activity deadline scheduled")
+#endif
+        let source = expanded ? expandedPillActivity : nil
+        hoveredPillActivity = activity
+        pillHoverWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            // Release the deadline even when a dialog or another presentation
+            // interrupted it, so a subsequent hover can schedule a fresh one.
+            guard self.hoveredPillActivity == activity else { return }
+            self.pillHoverWork = nil
+            guard self.running, !self.suspended, self.usesPillActivityDeck,
+                  !self.pinned, !self.heldDrag, !self.keepsWorkingSurface,
+                  self.captureControls == nil, !self.hidingExpandedForHover,
+                  (self.expanded ? self.expandedPillActivity : nil) == source,
+                  self.pillActivityUnderPointer() == activity,
+                  self.visiblePillActivities.contains(activity) else { return }
+#if VORSSAINT_DEVELOPMENT
+            NotchHoverTrace.mark("activity deadline fired")
+#endif
+            guard self.notice == nil || activity != self.compactActivity else { return }
+            // Replace the deck's expanded owner in one presentation update.
+            // Both viewports keep their springs and animate concurrently.
+            self.open(activity.module, takeFocus: false, activity: activity)
+        }
+        pillHoverWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + NotchPillActivityLayout.hoverDelay, execute: work)
     }
 
     private func pillActivityUnderPointer() -> NotchCompactActivity? {
@@ -1380,6 +1398,8 @@ final class NotchService: ObservableObject {
         stopMenuSpaceMonitoring()
         geometry.compactSideRoom = nil
         hoverWork?.cancel(); hoverWork = nil
+        pillHoverWork?.cancel(); pillHoverWork = nil
+        hoveredPillActivity = nil
         noticeWork?.cancel(); noticeWork = nil
         endDeparture()
         finishMusicDeparture()
@@ -1513,6 +1533,7 @@ final class NotchService: ObservableObject {
         let metric = metric.flatMap { metricIsAvailable($0) ? $0 : nil }
         let changesPresentation = !expanded || selected != destination
             || showingAppPanel != appPanel || selectedMetric != metric || showingSections != sections
+            || (activity != nil && expandedPillActivity != activity)
         if changesPresentation, destination == .tools, !appPanel, !sections, metric == nil {
             QuickLauncherService.shared.prepareForPresentation()
         }
@@ -1525,10 +1546,9 @@ final class NotchService: ObservableObject {
         // passing through the gallery keeps that answer.
         if !expanded { detailHasPage = false }
         else if appPanel || metric != nil, !showingAppPanel, selectedMetric == nil { detailHasPage = true }
-        // Following the closed island ends the moment it opens, before a page
-        // or a capture preview under the pointer can be told the pointer left.
-        // An open page is followed again only from an exit report.
-        if !expanded { removeHoverExitMonitors() }
+        // Ordinary pages stop closed-island tracking as they open. Activity
+        // decks keep tracking moves so adjacent pills can take over directly.
+        if !expanded && activity == nil { removeHoverExitMonitors() }
 #if VORSSAINT_DEVELOPMENT
         NotchHoverTrace.mark("open state ready")
 #endif
@@ -1682,7 +1702,7 @@ final class NotchService: ObservableObject {
         // Start activity hover from the same native entry/move events as the
         // resting island. SwiftUI tracking can arrive later after layout or
         // context-menu updates; it remains a fallback, not the start clock.
-        if usesPillActivityDeck, !expanded, compactActivity != nil, !hiddenUntilHover {
+        if usesPillActivityDeck, compactActivity != nil, !hiddenUntilHover, (!expanded || inside) {
             hoverWork?.cancel(); hoverWork = nil
             if inside, let activity = pillActivityUnderPointer() {
                 hoverPillActivity(activity, entered: true)
@@ -1766,7 +1786,7 @@ final class NotchService: ObservableObject {
         // ends, and each followed move would tell it the pointer left, which
         // restarts its dismissal under a pointer that came back to reopen it.
         let watching = (hoverEmphasized && captureHover == nil
-                || usesPillActivityDeck && !expanded && compactActivity != nil && inside
+                || usesPillActivityDeck && compactActivity != nil && inside
                 || !entered && NotchSupport.closesOnPointerExit(expanded: expanded, peeking: peeking, openedByHover: openedByHover))
             && captureControls == nil && !pinned && !heldDrag && !hiddenUntilHover && !keepsWorkingSurface
             // Once watching, a pointer that leaves and slips back unreported is still seen.
