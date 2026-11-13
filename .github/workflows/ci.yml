@@ -2,8 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
+    tags: ["v[0-9]*"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -58,3 +60,39 @@ jobs:
 
       - name: Unit tests
         run: ./build.sh --test
+
+      - name: Verify packaged app and record provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG="dist/Vorssaint-$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Resources/Info.plist).dmg"
+          hdiutil verify "$DMG"
+          MP=$(mktemp -d)
+          trap 'hdiutil detach "$MP" -quiet || true; rmdir "$MP" || true' EXIT
+          hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MP"
+          codesign --verify --deep --strict "$MP/Vorssaint.app"
+          diff -qr build/stage/Vorssaint.app "$MP/Vorssaint.app"
+          cp "$DMG" "dist/Vorssaint-${GITHUB_SHA}.dmg"
+          rm "$DMG"
+          (cd dist && shasum -a 256 ./*.dmg > SHA256SUMS)
+          {
+            echo "Repository: $GITHUB_REPOSITORY"
+            echo "Commit: $GITHUB_SHA"
+            echo "Ref: $GITHUB_REF"
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "Architecture: arm64; requires macOS 14 or later"
+            echo "CI build: ad-hoc signed, not Apple notarized."
+          } > dist/BUILD-INFO.txt
+          cat dist/BUILD-INFO.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload verified DMG
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Vorssaint-dmg-${{ github.sha }}
+          path: |
+            dist/*.dmg
+            dist/SHA256SUMS
+            dist/BUILD-INFO.txt
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

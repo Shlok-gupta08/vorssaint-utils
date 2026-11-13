@@ -118,3 +118,22 @@ publishes an immutable release. Confirm publication succeeded; a pushed tag alon
 is not a published version. Beta releases remain prereleases and do not replace
 the latest stable release or its Homebrew cask. Do not move published tags or
 replace published artifacts.
+
+## Downloadable CI builds
+
+The CI workflow builds every pushed branch, version tag and pull request. It can
+also be started with **Actions → CI → Run workflow** once present on the default
+branch. The macOS 26 job builds the release app, runs selftests and unit tests,
+packages a DMG, verifies its signature and compares the mounted app with the
+fresh build. Only a successful job uploads a downloadable artifact.
+
+Open the successful run in GitHub Actions and download `Vorssaint-dmg-<commit>`.
+Extract the archive and send the DMG inside. `BUILD-INFO.txt` identifies the exact
+source and run; `SHA256SUMS` verifies the file with `shasum -a 256 -c SHA256SUMS`.
+DMGs use the full source commit in their filename to distinguish builds that
+share an app version. Artifacts remain available for 30 days.
+
+CI builds target Apple Silicon (arm64), require macOS 14+, and are ad-hoc signed
+without Apple notarization. The protected official release workflow is separate
+and remains restricted to the upstream repository and its signing credentials.
+Fork builds do not require Apple secrets and do not publish official releases.
