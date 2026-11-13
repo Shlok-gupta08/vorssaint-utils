@@ -43,7 +43,7 @@ enum NotchActivityObservationTests {
         NotchTimerService.shared.objectWillChange.send()
         suite.expect(musicChanges == 120 && timerChanges == 1,
                      "timer ticks reach their own card without remeasuring the music pill")
-        weak let released = music
+        weak var released = music
         music = nil
         suite.expect(released == nil, "removing an activity releases its subscription")
         withExtendedLifetime(subscriptions) {}

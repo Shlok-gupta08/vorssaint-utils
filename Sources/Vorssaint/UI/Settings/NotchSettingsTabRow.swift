@@ -187,6 +187,7 @@ struct NotchSettingsTabRow: View {
                 Label(tab.title(language), systemImage: tab.symbol)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(8).contentShape(Rectangle())
             }.menuStyle(.borderlessButton)
+            .fixedSize()
             if showsOpenButton {
                 Button(action: open) { Image(systemName: "arrow.up.forward.app") }
                     .disabled(!canOpen).accessibilityLabel(FeatureStrings.notch(language).open)
