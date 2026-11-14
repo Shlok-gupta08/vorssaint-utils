@@ -85,6 +85,14 @@ final class AgentAntigravityActivity {
         return Endpoint(pid: pid, port: port, token: token)
     }
 
+    /// T3 ships both the legacy Python adapter and the newer native binary.
+    /// Keep the tool-directory check so an unrelated process cannot enable it.
+    static func isT3Adapter(executable: String) -> Bool {
+        guard executable.contains("/.t3/tools/antigravity-acp/") else { return false }
+        let name = URL(fileURLWithPath: executable).lastPathComponent
+        return name == "agy_acp_server.par" || name == "antigravity"
+    }
+
     private static func discover() -> (endpoints: [Endpoint], t3: Bool) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
@@ -101,7 +109,7 @@ final class AgentAntigravityActivity {
             // Only inspect agent server processes, never shell command text.
             let parts = line.split(whereSeparator: \.isWhitespace).map(String.init)
             guard parts.count >= 2, let pid = Int32(parts[0]) else { return nil }
-            if parts[1].contains("/.t3/tools/antigravity-acp/"), parts[1].hasSuffix("/agy_acp_server.par") { t3 = true }
+            if isT3Adapter(executable: parts[1]) { t3 = true }
             return endpoint(pid: pid, arguments: Array(parts.dropFirst()))
         }
         return (endpoints, t3)

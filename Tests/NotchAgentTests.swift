@@ -97,6 +97,18 @@ enum NotchAgentTests {
     }
 
     private static func antigravityLiveActivity(_ suite: TestSuite) {
+        for executable in [
+            "/Users/me/.t3/tools/antigravity-acp/darwin-arm64/agy_acp_server.par",
+            "/Users/me/.t3/tools/antigravity-acp/darwin-arm64/versions/build/antigravity",
+        ] {
+            suite.expect(AgentAntigravityActivity.isT3Adapter(executable: executable),
+                         "legacy and updated T3 Antigravity adapters enable live session reading")
+        }
+        for executable in ["/bin/sh", "/tmp/antigravity", "/tmp/agy_acp_server.par",
+                           "/Users/me/.t3/tools/antigravity-acp/darwin-arm64/versions/build/other"] {
+            suite.expect(!AgentAntigravityActivity.isT3Adapter(executable: executable),
+                         "unrelated executables cannot enable the T3 Antigravity reader")
+        }
         let endpoint = AgentAntigravityActivity.endpoint(pid: 123, arguments: ["/Users/me/.gemini/bin/agy", "--hub",
             "--hub-port=54321", "--csrf_token", "test-only"])
         suite.expect(endpoint?.port == 54321, "Antigravity discovers the modern hub's actual port")
