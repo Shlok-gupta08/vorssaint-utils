@@ -208,7 +208,19 @@ enum AgentPricing {
     /// The longest matching family wins, so a point release the list names
     /// never inherits the price of the version it extends.
     static func price(for model: String, in list: AgentPriceList = AgentPricing.list) -> AgentPrice? {
-        let id = normalized(model)
+        // Explicit user-requested estimate for the experimental Antigravity
+        // model. Preserve its real identity in usage rows, only alias pricing.
+        let normalizedID = normalized(model)
+        let id: String
+        if normalizedID == "gemini-3.8-flash-n" {
+            id = "gemini-3.8-flash-high"
+        } else if normalizedID.range(of: #"^gemini-3-flash-(agent(-[ab])?|[ab])$"#, options: .regularExpression) != nil {
+            id = "gemini-3.5-flash"
+        } else if normalizedID == "gemini-3-flash" || ["high", "medium", "low", "thinking", "tiered", "control"].contains(where: { normalizedID == "gemini-3-flash-\($0)" }) {
+            id = "gemini-3-flash-preview"
+        } else {
+            id = normalizedID
+        }
         let table = id.hasPrefix("claude-") ? list.claude : list.codex
         guard let match = table.filter({ matches(id, family: $0.id) })
             .max(by: { $0.id.count < $1.id.count }) else { return nil }

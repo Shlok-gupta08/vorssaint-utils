@@ -137,3 +137,25 @@ CI builds target Apple Silicon (arm64), require macOS 14+, and are ad-hoc signed
 without Apple notarization. The protected official release workflow is separate
 and remains restricted to the upstream repository and its signing credentials.
 Fork builds do not require Apple secrets and do not publish official releases.
+
+## AI usage accounting
+
+Antigravity history is read from conversation SQLite generation and step metadata
+in App, IDE, CLI and T3 profiles. Request aliases deduplicate repeated metadata,
+retries remain separate, and cache reads, cache writes, output and reasoning are
+kept distinct. Reasoning is already included in output and is not billed twice.
+Display transcripts remain a fallback when conversation databases are unavailable.
+Unknown model identities retain token counts without inventing prices.
+
+Codex history includes plain JSONL and compressed `.jsonl.zst` archives. The build
+downloads Zstandard 1.5.7 at a pinned commit and statically links its decoder for
+macOS 14+, so the installed app needs no external decompression command. Its BSD
+license ships in the bundle. Both readers use bounded buffers and support cancellation.
+
+Prices are estimated API-equivalent values, not subscription charges. Gemini rates
+were added to the shipped price list on 2026-11-15 using Google's published pricing.
+By explicit request, experimental `gemini-3.8-flash-n` uses the same estimate as
+`gemini-3.8-flash-high`: $0.75 input, $0.075 cache read, and $3.75 output per million
+tokens, with cache creation at input price. This is an estimate override, not a
+published separate price for `-n`. Recheck the promotional Gemini rates at the
+dates recorded in `Resources/agent-prices.json`.

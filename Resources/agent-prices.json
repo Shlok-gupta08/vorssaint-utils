@@ -1,7 +1,8 @@
 {
   "schema": 1,
-  "updated": "2026-10-02",
+  "updated": "2026-11-15",
   "sources": [
+    "https://aistudio.google.com/docs/pricing",
     "https://platform.claude.com/docs/en/about-claude/pricing",
     "https://platform.claude.com/docs/en/models/overview",
     "https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
@@ -22,6 +23,8 @@
     "https://learn.chatgpt.com/docs/pricing"
   ],
   "notes": [
+    "Gemini coding models added from current published API rates. gemini-3.8-flash-n uses the same estimated API value as gemini-3.8-flash-high by user request; this is not a separately published price for -n.",
+    "Gemini 3.6/3.7/3.8 Flash rates are promotional through December 31, 2026; Gemini 4 Argon rates are promotional through November 30, 2026. Recheck before those promotions end.",
     "gpt-5.6, gpt-5.6-sol and gpt-daybreak-blue-latest carry a promotional price announced through at least 2026-11-21. Check them again after that date.",
     "gpt-daybreak-blue-latest and gpt-daybreak-red-latest are aliases of gpt-5.6-sol and gpt-5.6-cyber; follow them when they move.",
     "claude-sonnet-4-5 and claude-sonnet-4 now have a 200K window. Their long-context premium only prices older history.",
@@ -73,6 +76,17 @@
   },
   "codex": {
     "models": [
+      {"id": "gemini-2.5-pro", "input": 1.25, "output": 10.0, "cacheRead": 0.125, "longContext": {"above": 200000, "inputMultiplier": 2.0, "outputMultiplier": 1.5}},
+      {"id": "gemini-2.5-flash", "input": 0.3, "output": 2.5, "cacheRead": 0.03},
+      {"id": "gemini-2.5-flash-lite", "input": 0.1, "output": 0.4, "cacheRead": 0.01},
+      {"id": "gemini-3-flash-preview", "input": 0.5, "output": 3.0, "cacheRead": 0.05},
+      { "id": "gemini-3.1-pro", "input": 2, "output": 12, "cacheRead": 0.2, "longContext": { "above": 200000, "inputMultiplier": 2, "outputMultiplier": 1.5 } },
+      {"id": "gemini-3.1-flash-lite", "input": 0.25, "output": 1.5, "cacheRead": 0.025},
+      {"id": "gemini-3.5-flash", "input": 1.5, "output": 9.0, "cacheRead": 0.15},
+      {"id": "gemini-3.6-flash", "input": 0.75, "output": 3.75, "cacheRead": 0.075},
+      {"id": "gemini-3.7-flash", "input": 0.75, "output": 3.75, "cacheRead": 0.075},
+      {"id": "gemini-3.8-flash", "input": 0.75, "output": 3.75, "cacheRead": 0.075},
+      {"id": "gemini-4-argon", "input": 2.0, "output": 10.0, "cacheRead": 0.1},
       { "id": "gpt-6.1-sol", "input": 2, "output": 10, "cacheRead": 0.1, "cacheWrite": 2.5, "fastMultiplier": 2,
         "longContext": { "above": 272000, "inputMultiplier": 2, "outputMultiplier": 1.5 } },
       { "id": "gpt-6-astra", "input": 10, "output": 50, "cacheRead": 1, "cacheWrite": 12.5, "fastMultiplier": 2,

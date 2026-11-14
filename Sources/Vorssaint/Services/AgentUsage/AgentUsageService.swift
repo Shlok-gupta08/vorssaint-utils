@@ -42,6 +42,7 @@ final class AgentUsageService: ObservableObject {
 
     private let queue = DispatchQueue(label: "com.vorssaint.agent-usage", qos: .utility, autoreleaseFrequency: .workItem)
     private let home = FileManager.default.homeDirectoryForCurrentUser
+    private let antigravityUsage = AgentAntigravityUsageReader()
 
     /// Lets a stop end a first read that is still going on the queue.
     private final class Cancellation {
@@ -194,6 +195,7 @@ final class AgentUsageService: ObservableObject {
             watcher = nil
             watchedRoots = []
             store = AgentUsageStore()
+            antigravityUsage.reset()
             cursors.removeAll()
             published = AgentUsageSnapshot()
             previousLimits.removeAll()
@@ -269,6 +271,7 @@ final class AgentUsageService: ObservableObject {
             }
             guard !cancellation.isCancelled else { return }
             let now = Date()
+            readAntigravityUsage(now: now, force: true)
             // A turn left open by a crash would otherwise stay working.
             store.closeIdleTurns(now: now, after: NotchAgentSupport.idleTurn)
             closeEndedTurns(roots, atLaunch: true)
@@ -355,9 +358,10 @@ final class AgentUsageService: ObservableObject {
         timer.setEventHandler { [weak self] in
             guard let self else { return }
             let read = self.pollOpenLogs(within: Self.pollWindow)
+            let usageRead = self.readAntigravityUsage(now: Date())
             let stopped = self.store.closeSettledTurns(now: Date())
             // After the logs, so a turn its last lines ended ends as usual.
-            guard self.closeEndedTurns(self.watchedRoots) || read || stopped else { return }
+            guard self.closeEndedTurns(self.watchedRoots) || read || usageRead || stopped else { return }
             self.checkLimits()
             self.schedulePublish()
         }
@@ -393,7 +397,7 @@ final class AgentUsageService: ObservableObject {
                                 + Double(info.st_mtimespec.tv_nsec) / 1_000_000_000)
             guard !exists || UInt64(max(0, info.st_size)) != cursor.offset
                     || UInt64(info.st_ino) != cursor.identity
-                    || (cursor.provider == .antigravity && modified != cursor.modified) else { continue }
+                    || ((cursor.provider == .antigravity || path.hasSuffix(".jsonl.zst")) && modified != cursor.modified) else { continue }
             if read(path, provider: cursor.provider) { changed = true }
         }
         return changed
@@ -497,6 +501,16 @@ final class AgentUsageService: ObservableObject {
             publishScheduled = false
             publish()
         }
+    }
+
+    @discardableResult
+    private func readAntigravityUsage(now: Date, force: Bool = false) -> Bool {
+        guard enabled.contains(.antigravity), let cancellation = readerCancellation,
+              let entries = antigravityUsage.read(roots: AgentAntigravityUsageReader.roots(home: home),
+                since: now.addingTimeInterval(-Self.horizon), now: now, force: force,
+                shouldContinue: { !cancellation.isCancelled }) else { return false }
+        store.replaceAntigravityUsage(entries)
+        return true
     }
 
     private func tickTimer() {

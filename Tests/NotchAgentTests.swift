@@ -20,6 +20,8 @@ enum NotchAgentTests {
         openCodeParsing(suite)
         antigravityParsing(suite)
         antigravityLiveActivity(suite)
+        AgentAntigravityUsageTests.run(suite)
+        AgentCompressedLogTests.run(suite)
         antigravityT3Activity(suite)
         automationLifecycle(suite)
         timestamps(suite)

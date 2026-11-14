@@ -18,6 +18,9 @@ struct NotchControlsView: View {
     @ObservedObject private var music = NotchMusicService.shared
     private var scale: CGFloat { service.geometry.expandedScale }
     private var canvasSize: CGSize { CGSize(width: size.width / scale, height: size.height / scale) }
+    private var hasKeyboardBrightness: Bool {
+        NotchSupport.controls().contains(.brightness) && BrightnessService.keyboardLightIsSupported
+    }
 
     var body: some View {
         controls
@@ -33,11 +36,12 @@ struct NotchControlsView: View {
         let layout = NotchLayout.controls(hasCards: items.contains(.music) || !levels.isEmpty,
                                           shortcutCount: shortcuts.count, width: canvasSize.width, height: canvasSize.height,
                                           hasMediaTabs: items.contains(.music) && music.sources.count > 1,
-                                          hasPlaybackTimeline: items.contains(.music) && music.hasPlaybackTimeline)
+                                          hasPlaybackTimeline: items.contains(.music) && music.hasPlaybackTimeline,
+                                          levelRows: levels.count + (hasKeyboardBrightness ? 1 : 0))
         if items.isEmpty {
             NotchEmptyView(symbol: "slider.horizontal.3", message: FeatureStrings.notch(l10n.language).empty)
         } else {
-            VStack(spacing: NotchLayout.rowSpacing) {
+            let content = VStack(spacing: NotchLayout.rowSpacing) {
                 if layout.cardRow > 0 {
                     cards(levels: levels, music: items.contains(.music), height: layout.cardRow)
                 }
@@ -49,6 +53,12 @@ struct NotchControlsView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            if layout.height > canvasSize.height {
+                ScrollView(.vertical) { content.frame(height: layout.height) }
+                    .scrollIndicators(.hidden)
+            } else {
+                content
+            }
         }
     }
 
@@ -72,9 +82,10 @@ struct NotchControlsView: View {
         HStack(spacing: NotchLayout.rowSpacing) {
             if music {
                 NotchMusicControlsView(notch: service, height: height)
-                if levels.count > 1 {
+                if levels.count > 1 || hasKeyboardBrightness {
                     VStack(spacing: 6) {
                         ForEach(levels) { level($0, style: .row, showsDevice: false) }
+                        if hasKeyboardBrightness { NotchKeyboardBrightnessControls(style: .row) }
                     }
                     .padding(.horizontal, 12)
                     .frame(width: 160, height: height)
@@ -85,6 +96,9 @@ struct NotchControlsView: View {
             } else {
                 ForEach(levels) { item in
                     level(item, style: .card, showsDevice: height >= 88).frame(maxWidth: .infinity).frame(height: height)
+                }
+                if hasKeyboardBrightness {
+                    NotchKeyboardBrightnessControls().frame(maxWidth: .infinity).frame(height: height)
                 }
             }
         }
@@ -358,6 +372,61 @@ private struct NotchLevelReadoutMenu<Readout: View>: View {
             .frame(height: 24)
             .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
+    }
+}
+
+private struct NotchKeyboardBrightnessControls: View {
+    var style: NotchLevelStyle = .card
+    @ObservedObject private var service = BrightnessService.shared
+    @ObservedObject private var l10n = L10n.shared
+    private var title: String { FeatureStrings.brightness(l10n.language).keyboardLight }
+
+    var body: some View {
+        Group {
+            if style == .row {
+                HStack(spacing: 8) {
+                    glyph
+                    slider
+                    percent.frame(width: 57, alignment: .trailing)
+                }
+                .frame(height: 28)
+            } else {
+                VStack(spacing: 6) {
+                    HStack(spacing: 7) {
+                        glyph
+                        Text(title).lineLimit(1)
+                        Spacer(minLength: 0)
+                        percent
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    slider
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .modifier(NotchControlSurface(cornerRadius: 18))
+            }
+        }
+        .help(title)
+        .onAppear { service.refreshKeyboardLight() }
+    }
+
+    private var glyph: some View {
+        Image(systemName: "light.max").font(.system(size: 12, weight: .medium)).frame(width: 18)
+            .accessibilityLabel(title)
+    }
+
+    private var percent: some View {
+        Text("\(Int(((service.keyboardLightLevel ?? 0) * 100).rounded()))%")
+            .font(.system(size: 12, weight: .semibold)).monospacedDigit()
+    }
+
+    private var slider: some View {
+        NotchLevelSlider(value: Binding(get: { Double(service.keyboardLightLevel ?? 0) },
+            set: { service.setKeyboardLightLevel(Float($0)) }), label: title,
+            onEditingChanged: service.keyboardLightDragChanged)
+            .frame(height: style == .card ? 28 : 24)
+            .disabled(service.keyboardLightLevel == nil)
     }
 }
 

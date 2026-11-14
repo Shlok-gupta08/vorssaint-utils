@@ -477,11 +477,13 @@ enum NotchLayout {
     /// The home page: one row of cards (playback and levels) over a rail of
     /// shortcuts. A tight budget shortens the cards before it drops a row.
     static func controls(hasCards: Bool, shortcutCount: Int, width: CGFloat, height: CGFloat,
-                         hasMediaTabs: Bool = false, hasPlaybackTimeline: Bool = false) -> NotchControlsLayout {
+                         hasMediaTabs: Bool = false, hasPlaybackTimeline: Bool = false,
+                         levelRows: Int = 2) -> NotchControlsLayout {
         guard hasCards || shortcutCount > 0 else { return NotchControlsLayout(cardRow: 0, shortcutRows: 0) }
         let timeline = hasPlaybackTimeline ? musicTimelineHeight + NotchMusicCardLayout.tabsSpacing : 0
-        let preferredCard = (hasMediaTabs ? mediaTabsCardHeight : cardHeight) + timeline
-        let minimumCard = (hasMediaTabs ? minimumMediaTabsCardHeight : minimumCardHeight) + timeline
+        let levelsHeight = levelRows > 2 ? CGFloat(levelRows) * 28 + CGFloat(levelRows - 1) * 6 : 0
+        let preferredCard = max((hasMediaTabs ? mediaTabsCardHeight : cardHeight) + timeline, levelsHeight)
+        let minimumCard = max((hasMediaTabs ? minimumMediaTabsCardHeight : minimumCardHeight) + timeline, levelsHeight)
         var rows = 0
         if shortcutCount > 0 {
             let remaining = hasCards ? height - minimumCard - rowSpacing : height

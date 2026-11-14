@@ -15,6 +15,7 @@ final class AgentUsageStore {
     private var sources: [[String]] = []
     private var index: [String: Int] = [:]
     private let summary = AgentUsageSummaryCache()
+    private var antigravityDatabaseHistory = false
     private(set) var limits: [AgentProvider: AgentLimits] = [:]
     private(set) var codexPlan: String?
     private var codexPlanObserved = Date.distantPast
@@ -42,6 +43,26 @@ final class AgentUsageStore {
 
     var live: [AgentLiveSession] { Array(turns.values) }
 
+    /// A database scan is authoritative for Antigravity history. Replace its
+    /// old transcript/archive estimates, including removed or corrected rows,
+    /// without disturbing another provider's deduplication indices or turns.
+    func replaceAntigravityUsage(_ entries: [AgentAntigravityUsageReader.Entry]) {
+        antigravityDatabaseHistory = true
+        summary.invalidate()
+        let retained = records.indices.filter { records[$0].provider != .antigravity }
+        let positions = Dictionary(uniqueKeysWithValues: retained.enumerated().map { ($0.element, $0.offset) })
+        index = index.reduce(into: [:]) { result, pair in
+            if let position = positions[pair.value] { result[pair.key] = position }
+        }
+        records = retained.map { records[$0] }
+        billables = retained.map { billables[$0] }
+        sources = retained.map { sources[$0] }
+        for entry in entries {
+            add(entry.record, billable: entry.billable, key: entry.key,
+                source: "antigravity-conversation-databases", turn: nil, subagent: false)
+        }
+    }
+
     func snapshot(plans: [AgentProvider: AgentPlan], providers: Set<AgentProvider>, now: Date,
                   calendar: Calendar = .current) -> AgentUsageSnapshot {
         summary.snapshot(records: records, limits: limits, live: live, plans: plans,
@@ -57,6 +78,9 @@ final class AgentUsageStore {
         for entry in entries {
             switch entry {
             case .usage(let key, let record, let billable):
+                // Once real metadata is available, display transcripts must
+                // not add a second copy of the same generation's counters.
+                if record.provider == .antigravity && antigravityDatabaseHistory { continue }
                 add(record, billable: billable, key: key, source: file, turn: tracksTurns ? file : parent,
                     subagent: !tracksTurns)
             case .limits(let reading):
@@ -681,7 +705,8 @@ enum AgentLogReader {
             }
             guard let enumerator = FileManager.default.enumerator(at: root.url, includingPropertiesForKeys: keys,
                                                                   options: [.skipsPackageDescendants]) else { continue }
-            for case let url as URL in enumerator where url.path.hasSuffix(".jsonl") {
+            for case let url as URL in enumerator where url.path.hasSuffix(".jsonl")
+                || (root.provider == .codex && url.path.hasSuffix(".jsonl.zst")) {
                 guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true,
                       let modified = values.contentModificationDate, modified >= horizon else { continue }
                 let subagent = root.provider == .claude && AgentLogCursor.parent(of: url.path) != nil
@@ -707,6 +732,26 @@ enum AgentLogReader {
         guard stat(cursor.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return }
         let size = UInt64(max(0, info.st_size))
         let identity = UInt64(info.st_ino)
+        if cursor.provider == .codex && cursor.path.hasSuffix(".jsonl.zst") {
+            let modified = Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec)
+                                + TimeInterval(info.st_mtimespec.tv_nsec) / 1_000_000_000)
+            guard cursor.identity != identity || cursor.offset != size || cursor.modified != modified || !cursor.holdsWhatWasRead else { return }
+            cursor.startOver(identity: identity)
+            // A failed/truncated frame can still contain complete earlier
+            // records; their stable request keys deduplicate when retried.
+            let complete = AgentCompressedLogReader.read(cursor.path, shouldContinue: shouldContinue) { chunk in
+                split(chunk, cursor: cursor, line: line)
+            }
+            if complete {
+                // Codex permits a complete final JSON record without a newline.
+                if !cursor.pending.isEmpty && !cursor.discarding { line(cursor.pending) }
+                cursor.pending = Data()
+                cursor.offset = size
+                cursor.modified = modified
+                cursor.fingerprintRead()
+            }
+            return
+        }
         cursor.modified = Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec)
                                 + TimeInterval(info.st_mtimespec.tv_nsec) / 1_000_000_000)
         if identity != cursor.identity || size < cursor.offset

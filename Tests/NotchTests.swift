@@ -174,6 +174,10 @@ enum NotchTests {
                && QuickToolsSupport.gridIndex(after: 9, count: 7, flow: .columns(rows: 2), direction: .up) == 6,
                "with two rows the arrows follow the columns the tiles fill, clamped to the last tile")
         let controls = NotchLayout.controls(hasCards: true, shortcutCount: 4, width: 424, height: NotchLayout.compactContentHeight)
+        let keyboardControls = NotchLayout.controls(hasCards: true, shortcutCount: 4, width: 424, height: 154, levelRows: 3)
+        suite.expect(keyboardControls.cardRow >= 96 && keyboardControls.shortcutRows == 1
+                        && keyboardControls.height == keyboardControls.cardRow + NotchLayout.rowSpacing + NotchLayout.shortcutHeight,
+                     "three level rows preserve slider hit areas and shortcuts in the scrollable Controls content")
         suite.expect(controls == NotchControlsLayout(cardRow: NotchLayout.cardHeight, shortcutRows: 1)
                && controls.height == NotchLayout.compactContentHeight,
                "the default home page is one card row over one shortcut rail, exactly the compact strip")
