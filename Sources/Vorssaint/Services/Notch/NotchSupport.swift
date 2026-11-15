@@ -2322,6 +2322,16 @@ struct NotchGeometry: Equatable {
         compact.allowsActivityFooter = false
         return compact
     }
+    /// Shortcut labels need more room than the timer's 64-point readout cap.
+    func compactShortcutsGeometry() -> NotchGeometry {
+        var compact = self
+        let room = compactSideRoom ?? 0
+        let wing: CGFloat = 110
+        compact.compactSideRoom = room.isFinite ? min(wing, max(0, room)) : 0
+        compact.minimumCompactWidth = cameraWidth + wing * 2
+        compact.allowsActivityFooter = false
+        return compact
+    }
     /// A download keeps its arrow and progress beside the camera. Where the
     /// menus leave room, its name can take a wider wing without a fixed band.
     func compactDownloadGeometry(wing: CGFloat = 56) -> NotchGeometry {

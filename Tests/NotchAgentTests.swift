@@ -19,6 +19,7 @@ enum NotchAgentTests {
         codexParsing(suite)
         openCodeParsing(suite)
         antigravityParsing(suite)
+        antigravityQuotaFallback(suite)
         antigravityLiveActivity(suite)
         AgentAntigravityUsageTests.run(suite)
         AgentCompressedLogTests.run(suite)
@@ -41,6 +42,48 @@ enum NotchAgentTests {
         formatting(suite)
         AgentUsageEventDeliveryTests.run(suite)
         NotchAgentAnimationTests.run { suite.expect($0, $1) }
+    }
+
+    private static func antigravityQuotaFallback(_ suite: TestSuite) {
+        let json = """
+        {"groups":[{"displayName":"Gemini Models","buckets":[
+          {"bucketId":"gemini-weekly","window":"weekly","remainingFraction":0},
+          {"bucketId":"gemini-5h","window":"5h","remainingFraction":0.54,"disabled":true},
+          {"bucketId":"gemini-missing","window":"5h"},
+          {"bucketId":"gemini-bool","window":"5h","remainingFraction":true}]}]}
+        """
+        let limits = AgentAntigravityActivity.limits(line(json), observed: Date())
+        suite.expect(limits?.windows.count == 1 && limits?.windows.first?.usedPercent == 100
+            && limits?.windows.first?.kind == .weekly,
+            "direct cloud quotas preserve exhaustion and skip disabled, missing and boolean fractions")
+        suite.expect(AgentAntigravityActivity.limits(line("{\"buckets\":[{\"bucketId\":\"gemini-5h\",\"window\":\"5h\",\"remainingFraction\":0.25}]}"), observed: Date())?.windows.first?.usedPercent == 75,
+            "ungrouped Gemini cloud buckets are accepted without a response wrapper")
+        let home = FileManager.default.temporaryDirectory.appending(path: "vorssaint-quota-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        do {
+            let credential = home.appending(path: ".t3/userdata/providers/antigravity/one/antigravity-acp/acp_token.json")
+            try FileManager.default.createDirectory(at: credential.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try line("{\"client_id\":\"fake-id\",\"client_secret\":\"fake-secret\",\"refresh_token\":\"fake-refresh\",\"project_id\":\"fake-project\"}").write(to: credential)
+            suite.expect(AgentAntigravityQuota.credentialURLs(home: home).map { $0.resolvingSymlinksInPath() } == [credential.resolvingSymlinksInPath()], "one ACP profile is unambiguous")
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [AgentQuotaMockProtocol.self]
+            let queue = DispatchQueue(label: "test.antigravity.quota")
+            let ready = DispatchSemaphore(value: 0)
+            let reader = AgentAntigravityQuota(queue: queue, home: home, configuration: config) { value in
+                if value.windows.first?.usedPercent == 100 { ready.signal() }
+            }
+            queue.async { reader.poll(now: Date()) }
+            suite.expect(ready.wait(timeout: .now() + 3) == .success,
+                         "a native ACP profile refreshes OAuth and reads cloud limits without a local hub")
+            queue.sync { reader.stop() }
+            let second = home.appending(path: ".t3/userdata/providers/antigravity/two/antigravity-acp/acp_token.json")
+            try FileManager.default.createDirectory(at: second.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(contentsOf: credential).write(to: second)
+            suite.expect(AgentAntigravityQuota.credentialURLs(home: home).isEmpty,
+                         "multiple accounts cannot silently contribute mixed quota readings")
+        } catch { suite.expect(false, "cloud quota fixture: \(error)") }
+        suite.expect(AgentAntigravityQuota.Credential.decode(line("{\"access_token\":\"incomplete\"}")) == nil,
+                     "incomplete credential files do not authorize quota requests")
     }
 
     private static func line(_ json: String) -> Data { Data(json.utf8) }
@@ -2622,4 +2665,26 @@ enum NotchAgentTests {
 private func * (count: Int, tokens: AgentTokens) -> AgentTokens {
     AgentTokens(input: tokens.input * count, cacheWrite: tokens.cacheWrite * count, cacheRead: tokens.cacheRead * count,
                 output: tokens.output * count, reasoning: tokens.reasoning * count)
+}
+
+private final class AgentQuotaMockProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let host = request.url?.host ?? ""
+        let body: String
+        if host == "oauth2.googleapis.com" {
+            body = "{\"access_token\":\"fake-access\",\"expires_in\":3600}"
+        } else if host == "daily-cloudcode-pa.googleapis.com", request.value(forHTTPHeaderField: "Authorization") == "Bearer fake-access" {
+            body = "{\"groups\":[{\"displayName\":\"Gemini\",\"buckets\":[{\"bucketId\":\"gemini-weekly\",\"window\":\"weekly\",\"remainingFraction\":0}]}]}"
+        } else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse)); return
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                      headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }

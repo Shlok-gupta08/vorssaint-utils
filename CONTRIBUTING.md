@@ -174,3 +174,13 @@ Vorssaint is a persistent menu-bar utility. App Intents idle cleanup from Siri
 or LaunchServices must not quit it. The termination policy preserves explicit
 local quits, Activity Monitor quits and session-ending quit reasons. Its tests
 also cover the command bar's asynchronous input-source restoration on quit.
+
+Antigravity quotas fall back to Google's quota summary endpoint when no local
+hub is available (or its quota response is unusable). A single existing T3 ACP
+profile supplies OAuth refresh credentials; multiple profiles are not mixed.
+Without an ACP profile, a still-valid standalone Antigravity access token can
+be used. Tokens remain in memory and refresh credentials go only to Google's
+OAuth endpoint, with redirects rejected. Direct and hub-wrapped quota schemas
+are supported; disabled or missing-fraction buckets never invent allowances.
+Shortcuts compact wings use their own text budget, and nested workflow counts
+remain internal rather than being presented as a count of independent shortcuts.

@@ -26,6 +26,14 @@ enum NotchActivityTests {
     }
 
     private static func shortcutsContracts(_ suite: TestSuite) {
+        let roomy = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1470, height: 956), safeAreaTop: 32,
+            cameraWidth: 180, menuBarHeight: 32, compactSideRoom: 140).compactShortcutsGeometry()
+        suite.expect(roomy.compactActivityWingWidth >= 110 && roomy.compactActivitySize.width >= 400,
+                     "Shortcuts reserves readable title wings instead of the timer's 64-point cap")
+        let narrow = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1470, height: 956), safeAreaTop: 32,
+            cameraWidth: 180, menuBarHeight: 32, compactSideRoom: 44).compactShortcutsGeometry()
+        suite.expect(narrow.compactActivitySize.width <= 268 && !narrow.compactActivityUsesFooter,
+                     "Shortcuts respects menu space without moving under the camera")
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let path = "/System/Library/PrivateFrameworks/WorkflowKit.framework/XPCServices/BackgroundShortcutRunner.xpc/Contents/MacOS/BackgroundShortcutRunner"
         func record(start: Bool = true, pid: Int = 42, executable: String? = nil, subsystem: String = "com.apple.shortcuts") -> Data {

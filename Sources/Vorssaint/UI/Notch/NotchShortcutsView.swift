@@ -19,21 +19,26 @@ struct NotchShortcutsStrip: View {
     var body: some View {
         if let session = shortcuts.primary {
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                HStack(spacing: 8) {
+                let wing = max(0, (size.width - geometry.cameraWidth) / 2)
+                HStack(spacing: 0) {
                     HStack(spacing: 6) {
                         NotchShortcutsGlyph()
-                        Text("Shortcuts").font(.system(size: 11, weight: .medium)).lineLimit(1)
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                    if geometry.isNotched { Color.clear.frame(width: geometry.cameraWidth) }
-                    HStack(spacing: 5) {
-                        if shortcuts.executionCount > 1 {
-                            Text("×\(shortcuts.executionCount)").font(.system(size: 10))
+                        if !geometry.isNotched || wing >= 100 {
+                            Text("Shortcuts").font(.system(size: 11, weight: .medium))
+                                .lineLimit(1).fixedSize()
                         }
-                        Text(session.elapsed(at: context.date))
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced)).fixedSize()
-                    }.frame(maxWidth: geometry.isNotched ? .infinity : nil, alignment: .trailing)
+                    }
+                    .padding(.leading, geometry.isNotched ? 12 : 0)
+                    .frame(width: geometry.isNotched ? wing : nil, alignment: .leading)
+                    if geometry.isNotched { Color.clear.frame(width: geometry.cameraWidth) }
+                    else { Spacer(minLength: 12) }
+                    Text(session.elapsed(at: context.date))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .lineLimit(1).fixedSize()
+                        .padding(.trailing, geometry.isNotched ? 12 : 0)
+                        .frame(width: geometry.isNotched ? wing : nil, alignment: .trailing)
                 }
-                .padding(.horizontal, geometry.floats ? NotchCapsuleLayout.side(geometry) + 10 : 12)
+                .padding(.horizontal, geometry.isNotched ? 0 : NotchCapsuleLayout.side(geometry) + 10)
                 .frame(width: size.width, height: geometry.stripHeight)
                 .foregroundStyle(.white)
                 .onChange(of: session.elapsed(at: context.date).count) { _, _ in
@@ -41,7 +46,7 @@ struct NotchShortcutsStrip: View {
                 }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(shortcuts.executionCount) running shortcuts")
+            .accessibilityLabel("Shortcuts running")
         }
     }
 }
@@ -58,7 +63,7 @@ struct NotchShortcutsPanel: View {
                 NotchIconButton(symbol: "chevron.down", title: "Collapse Shortcuts") { service.collapse() }
             }
             if let session = shortcuts.primary {
-                Text(shortcuts.executionCount == 1 ? "Running shortcut" : "\(shortcuts.executionCount) running shortcuts")
+                Text("Shortcuts running")
                     .font(.system(size: 17, weight: .semibold))
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text(session.elapsed(at: context.date))

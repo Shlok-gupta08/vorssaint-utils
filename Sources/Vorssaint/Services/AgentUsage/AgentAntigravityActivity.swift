@@ -31,6 +31,7 @@ final class AgentAntigravityActivity {
     private var previous: [AgentLiveSession] = []
     private var previousLimits: AgentLimits?
     private var previousPlan: AgentPlan?
+    private var cloudQuota: AgentAntigravityQuota?
 
     init(queue: DispatchQueue,
          changed: @escaping ([AgentLiveSession]) -> Void,
@@ -58,6 +59,7 @@ final class AgentAntigravityActivity {
 
     func stop() {
         stopped = true
+        cloudQuota?.stop(); cloudQuota = nil
         generation += 1
         timer?.cancel()
         timer = nil
@@ -137,19 +139,22 @@ final class AgentAntigravityActivity {
 
     /// Quota buckets and reset windows from RetrieveUserQuotaSummary.
     static func limits(_ data: Data, observed: Date) -> AgentLimits? {
-        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let response = json["response"] as? [String: Any],
-              let groups = response["groups"] as? [[String: Any]] else { return nil }
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        let response = (json["response"] as? [String: Any]) ?? json
+        let groups = response["groups"] as? [[String: Any]] ?? [["buckets": response["buckets"] ?? []]]
         var windows: [AgentLimitWindow] = []
         for group in groups {
             let groupName = group["displayName"] as? String ?? ""
             // Only track Gemini models: ignore Claude, GPT, and 3rd-party models.
-            guard groupName.localizedCaseInsensitiveContains("gemini") else { continue }
             let buckets = group["buckets"] as? [[String: Any]] ?? []
             for bucket in buckets {
                 let bucketId = bucket["bucketId"] as? String ?? ""
+                guard bucket["disabled"] as? Bool != true,
+                      groupName.localizedCaseInsensitiveContains("gemini") || bucketId.hasPrefix("gemini-"),
+                      let number = bucket["remainingFraction"] as? NSNumber,
+                      CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.isFinite else { continue }
                 let rawWindow = bucket["window"] as? String ?? ""
-                let remainingFraction = (bucket["remainingFraction"] as? NSNumber)?.doubleValue ?? 1.0
+                let remainingFraction = number.doubleValue
                 let usedPercent = min(100.0, max(0.0, (1.0 - remainingFraction) * 100.0))
                 let resetsAt = (bucket["resetTime"] as? String).flatMap(AgentTimestamp.parse)
 
@@ -208,6 +213,7 @@ final class AgentAntigravityActivity {
            (lastLimitsPoll == .distantPast || now.timeIntervalSince(lastLimitsPoll) >= 15) {
             pollLimits(endpoint: primary, now: now)
         }
+        if endpoints.isEmpty { pollCloudQuota(now: now) }
         var live = hasT3Adapter ? AgentT3AntigravityReader.read(now: now) : []
         guard !endpoints.isEmpty else { deliver(live); return }
         inFlight = true
@@ -256,9 +262,8 @@ final class AgentAntigravityActivity {
             self.queue.async { [weak self] in
                 guard let self, !self.stopped, self.generation == generation else { return }
                 self.limitsInFlight = false
-                if let reading {
-                    self.deliverLimits(reading)
-                }
+                if let reading { self.deliverLimits(reading) }
+                else { self.pollCloudQuota(now: now) }
             }
         }.resume()
 
@@ -286,8 +291,16 @@ final class AgentAntigravityActivity {
         }
     }
 
+    private func pollCloudQuota(now: Date) {
+        if cloudQuota == nil {
+            cloudQuota = AgentAntigravityQuota(queue: queue) { [weak self] in self?.deliverLimits($0) }
+        }
+        cloudQuota?.poll(now: now)
+    }
+
     private func deliverLimits(_ limits: AgentLimits) {
-        guard previousLimits?.windows != limits.windows else { return }
+        guard previousLimits?.windows != limits.windows
+            || limits.observedAt.timeIntervalSince(previousLimits?.observedAt ?? .distantPast) >= 60 else { return }
         previousLimits = limits
         limitsChanged?(limits)
     }

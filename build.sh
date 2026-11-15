@@ -311,6 +311,7 @@ if (( TEST )); then
         Sources/Vorssaint/Services/AgentUsage/AgentClaudeAppUsage.swift
         Sources/Vorssaint/Services/AgentUsage/AgentCodexServer.swift
         Sources/Vorssaint/Services/AgentUsage/AgentOpenCodeReader.swift
+        Sources/Vorssaint/Services/AgentUsage/AgentAntigravityQuota.swift
         Sources/Vorssaint/Services/AgentUsage/AgentAntigravityActivity.swift
         Sources/Vorssaint/Services/AgentUsage/AgentAntigravityUsageReader.swift
         Sources/Vorssaint/Services/AgentUsage/AgentCompressedLogReader.swift
