@@ -845,6 +845,9 @@ final class NotchService: ObservableObject {
     }
 
     var expandedSize: CGSize {
+        if expandedPillActivity == .shortcuts && !showingSections {
+            return CGSize(width: min(360, geometry.screen.width - 32), height: geometry.safeContentTop + 68)
+        }
         if showingCall {
             return CGSize(width: min(420, geometry.screen.width - 32), height: geometry.safeContentTop + 250)
         }
@@ -1563,12 +1566,12 @@ final class NotchService: ObservableObject {
 #if VORSSAINT_DEVELOPMENT
         NotchHoverTrace.mark("open state ready")
 #endif
-        let existingActivity = expanded && usesPillActivityDeck && !appPanel && !sections && metric == nil
+        let existingActivity = (module == nil || expandedPillActivity != .shortcuts) && expanded && usesPillActivityDeck && !appPanel && !sections && metric == nil
             ? expandedPillActivity : nil
         mutatePresentation(transitionContent: changesPresentation ? (expanded ? .replace : .reveal) : .none,
                            animatesPills: activity != nil || expandedPillActivity != nil) {
             expandedPillActivity = activity ?? existingActivity
-                ?? (compactActivity?.module == destination && !appPanel && !sections && metric == nil ? compactActivity : nil)
+                ?? ((module == nil || compactActivity != .shortcuts) && compactActivity?.module == destination && !appPanel && !sections && metric == nil ? compactActivity : nil)
             showingCall = activity == .call || (module == nil && compactActivity == .call && destination == .controls)
             showingAppPanel = appPanel
             showingSections = sections

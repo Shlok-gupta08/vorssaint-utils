@@ -2322,11 +2322,12 @@ struct NotchGeometry: Equatable {
         compact.allowsActivityFooter = false
         return compact
     }
-    /// Shortcut labels need more room than the timer's 64-point readout cap.
+    /// Shortcut activity width: compact wing matching timer/agent wings on physical
+    /// notch, with slightly more room for a title on virtual notch / capsule.
     func compactShortcutsGeometry() -> NotchGeometry {
         var compact = self
         let room = compactSideRoom ?? 0
-        let wing: CGFloat = 110
+        let wing: CGFloat = isNotched ? 52 : 72
         compact.compactSideRoom = room.isFinite ? min(wing, max(0, room)) : 0
         compact.minimumCompactWidth = cameraWidth + wing * 2
         compact.allowsActivityFooter = false

@@ -4,23 +4,21 @@
 import AppKit
 import Combine
 import Darwin
-import UniformTypeIdentifiers
 
-/// Observes bounded start/finish metadata only. It never reads shortcut actions,
-/// inputs, results, or their library database, and never launches a shortcut.
+/// Observes lifecycle metadata and exact native titles to retrieve library artwork.
+/// Accessibility values that do not match a shortcut name are discarded; no
+/// actions, dialog content or results are retained, and no shortcut is launched.
 final class NotchShortcutsService: ObservableObject {
     static let shared = NotchShortcutsService()
     @Published private(set) var sessions: [NotchShortcutSession] = []
     var primary: NotchShortcutSession? { sessions.first }
     var executionCount: Int { sessions.reduce(0) { $0 + $1.executions } }
     static let appURL = URL(fileURLWithPath: "/System/Applications/Shortcuts.app")
-    /// The generic shortcut file-type icon — not the Shortcuts application icon.
-    let icon: NSImage = {
-        if let type = UTType("com.apple.shortcut") {
-            return NSWorkspace.shared.icon(for: type)
-        }
-        return NSWorkspace.shared.icon(forFile: appURL.path)
-    }()
+
+    // The workflow log supplies lifecycle only, not shortcut artwork. Never
+    // invent a colorful tile or reuse artwork from a previous execution.
+    @Published private(set) var currentIcon: NSImage? = nil
+    @Published private(set) var currentShortcutName: String? = nil
 
     private let queue = DispatchQueue(label: "com.vorssaint.notch.shortcuts", qos: .utility)
     private var generation = UUID() // main thread
@@ -31,6 +29,9 @@ final class NotchShortcutsService: ObservableObject {
     private var timer: DispatchSourceTimer?
     private var pending = Data()
     private var lifecycle = NotchShortcutsLifecycle()
+    private let metadata = NotchShortcutMetadata()
+    private var lastMetadata = Date.distantPast
+    private var metadataSessionID: String?
 
     private init() {}
 
@@ -57,6 +58,7 @@ final class NotchShortcutsService: ObservableObject {
     func stop() {
         guard running else { return }
         running = false; generation = UUID(); sessions = []
+        currentIcon = nil; currentShortcutName = nil
         queue.async { [weak self] in
             guard let self else { return }
             self.queueToken = nil
@@ -69,6 +71,27 @@ final class NotchShortcutsService: ObservableObject {
     }
 
     func openApp() { NSWorkspace.shared.open(Self.appURL) }
+
+    func canCancel(_ session: NotchShortcutSession) -> Bool {
+        session.executable.contains("/BackgroundShortcutRunner.xpc/")
+            && (session.executable as NSString).lastPathComponent == "BackgroundShortcutRunner"
+    }
+
+    func cancel(_ session: NotchShortcutSession) {
+        guard canCancel(session) else { return }
+        queue.async { [weak self] in
+            guard let self, self.lifecycle.sessions[session.pid]?.id == session.id else { return }
+            var info = proc_bsdinfo()
+            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+            var path = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
+            guard proc_pidinfo(session.pid, PROC_PIDTBSDINFO, 0, &info, size) == size,
+                  Double(info.pbi_start_tvsec) <= session.started.timeIntervalSince1970 + 2,
+                  proc_pidpath(session.pid, &path, UInt32(path.count)) > 0,
+                  String(cString: path) == session.executable else { return }
+            // Stop this isolated runner only, never the Shortcuts application.
+            kill(session.pid, SIGTERM)
+        }
+    }
 
     private func startStream(token: UUID) {
         guard queueToken == token, child == nil else { return }
@@ -139,9 +162,22 @@ final class NotchShortcutsService: ObservableObject {
             return proc_pidpath(session.pid, &path, UInt32(path.count)) > 0 && String(cString: path) == session.executable
         }
         let next = lifecycle.ordered
+        var detail: NotchShortcutMetadata.Value?
+        let refreshMetadata = !next.isEmpty && (metadataSessionID != next.first?.id || Date().timeIntervalSince(lastMetadata) >= 5)
+        if refreshMetadata, let primary = next.first {
+            metadataSessionID = primary.id
+            lastMetadata = Date()
+            detail = metadata.read(pid: primary.pid, now: lastMetadata)
+        }
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.running, self.generation == token, self.sessions != next else { return }
-            self.sessions = next
+            guard let self, self.running, self.generation == token else { return }
+            if self.sessions.first?.id != next.first?.id {
+                self.currentIcon = nil; self.currentShortcutName = nil
+            }
+            if refreshMetadata {
+                self.currentIcon = detail?.icon; self.currentShortcutName = detail?.name
+            }
+            if self.sessions != next { self.sessions = next }
         }
     }
 }

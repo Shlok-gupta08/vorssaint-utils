@@ -208,6 +208,16 @@ enum NotchDestinationContract {
         activityPage.open(.controls)
         suite.expect(activityPage.expandedPillActivity == .music && activityPage.selected == .controls,
                      "music-to-controls navigation stays in its existing activity surface without a rendering-mode swap")
+        let shortcutPage = Service()
+        shortcutPage.open(.controls, activity: .shortcuts)
+        suite.expect(shortcutPage.expandedPillActivity == .shortcuts, "opening a shortcut keeps its dedicated compact detail")
+        shortcutPage.open(.controls)
+        suite.expect(shortcutPage.expandedPillActivity == nil && shortcutPage.selected == .controls,
+                     "explicit Controls navigation leaves Shortcuts detail instead of trapping the page")
+        shortcutPage.open(.controls, activity: .shortcuts)
+        shortcutPage.open(sections: true)
+        suite.expect(shortcutPage.expandedPillActivity == nil && shortcutPage.showingSections,
+                     "the section picker remains accessible during a running shortcut")
         scratchpadContracts(defaults: defaults, suite: suite)
         reopeningContracts(defaults: defaults, suite: suite)
         stepBackContracts(suite)

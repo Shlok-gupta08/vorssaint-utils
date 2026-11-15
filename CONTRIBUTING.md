@@ -185,3 +185,11 @@ are supported; missing-fraction buckets never invent allowances. Provider-disabl
 their last reported readings and are explicitly labeled instead of hidden.
 Shortcuts compact wings use their own text budget, and nested workflow counts
 remain internal rather than being presented as a count of independent shortcuts.
+
+Shortcut detail is a compact status row. Explicit Controls/Sections navigation
+leaves that detail instead of retaining its activity page. Its Stop action is
+limited to an isolated BackgroundShortcutRunner and rechecks executable and
+process birth time before signaling it. Artwork resolution matches exact native
+accessibility titles against library names and obtains TIFF artwork through the
+Shortcuts scripting interface. It is local and bounded; ambiguous or unavailable
+titles leave artwork unavailable rather than guessing. No dialog values are kept.

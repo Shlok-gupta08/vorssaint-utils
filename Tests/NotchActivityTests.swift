@@ -26,10 +26,12 @@ enum NotchActivityTests {
     }
 
     private static func shortcutsContracts(_ suite: TestSuite) {
+        suite.expect(NotchShortcutMetadata.literal("A\"\\B\nC") == "\"A\\\"\\\\B\\nC\"",
+                     "shortcut names are escaped as AppleScript data, never executable source")
         let roomy = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1470, height: 956), safeAreaTop: 32,
             cameraWidth: 180, menuBarHeight: 32, compactSideRoom: 140).compactShortcutsGeometry()
-        suite.expect(roomy.compactActivityWingWidth >= 110 && roomy.compactActivitySize.width >= 400,
-                     "Shortcuts reserves readable title wings instead of the timer's 64-point cap")
+        suite.expect(roomy.compactActivityWingWidth == 52 && roomy.compactActivitySize.width == 284,
+                     "physical Shortcuts reserves equal icon and timer wings without a title")
         let narrow = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1470, height: 956), safeAreaTop: 32,
             cameraWidth: 180, menuBarHeight: 32, compactSideRoom: 44).compactShortcutsGeometry()
         suite.expect(narrow.compactActivitySize.width <= 268 && !narrow.compactActivityUsesFooter,
