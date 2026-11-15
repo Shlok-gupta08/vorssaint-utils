@@ -186,16 +186,11 @@ their last reported readings and are explicitly labeled instead of hidden.
 Shortcuts compact wings use their own text budget, and nested workflow counts
 remain internal rather than being presented as a count of independent shortcuts.
 
-Shortcut detail is a compact status row. Explicit Controls/Sections navigation
-leaves that detail instead of retaining its activity page. Its Stop action is
-limited to an isolated BackgroundShortcutRunner and rechecks executable and
-process birth time before signaling it. Artwork resolution matches exact native
-accessibility titles against library names and obtains TIFF artwork through the
-Shortcuts scripting interface. It is local and bounded; ambiguous or unavailable
-titles leave artwork unavailable rather than guessing. No dialog values are kept.
-
-When macOS does not expose a matching native title, the compact shortcut name
-opens a library-name picker. This explicit choice fetches the selected shortcut's
-real icon through the official scripting interface and applies only to the
-current runner identity. A verified identity remains attached until that run
-finishes, even after its native popover closes. No last-used shortcut is guessed.
+Shortcut detail is a compact status row with Stop. Explicit Controls/Sections
+navigation leaves that detail. The observer filters Siri's on-the-fly wrappers,
+keeps nested real shortcuts visible, and removes a finished activity even if its
+wrapper process remains alive. Startup does not replay historical executions.
+It never invokes the Shortcuts CLI or artwork scripting while monitoring. The
+Shortcuts application icon is used because lifecycle logs redact workflow identity.
+Stop is limited to an isolated BackgroundShortcutRunner, with executable and
+process-birth checks before terminating it; it never kills the Shortcuts UI.

@@ -8,17 +8,10 @@ struct NotchShortcutsGlyph: View {
     @ObservedObject private var shortcuts = NotchShortcutsService.shared
 
     var body: some View {
-        Group {
-            if let icon = shortcuts.currentIcon {
-                Image(nsImage: icon).resizable().aspectRatio(contentMode: .fit)
-            } else {
-                Image(systemName: "questionmark.square.dashed")
-                    .resizable().aspectRatio(contentMode: .fit)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(width: side, height: side, alignment: .center)
-        .help(shortcuts.currentIcon == nil ? "Shortcut artwork is unavailable" : (shortcuts.currentShortcutName ?? "Running shortcut"))
+        Image(nsImage: shortcuts.icon)
+            .resizable().aspectRatio(contentMode: .fit)
+            .frame(width: side, height: side, alignment: .center)
+            .help("Shortcuts")
     }
 }
 
@@ -34,8 +27,8 @@ struct NotchShortcutsStrip: View {
                 HStack(spacing: 0) {
                     HStack(spacing: 6) {
                         NotchShortcutsGlyph()
-                        if !geometry.isNotched, let name = shortcuts.currentShortcutName, !name.isEmpty {
-                            Text(name).font(.system(size: 11, weight: .medium))
+                        if !geometry.isNotched {
+                            Text("Shortcuts").font(.system(size: 11, weight: .medium))
                                 .lineLimit(1).fixedSize()
                         }
                     }
@@ -69,16 +62,8 @@ struct NotchShortcutsPanel: View {
             if let session = shortcuts.primary {
                 HStack(spacing: 10) {
                     NotchShortcutsGlyph(side: 26)
-                    Menu {
-                        ForEach(shortcuts.availableShortcutNames, id: \.self) { name in
-                            Button(name) { shortcuts.chooseShortcut(name) }
-                        }
-                    } label: {
-                        Text(shortcuts.currentShortcutName ?? "Choose running shortcut…")
-                            .font(.system(size: 13, weight: .medium)).lineLimit(1)
-                    }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden)
-                    .help("Choose the running shortcut if macOS has not supplied its identity")
+                    Text("Running shortcut")
+                        .font(.system(size: 13, weight: .medium)).lineLimit(1)
                     Spacer(minLength: 4)
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(session.elapsed(at: context.date))

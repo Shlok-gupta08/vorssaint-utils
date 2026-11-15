@@ -5,9 +5,7 @@ import AppKit
 import Combine
 import Darwin
 
-/// Observes lifecycle metadata and exact native titles to retrieve library artwork.
-/// Accessibility values that do not match a shortcut name are discarded; no
-/// actions, dialog content or results are retained, and no shortcut is launched.
+/// Observes lifecycle logs without launching Shortcuts or querying its library.
 final class NotchShortcutsService: ObservableObject {
     static let shared = NotchShortcutsService()
     @Published private(set) var sessions: [NotchShortcutSession] = []
@@ -15,11 +13,7 @@ final class NotchShortcutsService: ObservableObject {
     var executionCount: Int { sessions.reduce(0) { $0 + $1.executions } }
     static let appURL = URL(fileURLWithPath: "/System/Applications/Shortcuts.app")
 
-    // The workflow log supplies lifecycle only, not shortcut artwork. Never
-    // invent a colorful tile or reuse artwork from a previous execution.
-    @Published private(set) var currentIcon: NSImage? = nil
-    @Published private(set) var currentShortcutName: String? = nil
-    @Published private(set) var availableShortcutNames: [String] = []
+    let icon = NSWorkspace.shared.icon(forFile: NotchShortcutsService.appURL.path)
 
     private let queue = DispatchQueue(label: "com.vorssaint.notch.shortcuts", qos: .utility)
     private var generation = UUID() // main thread
@@ -30,11 +24,6 @@ final class NotchShortcutsService: ObservableObject {
     private var timer: DispatchSourceTimer?
     private var pending = Data()
     private var lifecycle = NotchShortcutsLifecycle()
-    private let metadata = NotchShortcutMetadata()
-    private var lastMetadata = Date.distantPast
-    private var selectedMetadata: (id: String, name: String)?
-    private var metadataSessionID: String?
-
     private init() {}
 
     func syncWithPreferences() {
@@ -48,7 +37,7 @@ final class NotchShortcutsService: ObservableObject {
             self.queueToken = token
             self.lifecycle = NotchShortcutsLifecycle()
             self.startStream(token: token)
-            self.backfill(last: "24h", token: token)
+            // Do not resurrect historical starts from retained runner processes.
             let timer = DispatchSource.makeTimerSource(queue: self.queue)
             timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(150))
             timer.setEventHandler { [weak self] in self?.publish(token: token) }
@@ -60,7 +49,6 @@ final class NotchShortcutsService: ObservableObject {
     func stop() {
         guard running else { return }
         running = false; generation = UUID(); sessions = []
-        currentIcon = nil; currentShortcutName = nil
         queue.async { [weak self] in
             guard let self else { return }
             self.queueToken = nil
@@ -73,20 +61,6 @@ final class NotchShortcutsService: ObservableObject {
     }
 
     func openApp() { NSWorkspace.shared.open(Self.appURL) }
-
-    func chooseShortcut(_ name: String) {
-        guard let primary, availableShortcutNames.contains(name) else { return }
-        let token = generation
-        queue.async { [weak self] in
-            guard let self, self.queueToken == token else { return }
-            self.selectedMetadata = (primary.id, name)
-            let detail = self.metadata.artwork(name)
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.generation == token, self.primary?.id == primary.id else { return }
-                self.currentShortcutName = detail.name; self.currentIcon = detail.icon
-            }
-        }
-    }
 
     func canCancel(_ session: NotchShortcutSession) -> Bool {
         session.executable.contains("/BackgroundShortcutRunner.xpc/")
@@ -105,7 +79,12 @@ final class NotchShortcutsService: ObservableObject {
                   proc_pidpath(session.pid, &path, UInt32(path.count)) > 0,
                   String(cString: path) == session.executable else { return }
             // Stop this isolated runner only, never the Shortcuts application.
-            kill(session.pid, SIGTERM)
+            // XPC's SIGTERM handler may defer exit until its workflow finishes.
+            // The user explicitly stops this isolated runner; do not signal the
+            // Shortcuts UI or a shared foreground process.
+            let result = kill(session.pid, SIGKILL)
+            NSLog("Shortcut stop: pid=%d result=%d errno=%d", session.pid, result, result == 0 ? 0 : errno)
+            self.publish(token: self.queueToken ?? UUID())
         }
     }
 
@@ -178,29 +157,8 @@ final class NotchShortcutsService: ObservableObject {
             return proc_pidpath(session.pid, &path, UInt32(path.count)) > 0 && String(cString: path) == session.executable
         }
         let next = lifecycle.ordered
-        var detail: NotchShortcutMetadata.Value?
-        let refreshMetadata = !next.isEmpty && (metadataSessionID != next.first?.id || Date().timeIntervalSince(lastMetadata) >= 5)
-        if refreshMetadata, let primary = next.first {
-            metadataSessionID = primary.id
-            lastMetadata = Date()
-            if let selectedMetadata, selectedMetadata.id == primary.id {
-                detail = metadata.artwork(selectedMetadata.name)
-            } else {
-                selectedMetadata = nil
-                detail = metadata.read(pid: primary.pid, now: lastMetadata)
-                if let detail { selectedMetadata = (primary.id, detail.name) }
-            }
-        }
-        let names = metadata.availableNames
         DispatchQueue.main.async { [weak self] in
             guard let self, self.running, self.generation == token else { return }
-            if self.sessions.first?.id != next.first?.id {
-                self.currentIcon = nil; self.currentShortcutName = nil
-            }
-            if self.availableShortcutNames != names { self.availableShortcutNames = names }
-            if refreshMetadata {
-                self.currentIcon = detail?.icon; self.currentShortcutName = detail?.name
-            }
             if self.sessions != next { self.sessions = next }
         }
     }

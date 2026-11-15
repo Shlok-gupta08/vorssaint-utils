@@ -26,8 +26,6 @@ enum NotchActivityTests {
     }
 
     private static func shortcutsContracts(_ suite: TestSuite) {
-        suite.expect(NotchShortcutMetadata.literal("A\"\\B\nC") == "\"A\\\"\\\\B\\nC\"",
-                     "shortcut names are escaped as AppleScript data, never executable source")
         let roomy = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1470, height: 956), safeAreaTop: 32,
             cameraWidth: 180, menuBarHeight: 32, compactSideRoom: 140).compactShortcutsGeometry()
         suite.expect(roomy.compactActivityWingWidth == 52 && roomy.compactActivitySize.width == 284,
@@ -47,6 +45,26 @@ enum NotchActivityTests {
         }
         let start = NotchShortcutsSupport.event(record(), now: now)!
         let stop = NotchShortcutsSupport.event(record(start: false), now: now)!
+        var helper = NotchShortcutsLifecycle()
+        helper.apply(.init(pid: 42, executable: path, date: now, started: false, onTheFly: true))
+        helper.apply(.init(pid: 42, executable: path, date: now.addingTimeInterval(0.1), started: true))
+        helper.prune { _ in true }
+        suite.expect(helper.ordered.isEmpty, "a live Siri on-the-fly helper never invents a running shortcut")
+        helper.apply(.init(pid: 42, executable: path, date: now.addingTimeInterval(0.2), started: true))
+        suite.expect(helper.ordered.count == 1 && helper.ordered.first?.executions == 1,
+                     "a named shortcut inside a Siri wrapper is shown once")
+        helper.apply(.init(pid: 42, executable: path, date: now.addingTimeInterval(1), started: false))
+        helper.prune { _ in true }
+        suite.expect(helper.ordered.isEmpty,
+                     "finishing the real shortcut removes its pill even if its wrapper and process remain alive")
+        helper.apply(.init(pid: 42, executable: path, date: now.addingTimeInterval(2), started: false))
+        suite.expect(helper.ordered.isEmpty, "a late wrapper completion cannot resurrect the finished activity")
+        var security = try! JSONSerialization.jsonObject(with: record()) as! [String: Any]
+        security["category"] = "Security"
+        security["eventMessage"] = "-[WFBackgroundShortcutRunner runWorkflowWithDescriptor:request:inEnvironment:runningContext:completion:] Disabling privacy prompts because this is an on-the-fly shortcut."
+        let marker = NotchShortcutsSupport.event(try! JSONSerialization.data(withJSONObject: security), now: now)
+        suite.expect(marker?.onTheFly == true && marker?.started == false,
+                     "the real macOS security prelude identifies an internal workflow before its start")
         suite.expect(start.started && !stop.started && start.pid == 42 && start.executable == path,
                      "Shortcuts start and unsuccessful finish records parse without retaining workflow contents")
         suite.expect(NotchShortcutsSupport.event(record(pid: 0), now: now) == nil
