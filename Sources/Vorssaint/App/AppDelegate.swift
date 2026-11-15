@@ -51,6 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // This app is a persistent utility, not a transient App Intent UI.
         // Siri/linkd must not terminate it when an intent's idle grace expires.
         ProcessInfo.processInfo.disableAutomaticTermination("Vorssaint background services are active")
+        // Foundation tracks the counter before this call but does not publish
+        // its opt-out to LaunchServices until automatic termination is registered.
+        // Register only after taking the lifetime-long opt-out above.
+        ProcessInfo.processInfo.automaticTerminationSupportEnabled = true
         NSApp.setActivationPolicy(.accessory)
         // Before any window exists, so nothing is ever built with the wrong
         // appearance and then repainted.
