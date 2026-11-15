@@ -78,6 +78,7 @@ final class NotchService: ObservableObject {
     @Published private(set) var expanded = false
     @Published private(set) var hidingExpandedForHover = false
     private var completesHiddenHoverCollapse = false
+    private var expandedDeckPrimaryActivity: NotchCompactActivity?
     @Published private(set) var expandedPillActivity: NotchCompactActivity?
     @Published private(set) var showingCall = false
     @Published private(set) var dictationPhase: DictationPhase = .idle
@@ -411,7 +412,13 @@ final class NotchService: ObservableObject {
             && !peeking && !dragPlaceholder && captureControls == nil
     }
 
-    var pillDeckPrimaryActivity: NotchCompactActivity? { compactActivity ?? (expanded ? expandedPillActivity : nil) }
+    var pillDeckPrimaryActivity: NotchCompactActivity? {
+        if expanded, let opened = expandedPillActivity, let anchor = expandedDeckPrimaryActivity,
+           anchor == opened || compactActivities.contains(anchor) {
+            return anchor
+        }
+        return compactActivity ?? (expanded ? expandedPillActivity : nil)
+    }
 
     var activitySatelliteGeometry: NotchGeometry {
         geometry.floats ? geometry : NotchAttachedActivityLayout.satelliteGeometry(geometry)
@@ -519,11 +526,15 @@ final class NotchService: ObservableObject {
         hoverWork?.cancel(); hoverWork = nil
         switchCompactSelection {
             activitySelection.select(activity, available: compactActivities)
+            if expanded { expandedDeckPrimaryActivity = compactActivity }
         }
     }
 
     func useAutomaticPillPriority() {
-        switchCompactSelection { activitySelection = NotchActivitySelection() }
+        switchCompactSelection {
+            activitySelection = NotchActivitySelection()
+            if expanded { expandedDeckPrimaryActivity = compactActivity }
+        }
     }
 
     /// Opening an activity never changes the primary. Layout changes belong
@@ -864,8 +875,8 @@ final class NotchService: ObservableObject {
                             && NotchFileToolsService.shared.mediaPresented ? NotchFileToolsService.shared.mediaContentHeight : nil,
                         toolCount: launcher.isEditing || launcher.activeUtility != nil ? nil : launcher.visibleItems.count,
                         capturePreviewHeight: captureContent == nil ? nil : captureContentHeight)
-        if expandedPillActivity != nil, expandedPillActivity != compactActivity {
-            let primaryWidth = compactActivity.map { pillSize(for: $0).width } ?? 160
+        if expandedPillActivity != nil, expandedPillActivity != pillDeckPrimaryActivity {
+            let primaryWidth = pillDeckPrimaryActivity.map { pillSize(for: $0).width } ?? 160
             result.width = min(result.width, max(220, (geometry.screen.width - 32) / 2 - primaryWidth / 2 - 170))
         }
         return result
@@ -1566,6 +1577,12 @@ final class NotchService: ObservableObject {
 #if VORSSAINT_DEVELOPMENT
         NotchHoverTrace.mark("open state ready")
 #endif
+        // Retain the deck's current center while an activity is open. Track
+        // announcements temporarily remove music from compact priority; they
+        // must not move an already expanded card to a side pill.
+        if !expanded || expandedPillActivity == nil {
+            expandedDeckPrimaryActivity = compactActivity ?? activity
+        }
         let existingActivity = (module == nil || expandedPillActivity != .shortcuts) && expanded && usesPillActivityDeck && !appPanel && !sections && metric == nil
             ? expandedPillActivity : nil
         mutatePresentation(transitionContent: changesPresentation ? (expanded ? .replace : .reveal) : .none,

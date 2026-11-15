@@ -87,6 +87,8 @@ enum NotchMusicVisibilityTests {
         var suspended = false
         var isPlayerActive = false
         var isMusicPausedHolding = false
+        var expandedDeckPrimaryActivity: NotchCompactActivity?
+        var expandedPillActivity: NotchCompactActivity?
         var expanded = false
         var peeking = false
         var showingAppPanel = false
@@ -192,6 +194,39 @@ enum NotchMusicVisibilityTests {
                      "ending dictation restores the user's compact full-screen presentation")
         let reader = NotchMusicService.shared
         service.modules = NotchSupport.modules(in: defaults)
+        do {
+            let oldShow = defaults.bool(forKey: DefaultsKey.notchShowPlayingMusic)
+            let oldPlayback = reader.playback
+            defaults.set(true, forKey: DefaultsKey.notchShowPlayingMusic)
+            reader.playback = .init(isPlaying: true)
+            let music = Service()
+            music.modules = service.modules
+            music.hasAgentActivity = true
+            music.activitySelection.select(.music, available: [.music, .agents])
+            music.expanded = true
+            music.expandedPillActivity = .music
+            music.expandedDeckPrimaryActivity = .music
+            for waiting in [false, true, false] {
+                music.awaitsTrackNotice = waiting
+                suite.expect(music.pillDeckPrimaryActivity == .music,
+                             "an expanded central music card stays central before, during and after a track notice")
+            }
+            music.expandedDeckPrimaryActivity = .agents
+            music.awaitsTrackNotice = true
+            suite.expect(music.pillDeckPrimaryActivity == .agents,
+                         "an expanded side music card retains its original side instead of jumping to the center")
+            music.hasAgentActivity = false
+            suite.expect(music.pillDeckPrimaryActivity == .music,
+                         "ending the original primary still permits a genuine activity transition")
+            music.hasAgentActivity = true
+            music.expandedDeckPrimaryActivity = .music
+            music.expanded = false
+            suite.expect(music.pillDeckPrimaryActivity == .agents,
+                         "collapsed track announcements retain their normal compact priority")
+            defaults.set(oldShow, forKey: DefaultsKey.notchShowPlayingMusic)
+            reader.playback = oldPlayback
+        }
+
 
         let persistentCapture = Service()
         var persistentCloseCount = 0

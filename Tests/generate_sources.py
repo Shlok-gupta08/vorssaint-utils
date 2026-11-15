@@ -609,7 +609,7 @@ def main():
           + "}\n}\n")
     music_visibility = "var pillActivityOrder: [NotchCompactActivity] { NotchPillActivityLayout.ordered(compactActivities, preferred: activitySelection.preferred) }\n" + "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
         "    private var hiddenUntilHover:", "    var fullscreenCompact:", "    var idleContent:", "    var hasMusicActivity:", "    var compactActivity:",
-        "    private var sharedCompactActivity:",
+        "    private var sharedCompactActivity:", "    var pillDeckPrimaryActivity:",
         "    var compactActivityGeometry:", "    func compactGeometry(", "    var compactActivities:",
         "    var compactCompanion:",
         "    var surfaceSize:", "    func collapse(",

@@ -80,6 +80,7 @@ enum NotchDestinationContract {
         func endDeparture() { departingNotice = nil }
 
         var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900), safeAreaTop: 0, cameraWidth: 0)
+        var expandedDeckPrimaryActivity: NotchCompactActivity?
         var expandedPillActivity: NotchCompactActivity?
         var fullscreenCompact = false
         var dragPlaceholder = false
@@ -203,7 +204,10 @@ enum NotchDestinationContract {
         suite.expect(!idle.usesPillActivityDeck,
                      "opening Control Centre without a live activity retains the native expanding contour")
         let activityPage = Service()
+        activityPage.compactActivity = .music
         activityPage.open(.music, activity: .music)
+        suite.expect(activityPage.expandedDeckPrimaryActivity == .music,
+                     "opening music captures its central position before notifications can change compact priority")
         suite.expect(activityPage.usesPillActivityDeck, "an explicitly opened live activity retains its own animated viewport")
         activityPage.open(.controls)
         suite.expect(activityPage.expandedPillActivity == .music && activityPage.selected == .controls,

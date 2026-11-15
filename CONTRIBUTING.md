@@ -194,3 +194,8 @@ It never invokes the Shortcuts CLI or artwork scripting while monitoring. The
 Shortcuts application icon is used because lifecycle logs redact workflow identity.
 Stop is limited to an isolated BackgroundShortcutRunner, with executable and
 process-birth checks before terminating it; it never kills the Shortcuts UI.
+
+An expanded activity retains the deck's primary anchor across transient track
+announcements and feedback. Side activity expansion retains its original primary.
+Explicit primary selection and real activity removal still change the anchor;
+collapsing resumes ordinary compact notification and priority behavior.
