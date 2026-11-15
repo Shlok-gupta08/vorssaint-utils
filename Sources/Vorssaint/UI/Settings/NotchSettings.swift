@@ -23,6 +23,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchCalendarCountdown) private var calendarCountdown = false
     @AppStorage(DefaultsKey.notchCalendarTimeLeft) private var calendarTimeLeft = false
     @AppStorage(DefaultsKey.notchAgentsEnabled) private var agentsEnabled = true
+    @AppStorage(DefaultsKey.notchShortcutsEnabled) private var shortcutsEnabled = true
     @AppStorage(DefaultsKey.notchCallsEnabled) private var callsEnabled = false
     @AppStorage(DefaultsKey.notchWatchEnabled) private var watchEnabled = true
     @AppStorage(DefaultsKey.notchLyricsEnabled) private var lyricsEnabled = true
@@ -108,7 +109,7 @@ struct NotchSettings: View {
     }
 
     private var configuration: [String] {
-        [String(enabled), String(callsEnabled), String(calendarEnabled), String(calendarCountdown), String(calendarTimeLeft), String(notificationsEnabled), String(dismissNativeNotifications), String(gesturesEnabled), String(lyricsEnabled), String(lyricsOnline), String(queueEnabled), String(liveEqualizer), String(showPlayingMusic), String(hideMusicWhenPlayerActive), String(includeOtherPlayers), idle, hiddenControls, controlOrder, size,
+        [String(enabled), String(shortcutsEnabled), String(callsEnabled), String(calendarEnabled), String(calendarCountdown), String(calendarTimeLeft), String(notificationsEnabled), String(dismissNativeNotifications), String(gesturesEnabled), String(lyricsEnabled), String(lyricsOnline), String(queueEnabled), String(liveEqualizer), String(showPlayingMusic), String(hideMusicWhenPlayerActive), String(includeOtherPlayers), idle, hiddenControls, controlOrder, size,
          String(timerEnabled), String(timerSoundEnabled), String(cameraEnabled), String(accessoriesEnabled), String(outlineEnabled), String(customWidth), String(customHeight), String(cameraFitWidth), String(cameraFitHeight), String(capsuleFitWidth), String(capsuleFitHeight), String(capsuleFitDrop), String(hapticFeedback), String(shelfWindow), String(dragReveal), String(captureControls), String(quickPanel), String(appPanel), String(hoverExpand), String(hideUntilHover), String(autoHideWithoutNotch), String(hideInFullscreen), String(coversMenus), display, displayPreferences, preferredDisplay, silhouette, String(hover), hidden, order, String(volume),
          String(brightness), String(keyboardLight), String(microphone), String(battery), String(clipboard), String(clipboardWindow), String(capture), String(trackChange), captureAction, String(showInCaptures), String(returnHome), homeModule, String(opensActivity), String(scratchpad), String(agentsEnabled), String(watchEnabled), String(keepAwakeActivity), String(expandedScale)]
     }
@@ -810,6 +811,10 @@ struct NotchSettings: View {
                         pauseTimeoutSlider(music)
                     }
                 }
+            }
+            SettingsCard {
+                switchRow("square.stack.3d.up.fill", "Shortcuts live activity",
+                          caption: "Keep running shortcuts centered, with other activities in side pills.", isOn: $shortcutsEnabled)
             }
             DisclosureGroup(l10n.s.tabAdvanced) {
                 SettingsCard {

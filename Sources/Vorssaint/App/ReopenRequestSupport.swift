@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vorssaint
 
 import AppKit
+import CoreServices
 import Darwin
 
 /// Tells a reopen the person asked for from one the system sent on its own.
@@ -50,6 +51,35 @@ enum ReopenRequestSupport {
     /// Names the sender in the app's log without a full path.
     static func logName(_ sender: Sender?) -> String {
         sender?.bundleIdentifier ?? sender?.executablePath.map { ($0 as NSString).lastPathComponent } ?? "unknown"
+    }
+
+    /// App Intents' linkd sends a quit after its idle grace period even when
+    /// this accessory app still owns background services. Never mistake that
+    /// cleanup for the person's Quit action. Session-ending system requests
+    /// retain their normal behavior, including when sent by a system daemon.
+    static func isUnattendedQuit(_ sender: Sender?, isQuitEvent: Bool, reason: UInt32?) -> Bool {
+        guard isQuitEvent, let sender else { return false }
+        if let reason, [UInt32(kAEQuitAll), UInt32(kAEShutDown), UInt32(kAERestart), UInt32(kAEReallyLogOut)].contains(reason) {
+            return false
+        }
+        if let path = sender.executablePath {
+            // linkd asks LaunchServices to deliver idle cleanup on its behalf.
+            if ["/usr/libexec/linkd", "/usr/libexec/lsd", "/System/Library/CoreServices/launchservicesd"].contains(path) {
+                return true
+            }
+            // Logout/shutdown may omit the quit-reason parameter on older OSes.
+            if (path as NSString).lastPathComponent == "loginwindow" { return false }
+        }
+        if let id = sender.bundleIdentifier?.lowercased(), id.hasPrefix("com.apple."),
+           (id == "com.apple.campo" || assistantIdentifierFragments.contains(where: id.contains)) { return true }
+        return false
+    }
+
+    static func isCurrentUnattendedQuit() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent else { return false }
+        return isUnattendedQuit(currentSender(),
+            isQuitEvent: event.eventClass == AEEventClass(kCoreEventClass) && event.eventID == AEEventID(kAEQuitApplication),
+            reason: event.paramDescriptor(forKeyword: AEKeyword(kAEQuitReason))?.enumCodeValue)
     }
 
     /// The sender of the Apple event being handled right now.

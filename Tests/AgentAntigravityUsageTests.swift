@@ -64,7 +64,11 @@ enum AgentAntigravityUsageTests {
                         && AgentPricing.price(for: "gemini-3.9-flash-n") == nil
                         && AgentPricing.price(for: "gemini-3.8-flash-cyber") == nil,
                      "known runtime aliases resolve while new versions and specialized siblings stay unpriced")
-        let expected = (125 * 0.75 + 40 * 0.75 + 2000 * 0.075 + 40 * 3.75) / 1_000_000
+        let inputCost: Double = 125 * 0.75
+        let cacheWriteCost: Double = 40 * 0.75
+        let cacheReadCost: Double = 2000 * 0.075
+        let outputCost: Double = 40 * 3.75
+        let expected = (inputCost + cacheWriteCost + cacheReadCost + outputCost) / 1_000_000
         suite.expectClose(first.reduce(0) { $0 + ($1.record.cost ?? 0) }, expected,
                           "input, cache writes, cache reads and output are priced independently", tol: 0.0000001)
         suite.expect(reader.read(roots: [folder], since: horizon, now: now.addingTimeInterval(11)) == nil,

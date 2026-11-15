@@ -589,12 +589,13 @@ enum NotchHoverEmphasis {
 }
 
 enum NotchCompactActivity: String, Identifiable {
-    case timer, watch, downloads, agents, calendar, music, keepAwake, call
+    case timer, watch, downloads, agents, calendar, music, keepAwake, call, shortcuts
 
     var id: String { rawValue }
 
     func title(_ language: AppLanguage) -> String {
         switch self {
+        case .shortcuts: return "Shortcuts"
         case .call: return "Call"
         case .timer: return FeatureStrings.notchActivities(language).timer
         case .watch: return FeatureStrings.notchWatch(language).title
@@ -609,7 +610,7 @@ enum NotchCompactActivity: String, Identifiable {
     /// Keep Awake has no page of its own: its tile is on Controls.
     var module: NotchModule {
         switch self {
-        case .call: return .controls
+        case .shortcuts, .call: return .controls
         case .timer: return .timer
         case .watch: return .watch
         case .downloads: return .downloads
@@ -621,6 +622,7 @@ enum NotchCompactActivity: String, Identifiable {
     }
 
     var symbol: String {
+        if self == .shortcuts { return "square.stack.3d.up.fill" }
         if self == .call { return "phone.fill" }
         return self == .keepAwake ? NotchControlItem.keepAwake.symbol : module.symbol
     }
@@ -630,6 +632,7 @@ enum NotchCompactActivity: String, Identifiable {
     /// long-running status such as a timer or Keep Awake moves to a side pill.
     var pillPriority: Int {
         switch self {
+        case .shortcuts: return 20_000
         case .call: return 10_000
         case .agents: return 700
         case .music: return 600
@@ -679,6 +682,7 @@ enum NotchPillActivityLayout {
             }
         }
         return activities.sorted { lhs, rhs in
+            if lhs == .shortcuts || rhs == .shortcuts { return lhs == .shortcuts && rhs != .shortcuts }
             if lhs == .call || rhs == .call { return lhs == .call && rhs != .call }
             if lhs == preferred { return true }
             if rhs == preferred { return false }
@@ -1787,9 +1791,9 @@ enum NotchSupport {
     /// music plays, and it only says that the Mac stays awake. A watch
     /// follows the timer: the person started both and is waiting on them.
     static func compactActivities(timer: Bool, watch: Bool = false, downloads: Bool, agents: Bool,
-                                  calendar: Bool, music: Bool, keepAwake: Bool = false, call: Bool = false) -> [NotchCompactActivity] {
+                                  calendar: Bool, music: Bool, keepAwake: Bool = false, call: Bool = false, shortcuts: Bool = false) -> [NotchCompactActivity] {
         let candidates: [(Bool, NotchCompactActivity)] = [
-            (call, .call),
+            (shortcuts, .shortcuts), (call, .call),
             (timer, .timer), (watch, .watch), (downloads, .downloads), (agents, .agents),
             (calendar, .calendar), (music, .music), (keepAwake, .keepAwake)
         ]

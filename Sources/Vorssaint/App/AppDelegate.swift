@@ -48,6 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // This app is a persistent utility, not a transient App Intent UI.
+        // Siri/linkd must not terminate it when an intent's idle grace expires.
+        ProcessInfo.processInfo.disableAutomaticTermination("Vorssaint background services are active")
         NSApp.setActivationPolicy(.accessory)
         // Before any window exists, so nothing is ever built with the wrong
         // appearance and then repainted.
@@ -258,6 +261,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if ReopenRequestSupport.isCurrentUnattendedQuit() {
+            NSLog("Ignored unattended quit request from %@", ReopenRequestSupport.logName(ReopenRequestSupport.currentSender()))
+            return .terminateCancel
+        }
         if inputSourceRestorationPending { return .terminateLater }
         guard CommandBarService.shared.hasBorrowedInputSource else { return .terminateNow }
         inputSourceRestorationPending = true

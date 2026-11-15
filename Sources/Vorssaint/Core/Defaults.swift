@@ -848,6 +848,7 @@ enum DefaultsKey {
     static let notchAgentsDailyBudget = "notchAgentsDailyBudget"
     static let notchAgentsPriceUpdates = "notchAgentsPriceUpdates"
     static let notchEnabled = "notchEnabled"
+    static let notchShortcutsEnabled = "notchShortcutsEnabled"
     static let notchCallsEnabled = "notchCallsEnabled"
     static let notchDisplay = "notchDisplay"
     static let notchDisplayPreferences = "notchDisplayPreferences"
@@ -1441,6 +1442,7 @@ enum Defaults {
         DefaultsKey.notchWatchSound: true,
         DefaultsKey.notchWatchCondition: NotchWatchCondition.changes.rawValue,
         DefaultsKey.notchEnabled: false,
+        DefaultsKey.notchShortcutsEnabled: true,
         DefaultsKey.notchCallsEnabled: false,
         DefaultsKey.notchDisplay: NotchDisplay.automatic.rawValue,
         DefaultsKey.notchDisplayPreferences: "",

@@ -159,3 +159,18 @@ By explicit request, experimental `gemini-3.8-flash-n` uses the same estimate as
 tokens, with cache creation at input price. This is an estimate override, not a
 published separate price for `-n`. Recheck the promotional Gemini rates at the
 dates recorded in `Resources/agent-prices.json`.
+
+Shortcuts live activities observe only Apple's workflow start/finish unified-log
+metadata. The observer is opt-out in Dynamic Island settings, stops with the
+feature, bounds its subprocess lifetime and history reads, and checks runner
+identity and process birth time before presenting a session. Shortcut names,
+actions, inputs and results are not retained. A retained runner alone never
+creates an activity. This integration depends on macOS's WorkflowExecution log
+format; macOS owns its native running indicator and provides no supported
+suppression API. To smoke-test it, run a Wait-only shortcut and verify that it
+preempts music/agents centrally, then restores the previous activity on finish.
+
+Vorssaint is a persistent menu-bar utility. App Intents idle cleanup from Siri
+or LaunchServices must not quit it. The termination policy preserves explicit
+local quits, Activity Monitor quits and session-ending quit reasons. Its tests
+also cover the command bar's asynchronous input-source restoration on quit.

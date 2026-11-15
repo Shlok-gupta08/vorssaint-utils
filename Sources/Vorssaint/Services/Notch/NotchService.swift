@@ -354,6 +354,8 @@ final class NotchService: ObservableObject {
         NotchKeepAwakeSupport.showsActivity() && KeepAwakeManager.shared.isActive
     }
 
+    var hasShortcutActivity: Bool { NotchShortcutsService.shared.primary != nil }
+
     var hasCallActivity: Bool { NotchCallSupport.isAvailable && NotchCallService.shared.primary != nil }
 
     private var liveActivitiesEnabledOnDisplay: Bool {
@@ -373,6 +375,7 @@ final class NotchService: ObservableObject {
     private var sharedCompactActivity: NotchCompactActivity? {
         // A new song waiting for its notice is not drawn yet.
         let available = awaitsTrackNotice ? compactActivities.filter { $0 != .music } : compactActivities
+        if available.contains(.shortcuts) { return .shortcuts }
         if available.contains(.call) { return .call }
         return activitySelection.current(available: pillActivityOrder.filter { available.contains($0) })
     }
@@ -390,7 +393,7 @@ final class NotchService: ObservableObject {
     var compactActivities: [NotchCompactActivity] {
         NotchSupport.compactActivities(timer: hasTimerActivity, watch: hasWatchActivity, downloads: hasDownloadActivity,
                                       agents: hasAgentActivity, calendar: hasCalendarActivity,
-                                      music: hasMusicActivity, keepAwake: hasKeepAwakeActivity, call: hasCallActivity)
+                                      music: hasMusicActivity, keepAwake: hasKeepAwakeActivity, call: hasCallActivity, shortcuts: hasShortcutActivity)
     }
 
     var showsCompactActivityPicker: Bool {
@@ -693,7 +696,7 @@ final class NotchService: ObservableObject {
             geometry.compactSideRoom = min(geometry.compactSideRoom ?? 0, room)
         }
         switch activity {
-        case .call: return geometry.compactTimerGeometry(showsDownloads: false, wing: 100)
+        case .shortcuts, .call: return geometry.compactTimerGeometry(showsDownloads: false, wing: 100)
         case .music:
             if companion == .agents {
                 return musicAgentStripGeometry(in: geometry)
@@ -1177,6 +1180,10 @@ final class NotchService: ObservableObject {
         let download = NotchDownloadService.shared.items.first { $0.active && !$0.completed }
         let working = Set(AgentUsageService.shared.snapshot.live.map(\.provider)).count
         switch activity {
+        case .shortcuts:
+            return layout.surface(content: 20 + layout.width("Shortcuts", font: layout.titleFont)
+                + layout.width(NotchShortcutsService.shared.primary?.elapsed(at: Date()) ?? "0:00", font: layout.readingFont) + 20,
+                maximum: layout.Maximum.activity, geometry: geometry)
         case .call:
             let call = NotchCallService.shared.primary
             var callGeometry = geometry
@@ -1301,6 +1308,7 @@ final class NotchService: ObservableObject {
         refreshModules()
         NotchDownloadService.shared.syncWithPreferences()
         NotchCalendarService.shared.syncWithPreferences()
+        NotchShortcutsService.shared.syncWithPreferences()
         NotchCallService.shared.syncWithPreferences()
         NotchNotificationService.shared.syncWithPreferences()
         NotchAudioLevelService.shared.syncWithPreferences()
@@ -1418,6 +1426,7 @@ final class NotchService: ObservableObject {
         NotchAccessoryService.shared.suspend()
         NotchDownloadService.shared.stop()
         NotchCalendarService.shared.stop()
+        NotchShortcutsService.shared.stop()
         NotchCallService.shared.stop()
         NotchNotificationService.shared.stop()
         AgentUsageService.shared.pause()
@@ -1494,8 +1503,8 @@ final class NotchService: ObservableObject {
     /// unless the user turned off opening the visible activity, in which case
     /// the reopening choice decides here too.
     func openActivity(_ module: NotchModule) {
-        if compactActivity == .call && module == .controls {
-            open(module, activity: .call)
+        if let activity = compactActivity, [.shortcuts, .call].contains(activity), module == .controls {
+            open(module, activity: activity)
             return
         }
         let opensActivity = UserDefaults.standard.object(forKey: DefaultsKey.notchOpensActivity) as? Bool ?? true
@@ -4103,6 +4112,17 @@ final class NotchService: ObservableObject {
 
     private func bindEvents() {
         subscriptions.removeAll()
+        NotchShortcutsService.shared.$sessions.removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] sessions in
+                guard let self else { return }
+                if !sessions.isEmpty {
+                    if self.expanded && self.expandedPillActivity != .shortcuts { self.collapse() }
+                    if self.notice != nil { self.dismissNotice() }
+                } else if self.expanded && self.expandedPillActivity == .shortcuts { self.collapse() }
+                self.syncMenuSpaceMonitoring()
+                self.objectWillChange.send()
+                self.refreshPresentation()
+            }.store(in: &subscriptions)
         NotchCallService.shared.$sessions.removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] sessions in
                 guard let self else { return }

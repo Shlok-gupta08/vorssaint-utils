@@ -2062,7 +2062,7 @@ enum CommandBarInputSourceContract {
 /// run-loop modes, with inert replies and input sources. No app quits or layout changes.
 enum CommandBarTerminationContract {
     final class Application {
-        enum TerminateReply { case terminateNow, terminateLater }
+        enum TerminateReply { case terminateNow, terminateLater, terminateCancel }
         var replies: [Bool] = []
         var sourceAtReply: [String] = []
         func reply(toApplicationShouldTerminate accepted: Bool) {

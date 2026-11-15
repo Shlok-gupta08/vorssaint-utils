@@ -7,6 +7,7 @@ import SwiftUI
 
 enum NotchActivityTests {
     static func run(_ suite: TestSuite) {
+        shortcutsContracts(suite)
         NotchCallTests.run(suite)
         timerContracts(suite)
         alertContracts(suite)
@@ -22,6 +23,57 @@ enum NotchActivityTests {
         accessoryContracts(suite)
         PeripheralBatteryLifecycleTests.run(suite)
         gateContracts(suite)
+    }
+
+    private static func shortcutsContracts(_ suite: TestSuite) {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let path = "/System/Library/PrivateFrameworks/WorkflowKit.framework/XPCServices/BackgroundShortcutRunner.xpc/Contents/MacOS/BackgroundShortcutRunner"
+        func record(start: Bool = true, pid: Int = 42, executable: String? = nil, subsystem: String = "com.apple.shortcuts") -> Data {
+            let stamp = ISO8601DateFormatter().string(from: now)
+            return try! JSONSerialization.data(withJSONObject: ["processID": pid, "processImagePath": executable ?? path,
+                "subsystem": subsystem, "category": "WorkflowExecution", "timestamp": stamp,
+                "eventMessage": start ? "-[WFWorkflowController _run] Starting workflow execution: <private>"
+                    : "-[WFWorkflowController setFinishedRunningWithSuccess:] Stopping workflow execution: <private>. success: no"])
+        }
+        let start = NotchShortcutsSupport.event(record(), now: now)!
+        let stop = NotchShortcutsSupport.event(record(start: false), now: now)!
+        suite.expect(start.started && !stop.started && start.pid == 42 && start.executable == path,
+                     "Shortcuts start and unsuccessful finish records parse without retaining workflow contents")
+        suite.expect(NotchShortcutsSupport.event(record(pid: 0), now: now) == nil
+            && NotchShortcutsSupport.event(record(executable: "/tmp/Shortcuts"), now: now) == nil
+            && NotchShortcutsSupport.event(record(subsystem: "example.shortcuts"), now: now) == nil
+            && NotchShortcutsSupport.event(record(), now: now.addingTimeInterval(-120)) == nil
+            && NotchShortcutsSupport.event(Data("not json".utf8), now: now) == nil,
+                     "unrelated, invalid and future Shortcuts log records cannot produce an activity")
+        let observed = "2026-11-15 14:45:43.083858+0530"
+        var json = try! JSONSerialization.jsonObject(with: record()) as! [String: Any]
+        json["timestamp"] = observed
+        suite.expect(NotchShortcutsSupport.event(try! JSONSerialization.data(withJSONObject: json), now: Date(timeIntervalSince1970: 1_800_000_000)) != nil,
+                     "the observed macOS microsecond timestamp and timezone parse")
+        var state = NotchShortcutsLifecycle()
+        state.apply(stop)
+        suite.expect(state.ordered.isEmpty, "a finish without a start never invents an activity")
+        state.apply(start); state.apply(start)
+        suite.expect(state.ordered.first?.executions == 1, "overlapping history and live records are counted once")
+        let second = NotchShortcutsSupport.Event(pid: 42, executable: path, date: now.addingTimeInterval(1), started: true)
+        state.apply(second)
+        suite.expect(state.ordered.first?.executions == 2, "overlapping workflows in one runner are counted")
+        state.apply(.init(pid: 42, executable: path, date: now.addingTimeInterval(2), started: false))
+        suite.expect(state.ordered.first?.executions == 1, "one finish leaves the other workflow visible")
+        state.apply(.init(pid: 43, executable: path, date: now.addingTimeInterval(3), started: true))
+        suite.expect(state.ordered.map(\.pid) == [42, 43], "the earliest running shortcut keeps its elapsed time")
+        state.prune { $0.pid != 42 }
+        suite.expect(state.ordered.map(\.pid) == [43], "a dead runner is removed even without a finish message")
+        state.apply(.init(pid: 43, executable: path, date: now.addingTimeInterval(4), started: false))
+        suite.expect(state.ordered.isEmpty, "the last completion removes the activity")
+        suite.expect(NotchPillActivityLayout.ordered([.music, .call, .shortcuts, .agents], preferred: .music)
+                     == [.shortcuts, .call, .music, .agents],
+                     "running shortcuts stay central above calls and a preferred music pill")
+        suite.expect(NotchSupport.compactActivities(timer: false, downloads: false, agents: false,
+            calendar: false, music: true, shortcuts: true) == [.shortcuts, .music],
+                     "other active activities remain available beside Shortcuts")
+        suite.expect(NotchShortcutSession(id: "test", pid: 1, executable: path, started: now, executions: 1)
+            .elapsed(at: now.addingTimeInterval(3661)) == "1:01:01", "Shortcuts elapsed time survives hour boundaries")
     }
 
     private static func pillDeckContracts(_ suite: TestSuite) {

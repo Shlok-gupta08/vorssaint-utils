@@ -2645,6 +2645,31 @@ enum SwitcherModelFeatureTests {
                                                                   executablePath: "/System/Library/CoreServices/Finder.app",
                                                                   isApplication: true)) == "com.apple.finder",
                "the log names the sender by bundle identifier, or by executable without its path")
+        let intentCleanup = ReopenSender(bundleIdentifier: nil, executablePath: "/usr/libexec/linkd", isApplication: false)
+        suite.expect(ReopenRequestSupport.isUnattendedQuit(intentCleanup, isQuitEvent: true, reason: nil),
+                     "App Intents idle cleanup cannot quit the persistent utility")
+        for path in ["/usr/libexec/lsd", "/System/Library/CoreServices/launchservicesd"] {
+            suite.expect(ReopenRequestSupport.isUnattendedQuit(
+                ReopenSender(bundleIdentifier: nil, executablePath: path, isApplication: false), isQuitEvent: true, reason: nil),
+                "LaunchServices cannot deliver unattended cleanup on linkd's behalf")
+        }
+        suite.expect(!ReopenRequestSupport.isUnattendedQuit(
+            ReopenSender(bundleIdentifier: nil, executablePath: "/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow",
+                         isApplication: false), isQuitEvent: true, reason: nil), "loginwindow remains able to end the session")
+        for reason: UInt32 in [0x71756961, 0x73687574, 0x72657374, 0x726c676f] {
+            suite.expect(!ReopenRequestSupport.isUnattendedQuit(intentCleanup, isQuitEvent: true, reason: reason),
+                         "quit-all, shutdown, restart and logout remain permitted")
+        }
+        suite.expect(!ReopenRequestSupport.isUnattendedQuit(intentCleanup, isQuitEvent: false, reason: nil)
+                        && !ReopenRequestSupport.isUnattendedQuit(nil, isQuitEvent: true, reason: nil),
+                     "local/manual quits, app relaunch and unidentified senders retain their normal behavior")
+        suite.expect(ReopenRequestSupport.isUnattendedQuit(
+            ReopenSender(bundleIdentifier: "com.apple.Siri", executablePath: nil, isApplication: true), isQuitEvent: true, reason: nil)
+                     && ReopenRequestSupport.isUnattendedQuit(
+            ReopenSender(bundleIdentifier: "com.apple.campo", executablePath: nil, isApplication: true), isQuitEvent: true, reason: nil)
+                     && !ReopenRequestSupport.isUnattendedQuit(
+            ReopenSender(bundleIdentifier: "com.apple.ActivityMonitor", executablePath: nil, isApplication: true), isQuitEvent: true, reason: nil),
+                     "assistant cleanup is rejected without blocking an explicit Activity Monitor quit")
         let reshowCode = stripCommentLines((statusAnchorAppDelegateSource
             .components(separatedBy: "func reshowStatusItem() {").last ?? "")
             .components(separatedBy: "\n    }").first ?? "")

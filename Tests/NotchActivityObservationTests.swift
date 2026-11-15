@@ -29,6 +29,7 @@ enum NotchActivityObservationTests {
     typealias NotchWatchService = Source<Other>
     typealias KeepAwakeManager = Source<Other>
     typealias NotchCalendarService = Source<Other>
+    typealias NotchShortcutsService = Source<Other>
     typealias NotchCallService = Source<Other>
 
     static func run(_ suite: TestSuite) {

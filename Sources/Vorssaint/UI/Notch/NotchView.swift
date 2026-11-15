@@ -276,7 +276,8 @@ struct NotchView: View {
     private func pillContent(_ activity: NotchCompactActivity, size: CGSize, x: CGFloat, focused: Bool, widened: Bool) -> some View {
         ZStack(alignment: .top) {
             if service.expanded && activity == service.expandedPillActivity {
-                if service.showingCall { NotchCallPanel(service: service) }
+                if activity == .shortcuts { NotchShortcutsPanel(service: service) }
+                else if service.showingCall { NotchCallPanel(service: service) }
                 else { expanded }
             } else if focused, service.noticeExpanded, let notice = service.notice, let content = notice.notification {
                 NotchNotificationPreviewView(notice: notice, content: content, service: service)
@@ -318,6 +319,7 @@ struct NotchView: View {
         case .calendar: NotchCalendarStrip(service: service, displayGeometry: geometry)
         case .watch: NotchWatchStrip(service: service, displayGeometry: geometry)
         case .keepAwake: NotchKeepAwakeStrip(service: service, displayGeometry: geometry)
+        case .shortcuts: NotchShortcutsStrip(geometry: geometry, size: geometry.compactActivitySize)
         case .call: NotchCallStrip(geometry: geometry, size: geometry.compactActivitySize)
         }
     }
@@ -326,6 +328,7 @@ struct NotchView: View {
     @ViewBuilder private func activityStrip(_ activity: NotchCompactActivity, size: CGSize) -> some View {
         if floats || service.usesPillActivityDeck {
             switch activity {
+            case .shortcuts: NotchShortcutsStrip(geometry: service.activitySatelliteGeometry, size: size)
             case .call: NotchCallStrip(geometry: service.activitySatelliteGeometry, size: size)
             case .timer: NotchCapsuleTimerStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
             case .watch: NotchCapsuleWatchStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
@@ -337,6 +340,7 @@ struct NotchView: View {
             }
         } else {
             switch activity {
+            case .shortcuts: NotchShortcutsStrip(geometry: service.compactActivityGeometry, size: size)
             case .call: NotchCallStrip(geometry: service.compactActivityGeometry, size: size)
             case .timer: NotchTimerStrip(service: service)
             case .watch: NotchWatchStrip(service: service)
@@ -1166,6 +1170,7 @@ private final class NotchActivityObservation: ObservableObject {
         case .watch: changes = NotchWatchService.shared.objectWillChange
         case .keepAwake: changes = KeepAwakeManager.shared.objectWillChange
         case .calendar: changes = NotchCalendarService.shared.objectWillChange
+        case .shortcuts: changes = NotchShortcutsService.shared.objectWillChange
         case .call: changes = NotchCallService.shared.objectWillChange
         }
         subscription = changes.sink { [weak self] _ in self?.objectWillChange.send() }
@@ -1256,6 +1261,8 @@ struct NotchPillCompactMark: View {
             EmptyView() // The complete provider group and clock are rendered together above.
         case .call:
             EmptyView()
+        case .shortcuts:
+            NotchShortcutsGlyph(side: physicalSide ? 16 : 14)
         case .watch:
             NotchWatchEye(size: physicalSide ? 15 : 13, hidden: watch.state == .hidden)
         case .keepAwake:
@@ -1297,6 +1304,8 @@ struct NotchPillCompactMark: View {
                     sideReading(NotchCalendarSupport.countdownText(until: countdown.target, now: context.date))
                 }
             } else { Circle().fill(.mint).frame(width: 6, height: 6) }
+        case .shortcuts:
+            Circle().fill(.cyan).frame(width: 5, height: 5)
         case .watch:
             Circle().fill(watch.state == .hidden ? Color.secondary : Color.green).frame(width: 6, height: 6)
         case .keepAwake:

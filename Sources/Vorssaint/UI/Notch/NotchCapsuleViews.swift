@@ -402,7 +402,7 @@ private struct NotchCapsuleCompanionMark: View {
                     NotchCapsuleCalendarStrip.clockMark(countdown, now: context.date)
                 }
             }
-        case .timer, .keepAwake, .watch, .call:
+        case .timer, .keepAwake, .watch, .call, .shortcuts:
             EmptyView()
         }
     }

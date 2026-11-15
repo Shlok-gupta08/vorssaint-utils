@@ -60,6 +60,7 @@ enum NotchMusicVisibilityTests {
         var liveActivitiesEnabledOnDisplay = true
         var copiesNeedMusic = false
         var hasCallActivity = false
+        var hasShortcutActivity = false
         var showingCall = false
         var dictationPhase = DictationPhase.idle
         var showsDictation: Bool { dictationPhase.presentsIsland }
@@ -438,6 +439,11 @@ enum NotchMusicVisibilityTests {
                         showsDownloads: false, wing: service.keepAwakeStripWing)
                      && service.surfaceSize == service.compactActivityGeometry.compactActivitySize,
                      "a running Keep Awake session takes the timer's wings in the closed island")
+        service.hasShortcutActivity = true
+        service.activitySelection.select(.keepAwake, available: service.compactActivities)
+        suite.expect(service.compactActivity == .shortcuts, "Shortcuts preempts the previous explicit activity selection")
+        service.hasShortcutActivity = false
+        suite.expect(service.compactActivity == .keepAwake, "the previous activity returns when the shortcut finishes")
         service.geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1470, height: 956), safeAreaTop: 32,
                                          cameraWidth: 180, menuBarHeight: 32, compactSideRoom: 100)
         service.workingAgentCount = 3
