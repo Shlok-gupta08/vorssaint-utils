@@ -53,9 +53,9 @@ enum NotchAgentTests {
           {"bucketId":"gemini-bool","window":"5h","remainingFraction":true}]}]}
         """
         let limits = AgentAntigravityActivity.limits(line(json), observed: Date())
-        suite.expect(limits?.windows.count == 1 && limits?.windows.first?.usedPercent == 100
-            && limits?.windows.first?.kind == .weekly,
-            "direct cloud quotas preserve exhaustion and skip disabled, missing and boolean fractions")
+        suite.expect(limits?.windows.count == 2 && limits?.windows.first(where: { $0.kind == .weekly })?.usedPercent == 100
+            && limits?.windows.first(where: { $0.kind == .session })?.disabled == true,
+            "direct cloud quotas preserve exhausted and disabled readings, skipping only missing and boolean fractions")
         suite.expect(AgentAntigravityActivity.limits(line("{\"buckets\":[{\"bucketId\":\"gemini-5h\",\"window\":\"5h\",\"remainingFraction\":0.25}]}"), observed: Date())?.windows.first?.usedPercent == 75,
             "ungrouped Gemini cloud buckets are accepted without a response wrapper")
         let home = FileManager.default.temporaryDirectory.appending(path: "vorssaint-quota-\(UUID().uuidString)")

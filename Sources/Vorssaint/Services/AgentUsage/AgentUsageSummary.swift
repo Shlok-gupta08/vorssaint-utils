@@ -406,13 +406,13 @@ struct AgentPace: Equatable {
 enum AgentLimitSupport {
     /// A window that renewed since it was read has nothing spent on it yet.
     static func current(_ window: AgentLimitWindow, at now: Date) -> AgentLimitWindow {
-        guard let resets = window.resetsAt, resets <= now else { return window }
+        guard !window.disabled, let resets = window.resetsAt, resets <= now else { return window }
         return AgentLimitWindow(id: window.id, kind: window.kind, minutes: window.minutes,
                                 scope: window.scope, usedPercent: 0, resetsAt: nil)
     }
 
     static func pace(for window: AgentLimitWindow, now: Date) -> AgentPace? {
-        guard let minutes = window.minutes, minutes > 0, let resets = window.resetsAt, resets > now else { return nil }
+        guard !window.disabled, let minutes = window.minutes, minutes > 0, let resets = window.resetsAt, resets > now else { return nil }
         let length = TimeInterval(minutes) * 60
         let elapsed = now.timeIntervalSince(resets.addingTimeInterval(-length))
         guard elapsed > 0 else { return nil }

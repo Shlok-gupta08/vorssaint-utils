@@ -4,6 +4,7 @@
 import AppKit
 import Combine
 import Darwin
+import UniformTypeIdentifiers
 
 /// Observes bounded start/finish metadata only. It never reads shortcut actions,
 /// inputs, results, or their library database, and never launches a shortcut.
@@ -13,7 +14,13 @@ final class NotchShortcutsService: ObservableObject {
     var primary: NotchShortcutSession? { sessions.first }
     var executionCount: Int { sessions.reduce(0) { $0 + $1.executions } }
     static let appURL = URL(fileURLWithPath: "/System/Applications/Shortcuts.app")
-    let icon = NSWorkspace.shared.icon(forFile: appURL.path)
+    /// The generic shortcut file-type icon — not the Shortcuts application icon.
+    let icon: NSImage = {
+        if let type = UTType("com.apple.shortcut") {
+            return NSWorkspace.shared.icon(for: type)
+        }
+        return NSWorkspace.shared.icon(forFile: appURL.path)
+    }()
 
     private let queue = DispatchQueue(label: "com.vorssaint.notch.shortcuts", qos: .utility)
     private var generation = UUID() // main thread

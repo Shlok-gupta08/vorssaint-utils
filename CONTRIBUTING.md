@@ -181,6 +181,7 @@ profile supplies OAuth refresh credentials; multiple profiles are not mixed.
 Without an ACP profile, a still-valid standalone Antigravity access token can
 be used. Tokens remain in memory and refresh credentials go only to Google's
 OAuth endpoint, with redirects rejected. Direct and hub-wrapped quota schemas
-are supported; disabled or missing-fraction buckets never invent allowances.
+are supported; missing-fraction buckets never invent allowances. Provider-disabled buckets keep
+their last reported readings and are explicitly labeled instead of hidden.
 Shortcuts compact wings use their own text budget, and nested workflow counts
 remain internal rather than being presented as a count of independent shortcuts.

@@ -149,8 +149,7 @@ final class AgentAntigravityActivity {
             let buckets = group["buckets"] as? [[String: Any]] ?? []
             for bucket in buckets {
                 let bucketId = bucket["bucketId"] as? String ?? ""
-                guard bucket["disabled"] as? Bool != true,
-                      groupName.localizedCaseInsensitiveContains("gemini") || bucketId.hasPrefix("gemini-"),
+                guard groupName.localizedCaseInsensitiveContains("gemini") || bucketId.hasPrefix("gemini-"),
                       let number = bucket["remainingFraction"] as? NSNumber,
                       CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.isFinite else { continue }
                 let rawWindow = bucket["window"] as? String ?? ""
@@ -178,7 +177,8 @@ final class AgentAntigravityActivity {
                     minutes: minutes,
                     scope: nil,
                     usedPercent: usedPercent,
-                    resetsAt: resetsAt
+                    resetsAt: resetsAt,
+                    disabled: bucket["disabled"] as? Bool == true
                 ))
             }
         }

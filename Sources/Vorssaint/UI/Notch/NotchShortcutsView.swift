@@ -21,9 +21,11 @@ struct NotchShortcutsStrip: View {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let wing = max(0, (size.width - geometry.cameraWidth) / 2)
                 HStack(spacing: 0) {
+                    // Left side: icon only. On physical notch the wing is narrow so
+                    // the name is omitted; on virtual notch / floating pill it shows.
                     HStack(spacing: 6) {
                         NotchShortcutsGlyph()
-                        if !geometry.isNotched || wing >= 100 {
+                        if !geometry.isNotched {
                             Text("Shortcuts").font(.system(size: 11, weight: .medium))
                                 .lineLimit(1).fixedSize()
                         }

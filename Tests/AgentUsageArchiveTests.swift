@@ -58,6 +58,12 @@ enum AgentUsageArchiveTests {
         let data = AgentUsageArchive.encode(contents, build: build)
         let decoded = AgentUsageArchive.decode(data, build: build)
         suite.expect(decoded == contents, "saved progress reads back as it was written")
+        var paused = contents
+        if !paused.store.limits.isEmpty && !paused.store.limits[0].windows.isEmpty {
+            paused.store.limits[0].windows[0].disabled = true
+        }
+        suite.expect(AgentUsageArchive.decode(AgentUsageArchive.encode(paused, build: build), build: build) == paused,
+                     "provider-disabled limit windows retain their readings and status across restarts")
         var sourced = contents
         sourced.store.limits = [AgentLimits.Source.sessionLog, .claudeApp, .account].map {
             AgentLimits(provider: .codex, windows: [], observedAt: now, source: $0)
@@ -295,7 +301,7 @@ enum AgentUsageArchiveTests {
              ["tokens", "longCacheWrite", "fast", "domestic", "webSearches"]),
             ("AgentTokens", labels(sampleRecord.record.tokens), ["input", "cacheWrite", "cacheRead", "output", "reasoning"]),
             ("AgentLimits", labels(sampleLimits), ["provider", "windows", "observedAt", "source"]),
-            ("AgentLimitWindow", labels(sampleWindow), ["id", "kind", "minutes", "scope", "usedPercent", "resetsAt"]),
+            ("AgentLimitWindow", labels(sampleWindow), ["id", "kind", "minutes", "scope", "usedPercent", "resetsAt", "disabled"]),
             ("AgentLiveSession", labels(sampleTurn),
              ["id", "provider", "started", "lastActivity", "model", "project", "tokens", "cost"]),
             ("AgentLogCursor", labels(cursor),

@@ -209,7 +209,9 @@ private struct NotchAgentLimitsCard: View {
                     .lineLimit(1)
                     .layoutPriority(1)
                 Group {
-                    if let resets = window.resetsAt {
+                    if window.disabled {
+                        Text("Provider paused").foregroundStyle(.secondary)
+                    } else if let resets = window.resetsAt {
                         Label(countdown(to: resets), systemImage: "arrow.clockwise")
                             .labelStyle(NotchAgentInlineLabel())
                             .foregroundStyle(.secondary)
@@ -253,6 +255,7 @@ private struct NotchAgentLimitsCard: View {
     private func help(_ window: AgentLimitWindow) -> String {
         var parts = [label(window), text.usedShare(AgentFormat.percent(window.usedFraction)),
                      text.left(AgentFormat.percent(window.remainingFraction))]
+        if window.disabled { parts.append("This bucket is marked disabled by Antigravity; the last reported reading is shown.") }
         if let resets = window.resetsAt {
             parts.append(resets.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(locale)))
         }

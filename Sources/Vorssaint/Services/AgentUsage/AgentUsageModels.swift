@@ -91,6 +91,7 @@ struct AgentLimitWindow: Equatable, Identifiable {
     let scope: String?
     let usedPercent: Double
     let resetsAt: Date?
+    var disabled: Bool = false
 
     var usedFraction: Double { min(1, max(0, usedPercent / 100)) }
     var remainingFraction: Double { 1 - usedFraction }
