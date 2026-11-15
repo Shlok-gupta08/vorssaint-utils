@@ -69,8 +69,16 @@ struct NotchShortcutsPanel: View {
             if let session = shortcuts.primary {
                 HStack(spacing: 10) {
                     NotchShortcutsGlyph(side: 26)
-                    Text(shortcuts.currentShortcutName ?? "Running shortcut")
-                        .font(.system(size: 13, weight: .medium)).lineLimit(1)
+                    Menu {
+                        ForEach(shortcuts.availableShortcutNames, id: \.self) { name in
+                            Button(name) { shortcuts.chooseShortcut(name) }
+                        }
+                    } label: {
+                        Text(shortcuts.currentShortcutName ?? "Choose running shortcut…")
+                            .font(.system(size: 13, weight: .medium)).lineLimit(1)
+                    }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                    .help("Choose the running shortcut if macOS has not supplied its identity")
                     Spacer(minLength: 4)
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(session.elapsed(at: context.date))

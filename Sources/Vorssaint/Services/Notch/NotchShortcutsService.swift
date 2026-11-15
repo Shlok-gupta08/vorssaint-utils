@@ -19,6 +19,7 @@ final class NotchShortcutsService: ObservableObject {
     // invent a colorful tile or reuse artwork from a previous execution.
     @Published private(set) var currentIcon: NSImage? = nil
     @Published private(set) var currentShortcutName: String? = nil
+    @Published private(set) var availableShortcutNames: [String] = []
 
     private let queue = DispatchQueue(label: "com.vorssaint.notch.shortcuts", qos: .utility)
     private var generation = UUID() // main thread
@@ -31,6 +32,7 @@ final class NotchShortcutsService: ObservableObject {
     private var lifecycle = NotchShortcutsLifecycle()
     private let metadata = NotchShortcutMetadata()
     private var lastMetadata = Date.distantPast
+    private var selectedMetadata: (id: String, name: String)?
     private var metadataSessionID: String?
 
     private init() {}
@@ -71,6 +73,20 @@ final class NotchShortcutsService: ObservableObject {
     }
 
     func openApp() { NSWorkspace.shared.open(Self.appURL) }
+
+    func chooseShortcut(_ name: String) {
+        guard let primary, availableShortcutNames.contains(name) else { return }
+        let token = generation
+        queue.async { [weak self] in
+            guard let self, self.queueToken == token else { return }
+            self.selectedMetadata = (primary.id, name)
+            let detail = self.metadata.artwork(name)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.generation == token, self.primary?.id == primary.id else { return }
+                self.currentShortcutName = detail.name; self.currentIcon = detail.icon
+            }
+        }
+    }
 
     func canCancel(_ session: NotchShortcutSession) -> Bool {
         session.executable.contains("/BackgroundShortcutRunner.xpc/")
@@ -167,13 +183,21 @@ final class NotchShortcutsService: ObservableObject {
         if refreshMetadata, let primary = next.first {
             metadataSessionID = primary.id
             lastMetadata = Date()
-            detail = metadata.read(pid: primary.pid, now: lastMetadata)
+            if let selectedMetadata, selectedMetadata.id == primary.id {
+                detail = metadata.artwork(selectedMetadata.name)
+            } else {
+                selectedMetadata = nil
+                detail = metadata.read(pid: primary.pid, now: lastMetadata)
+                if let detail { selectedMetadata = (primary.id, detail.name) }
+            }
         }
+        let names = metadata.availableNames
         DispatchQueue.main.async { [weak self] in
             guard let self, self.running, self.generation == token else { return }
             if self.sessions.first?.id != next.first?.id {
                 self.currentIcon = nil; self.currentShortcutName = nil
             }
+            if self.availableShortcutNames != names { self.availableShortcutNames = names }
             if refreshMetadata {
                 self.currentIcon = detail?.icon; self.currentShortcutName = detail?.name
             }

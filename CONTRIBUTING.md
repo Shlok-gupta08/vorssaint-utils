@@ -193,3 +193,9 @@ process birth time before signaling it. Artwork resolution matches exact native
 accessibility titles against library names and obtains TIFF artwork through the
 Shortcuts scripting interface. It is local and bounded; ambiguous or unavailable
 titles leave artwork unavailable rather than guessing. No dialog values are kept.
+
+When macOS does not expose a matching native title, the compact shortcut name
+opens a library-name picker. This explicit choice fetches the selected shortcut's
+real icon through the official scripting interface and applies only to the
+current runner identity. A verified identity remains attached until that run
+finishes, even after its native popover closes. No last-used shortcut is guessed.

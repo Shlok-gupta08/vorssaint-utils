@@ -9,6 +9,7 @@ import ApplicationServices
 final class NotchShortcutMetadata {
     struct Value { let name: String; let icon: NSImage? }
     private var names: Set<String> = []
+    var availableNames: [String] { names.sorted { $0.localizedStandardCompare($1) == .orderedAscending } }
     private var lastNames = Date.distantPast
     private var cached: [String: NSImage] = [:]
 
@@ -20,7 +21,6 @@ final class NotchShortcutMetadata {
     }
 
     func read(pid: Int32, now: Date) -> Value? {
-        guard AXIsProcessTrusted() else { return nil }
         if now.timeIntervalSince(lastNames) >= 60 {
             lastNames = now
             let result = BoundedProcessRunner.run("/usr/bin/shortcuts", ["list"], timeout: 2, maxOutputBytes: 65536)
@@ -28,7 +28,7 @@ final class NotchShortcutMetadata {
                 names = Set(text.split(separator: "\n").map(String.init))
             }
         }
-        guard !names.isEmpty else { return nil }
+        guard AXIsProcessTrusted(), !names.isEmpty else { return nil }
         var matches = Set<String>()
         var pids = [pid]
         for bundle in ["com.apple.shortcuts.events", "com.apple.shortcuts.ShortcutLiveActivityWidget"] {
@@ -73,6 +73,11 @@ final class NotchShortcutMetadata {
             }
         }
         guard matches.count == 1, let name = matches.first else { return nil }
+        return artwork(name)
+    }
+
+    func artwork(_ name: String) -> Value {
+        guard names.contains(name) else { return Value(name: name, icon: nil) }
         if let icon = cached[name] { return Value(name: name, icon: icon) }
         // The official scripting interface returns this shortcut's own TIFF.
         let script = "tell application id \"com.apple.shortcuts\" to get icon of shortcut " + Self.literal(name)
