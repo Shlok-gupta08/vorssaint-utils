@@ -939,6 +939,7 @@ final class NotchService: ObservableObject {
                                      timerHasSession: NotchTimerService.shared.session.hasSession,
                                      timerMode: NotchTimerService.shared.session.hasSession
                                         ? NotchTimerService.shared.session.mode : NotchTimerSupport.savedMode(),
+                                     timerShowsSeconds: NotchTimerService.shared.showsSeconds,
                                      agentsHeight: module == .agents && !detail && !panel
                                         ? agentsContentHeight(width: geometry.contentWidth) : nil)
     }
@@ -1528,7 +1529,7 @@ final class NotchService: ObservableObject {
 
     func open(_ module: NotchModule? = nil, pinned: Bool = false, takeFocus: Bool = true,
               appPanel: Bool = false, metric: MetricDetailKind? = nil, feedback: Bool = true, sections: Bool = false,
-              activity: NotchCompactActivity? = nil) {
+              activity: NotchCompactActivity? = nil, automatic: Bool = false) {
 #if VORSSAINT_DEVELOPMENT
         NotchHoverTrace.mark("open entered")
 #endif
@@ -1583,7 +1584,8 @@ final class NotchService: ObservableObject {
         if !expanded || expandedPillActivity == nil {
             expandedDeckPrimaryActivity = compactActivity ?? activity
         }
-        let existingActivity = (module == nil || expandedPillActivity != .shortcuts) && expanded && usesPillActivityDeck && !appPanel && !sections && metric == nil
+        let existingActivity = !automatic && (module == nil || expandedPillActivity != .shortcuts)
+            && expanded && usesPillActivityDeck && !appPanel && !sections && metric == nil
             ? expandedPillActivity : nil
         mutatePresentation(transitionContent: changesPresentation ? (expanded ? .replace : .reveal) : .none,
                            animatesPills: activity != nil || expandedPillActivity != nil) {
@@ -1596,7 +1598,7 @@ final class NotchService: ObservableObject {
             if pinned { self.pinned = true }
             selectedMetric = metric
             peeking = false
-            openedByHover = !takeFocus
+            openedByHover = !takeFocus && !automatic
             expanded = true
             // The open island covers a mirrored banner, and the inbox keeps
             // the message; a held one must not reappear after collapsing.
@@ -2429,6 +2431,15 @@ final class NotchService: ObservableObject {
             open(.files)
         }
         return accepted
+    }
+
+    func presentTimerCompletion(_ completion: NotchNotice) {
+        guard acceptsSystemFeedback, modules.contains(.timer), !hasCallActivity,
+              captureControls == nil, !heldDrag, !keepsWorkingSurface else {
+            show(completion)
+            return
+        }
+        open(.timer, takeFocus: false, feedback: false, automatic: true)
     }
 
     @discardableResult
@@ -4162,7 +4173,9 @@ final class NotchService: ObservableObject {
                 }.store(in: &subscriptions)
         } else { dictationPhase = .idle }
         if modules.contains(.timer) {
-            NotchTimerService.shared.$session.removeDuplicates().receive(on: DispatchQueue.main)
+            let timer = NotchTimerService.shared
+            timer.$session.removeDuplicates().combineLatest(timer.$showsSeconds.removeDuplicates())
+                .receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in
                     self?.syncMenuSpaceMonitoring()
                     self?.objectWillChange.send()

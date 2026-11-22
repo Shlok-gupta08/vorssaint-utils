@@ -10,13 +10,17 @@ enum NotchTimerPhase: String { case timer, focus, shortBreak, longBreak, stopwat
 enum NotchTimerRulerScale {
     static let spacing = 14.0
 
-    static func moving(_ value: Double, by points: Double) -> Double {
-        guard value.isFinite, points.isFinite else { return 1 }
-        return min(180, max(1, value - points / spacing))
+    static let minutes = 1...180
+    static let countdownMinutes = 0...180
+    static let seconds = 0...59
+
+    static func moving(_ value: Double, by points: Double, in range: ClosedRange<Int> = minutes) -> Double {
+        guard value.isFinite, points.isFinite else { return Double(range.lowerBound) }
+        return min(Double(range.upperBound), max(Double(range.lowerBound), value - points / spacing))
     }
 
-    static func minute(_ value: Double) -> Int {
-        Int(moving(value, by: 0).rounded())
+    static func selection(_ value: Double, in range: ClosedRange<Int> = minutes) -> Int {
+        Int(moving(value, by: 0, in: range).rounded())
     }
 
     static func offset(of minute: Int, selected: Int) -> Double {
@@ -108,7 +112,7 @@ struct NotchTimerSession: Equatable {
         return pausedReading ?? (completed || countsUp ? 0 : duration)
     }
 
-    mutating func start(mode: NotchTimerMode, minutes: Int, now: TimeInterval,
+    mutating func start(mode: NotchTimerMode, minutes: Int, seconds: Int = 0, now: TimeInterval,
                         configuration: NotchPomodoroConfiguration = NotchPomodoroConfiguration()) {
         guard !hasSession, now.isFinite else { return }
         self.mode = mode
@@ -117,7 +121,8 @@ struct NotchTimerSession: Equatable {
         switch mode {
         case .timer:
             phase = .timer
-            duration = Double(min(180, max(1, minutes))) * 60
+            let chosen = NotchTimerSupport.countdownDuration(minutes: minutes, seconds: seconds)
+            duration = chosen > 0 ? chosen : 60
             anchor = now + duration
         case .pomodoro:
             phase = .focus
@@ -198,7 +203,13 @@ enum NotchTimerSupport {
         static let padding: CGFloat = 18
     }
 
-    static let timerLimit: TimeInterval = 180 * 60
+    static let timerLimit = countdownDuration(minutes: 180, seconds: 59)
+
+    static func countdownDuration(minutes: Int, seconds: Int) -> TimeInterval {
+        let minutes = min(NotchTimerRulerScale.countdownMinutes.upperBound, max(0, minutes))
+        let seconds = min(NotchTimerRulerScale.seconds.upperBound, max(0, seconds))
+        return Double(minutes * 60 + seconds)
+    }
     /// A stopwatch keeps counting; its clock saturates at the widest reading
     /// the surface fits, two hour digits.
     static let stopwatchLimit: TimeInterval = 100 * 3600 - 1

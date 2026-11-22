@@ -9,9 +9,11 @@ import Combine
 final class NotchTimerService: ObservableObject {
     static let shared = NotchTimerService()
     @Published private(set) var session = NotchTimerSession()
+    @Published var showsSeconds = false
     private let origin = ContinuousClock.now
     private var completionTask: Task<Void, Never>?
     private var suspended = true
+    private var completionNeedsPresentation = false
     private let alert = NotchTimerAlert()
     private init() {}
 
@@ -23,24 +25,26 @@ final class NotchTimerService: ObservableObject {
     func syncWithPreferences() {
         guard NotchTimerSupport.isEnabled() else { stop(); return }
         suspended = false
-        finishIfDue()
+        finishIfDue(at: now)
+        presentCompletionIfPossible()
         if session.completed { alert.start(enabled: NotchTimerSupport.isSoundEnabled()) }
         scheduleCompletion()
     }
 
-    func start(mode: NotchTimerMode, minutes: Int) {
+    func start(mode: NotchTimerMode, minutes: Int, seconds: Int = 0) {
         guard !suspended, NotchTimerSupport.isEnabled() else { return }
         guard !session.hasSession else { return }
         alert.stop()
-        session.start(mode: mode, minutes: minutes, now: now, configuration: .load())
+        session.start(mode: mode, minutes: minutes, seconds: seconds, now: now, configuration: .load())
         scheduleCompletion()
     }
 
     func pauseOrResume() {
         guard !suspended, NotchTimerSupport.isEnabled() else { return }
-        finishIfDue()
-        if session.isRunning { session.pause(at: now) }
-        else if session.isPaused { session.resume(at: now) }
+        let instant = now
+        finishIfDue(at: instant)
+        if session.isRunning { session.pause(at: instant) }
+        else if session.isPaused { session.resume(at: instant) }
         scheduleCompletion()
     }
 
@@ -48,12 +52,14 @@ final class NotchTimerService: ObservableObject {
         guard !suspended, NotchTimerSupport.isEnabled() else { return }
         guard session.canStartNext else { return }
         alert.stop()
+        completionNeedsPresentation = false
         session.startNext(at: now)
         scheduleCompletion()
     }
 
     func cancel() {
         alert.stop()
+        completionNeedsPresentation = false
         completionTask?.cancel(); completionTask = nil
         session.cancel()
     }
@@ -66,14 +72,22 @@ final class NotchTimerService: ObservableObject {
 
     func stop() { suspend(); cancel() }
 
-    private func finishIfDue() {
-        guard session.finishIfDue(at: now) else { return }
+    private func finishIfDue(at instant: TimeInterval) {
+        guard session.finishIfDue(at: instant) else { return }
         alert.stop()
+        alert.start(enabled: NotchTimerSupport.isSoundEnabled())
+        completionNeedsPresentation = true
+        presentCompletionIfPossible()
+    }
+
+    private func presentCompletionIfPossible() {
+        let notch = NotchService.shared
+        guard completionNeedsPresentation, notch.acceptsUserInteraction else { return }
+        completionNeedsPresentation = false
         let text = FeatureStrings.notchActivities(L10n.shared.language)
-        NotchService.shared.show(NotchNotice(event: .timer,
+        notch.presentTimerCompletion(NotchNotice(event: .timer,
             title: session.cycleFinished ? text.pomodoroFinished : text.finished,
             detail: text.phase(session.phase), symbol: "timer"))
-        alert.start(enabled: NotchTimerSupport.isSoundEnabled())
     }
 
     private func scheduleCompletion() {
@@ -85,7 +99,7 @@ final class NotchTimerService: ObservableObject {
             catch { return }
             guard let self, !Task.isCancelled, !self.suspended, NotchTimerSupport.isEnabled() else { return }
             self.completionTask = nil
-            self.finishIfDue()
+            self.finishIfDue(at: self.now)
         }
     }
 }

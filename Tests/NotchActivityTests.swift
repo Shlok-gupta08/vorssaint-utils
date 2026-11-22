@@ -360,12 +360,21 @@ enum NotchActivityTests {
         session.cancel()
         session.start(mode: .timer, minutes: Int.max, now: 0)
         suite.expect(session.duration == 10_800, "corrupt duration input stays within three hours")
+        session.cancel()
+        session.start(mode: .timer, minutes: 0, seconds: 42, now: 100)
+        suite.expect(session.deadline == 142 && session.reading(at: 100) == 42
+                        && !session.finishIfDue(at: 141.999) && session.finishIfDue(at: 142),
+                     "a seconds-only countdown expires at its exact deadline")
+        session.cancel()
+        session.start(mode: .timer, minutes: 5, seconds: Int.max, now: 10)
+        suite.expect(session.deadline == 369 && NotchTimerSupport.clockText(session.duration) == "05:59",
+                     "seconds are added to the minutes and clamp to the last ruler tick")
         suite.expect(NotchTimerSupport.clockText(0.01) == "00:01" && NotchTimerSupport.clockText(-1) == "00:00"
                && NotchTimerSupport.clockText(.nan) == "00:00", "display rounds up and safely handles invalid remaining time")
         let clockCases: [(TimeInterval, String)] = [
             (59, "00:59"), (60, "01:00"), (3599, "59:59"), (3599.01, "1:00:00"),
             (3600, "1:00:00"), (3601, "1:00:01"), (8580, "2:23:00"),
-            (10800, "3:00:00"), (.greatestFiniteMagnitude, "3:00:00"), (.infinity, "00:00")
+            (10800, "3:00:00"), (10859, "3:00:59"), (.greatestFiniteMagnitude, "3:00:59"), (.infinity, "00:00")
         ]
         for (seconds, expected) in clockCases {
             suite.expect(NotchTimerSupport.clockText(seconds) == expected,
@@ -716,27 +725,32 @@ enum NotchActivityTests {
             suite.expect(NotchTimerRulerScale.offset(of: minute, selected: minute) == 0,
                    "the chosen minute stays under the center pointer, including the initial value and both endpoints")
         }
-        suite.expect(NotchTimerRulerScale.minute(NotchTimerRulerScale.moving(15, by: 14)) == 14
-               && NotchTimerRulerScale.minute(NotchTimerRulerScale.moving(15, by: -14)) == 16,
+        suite.expect(NotchTimerRulerScale.selection(NotchTimerRulerScale.moving(15, by: 14)) == 14
+               && NotchTimerRulerScale.selection(NotchTimerRulerScale.moving(15, by: -14)) == 16,
                "dragging the ruler by one tick changes one minute in the matching direction")
         for minute in [1, 5, 15, 30, 180] {
             let offset = NotchTimerRulerScale.offset(of: minute, selected: 15)
-            suite.expect(NotchTimerRulerScale.minute(NotchTimerRulerScale.moving(15, by: -offset)) == minute,
+            suite.expect(NotchTimerRulerScale.selection(NotchTimerRulerScale.moving(15, by: -offset)) == minute,
                    "clicking a drawn tick selects its own minute, with the same spacing used by dragging")
         }
         var value = 15.0
         for _ in 0..<3 { value = NotchTimerRulerScale.moving(value, by: 2) }
-        suite.expect(NotchTimerRulerScale.minute(value) == 15, "small movements do not repeatedly change the selected tick")
+        suite.expect(NotchTimerRulerScale.selection(value) == 15, "small movements do not repeatedly change the selected tick")
         value = NotchTimerRulerScale.moving(value, by: 2)
-        suite.expect(NotchTimerRulerScale.minute(value) == 14, "fine scroll and drag deltas accumulate until crossing a tick")
+        suite.expect(NotchTimerRulerScale.selection(value) == 14, "fine scroll and drag deltas accumulate until crossing a tick")
         value = NotchTimerRulerScale.moving(1, by: 10_000)
         suite.expect(value == 1 && NotchTimerRulerScale.moving(value, by: -14) == 2,
                "dragging beyond the minimum does not leave a dead zone when reversing")
         value = NotchTimerRulerScale.moving(180, by: -10_000)
         suite.expect(value == 180 && NotchTimerRulerScale.moving(value, by: 14) == 179,
                "dragging beyond the maximum allows an immediate reversal")
-        suite.expect(NotchTimerRulerScale.minute(.nan) == 1 && NotchTimerRulerScale.minute(.infinity) == 1
-               && NotchTimerRulerScale.minute(.greatestFiniteMagnitude) == 180,
+        let seconds = NotchTimerRulerScale.seconds
+        suite.expect(NotchTimerRulerScale.moving(0, by: 10_000, in: seconds) == 0
+                        && NotchTimerRulerScale.moving(59, by: -10_000, in: seconds) == 59
+                        && NotchTimerRulerScale.moving(59, by: 14, in: seconds) == 58,
+                     "the seconds ruler clamps at both ends and moves away from the end on reversal")
+        suite.expect(NotchTimerRulerScale.selection(.nan) == 1 && NotchTimerRulerScale.selection(.infinity) == 1
+               && NotchTimerRulerScale.selection(.greatestFiniteMagnitude) == 180,
                "invalid or excessive ruler values cannot escape the supported duration range")
     }
 

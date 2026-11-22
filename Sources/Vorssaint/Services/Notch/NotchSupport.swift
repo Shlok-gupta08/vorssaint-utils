@@ -291,6 +291,7 @@ enum NotchLayout {
     /// The Pomodoro's breaks and sessions as one line of readouts under the ruler.
     static let timerSettingsRowHeight: CGFloat = 28
     static let timerRulerHeight: CGFloat = 82
+    static var timerSecondsRowHeight: CGFloat { timerRowSpacing + timerRulerHeight }
     static let timerMinimumRulerHeight: CGFloat = 56
     static let timerStartHeight: CGFloat = 36
     /// From this width the start button shares the mode row in every
@@ -2531,6 +2532,7 @@ struct NotchGeometry: Equatable {
                       fileMediaHeight: CGFloat? = nil, systemCards: Int = 6, toolCount: Int? = 8,
                       capturePreviewHeight: CGFloat? = nil,
                       timerHasSession: Bool = false, timerMode: NotchTimerMode = .timer,
+                      timerShowsSeconds: Bool = false,
                       agentsHeight: CGFloat? = nil) -> CGSize {
         if expandedScale != 1 {
             // Size from the preset's reference layout before scaling. A wider
@@ -2545,10 +2547,12 @@ struct NotchGeometry: Equatable {
                 musicHasControlsRow: musicHasControlsRow, musicExtraHeight: musicExtraHeight,
                 fileMediaHeight: fileMediaHeight, systemCards: systemCards, toolCount: toolCount,
                 capturePreviewHeight: capturePreviewHeight, timerHasSession: timerHasSession,
-                timerMode: timerMode, agentsHeight: agentsHeight)
+                timerMode: timerMode, timerShowsSeconds: timerShowsSeconds, agentsHeight: agentsHeight)
             return scaledExpandedSize(size, from: reference)
         }
         let budget = contentBudget
+        let extraTimerHeight = module == .timer && !timerHasSession && timerMode == .timer
+            && timerShowsSeconds && !detail && !panel ? NotchLayout.timerSecondsRowHeight : 0
         let showsCapturePreview = module == .captures && !detail && capturePreviewHeight != nil
         let showsFileMedia = module == .files && !detail && fileMediaHeight != nil
         let contentHeight: CGFloat
@@ -2597,6 +2601,7 @@ struct NotchGeometry: Equatable {
         }
         var preferredHeight = headerTopInset + headerChromeHeight + contentHeight
         if layout == .custom { preferredHeight = min(preferredHeight, customHeight) }
+        preferredHeight += extraTimerHeight
         return CGSize(width: expandedWidth,
                       height: boundedExpandedHeight(preferredHeight))
     }

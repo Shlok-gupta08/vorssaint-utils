@@ -216,6 +216,19 @@ enum NotchTests {
         suite.expect(NotchLayout.timer(mode: .pomodoro, hasSession: true, width: 424, height: 180) == 118
                && NotchLayout.timer(mode: .timer, hasSession: true, width: 304, height: tight) == 96,
                "a running session keeps its control row in every layout")
+        for layout in NotchSize.allCases {
+            let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                                         safeAreaTop: 32, cameraWidth: 185, layout: layout, compactSideRoom: 200)
+            let setup = geometry.expandedSize(module: .timer)
+            let withSeconds = geometry.expandedSize(module: .timer, timerShowsSeconds: true)
+            suite.expect(withSeconds.height == setup.height + NotchLayout.timerSecondsRowHeight,
+                         "seconds expand the timer by one ruler row in the \(layout) layout")
+            suite.expect(geometry.expandedSize(module: .timer, timerHasSession: true, timerShowsSeconds: true)
+                            == geometry.expandedSize(module: .timer, timerHasSession: true)
+                            && geometry.expandedSize(module: .timer, timerMode: .pomodoro, timerShowsSeconds: true)
+                            == geometry.expandedSize(module: .timer, timerMode: .pomodoro),
+                         "seconds only grow the countdown setup")
+        }
         suite.expect(NotchLayout.musicPlayerHeight(layout: .compact, height: 180) == 120
                && NotchLayout.musicPlayerHeight(layout: .spacious, height: 264) == 148
                && NotchLayout.musicPlayerHeight(layout: .custom, height: 154) == 112
