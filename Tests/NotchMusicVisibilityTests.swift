@@ -52,6 +52,10 @@ enum NotchMusicVisibilityTests {
     }
     enum NotchPanel { static let normalLevel = 0 }
     enum NSEvent { static let mouseLocation = CGPoint.zero }
+    final class ShelfService {
+        static let shared = ShelfService()
+        func setLiveActivityPaused(_ paused: Bool) {}
+    }
 
     class State {
         var hidingExpandedForHover = false
@@ -109,6 +113,9 @@ enum NotchMusicVisibilityTests {
         var noticeWork: DispatchWorkItem?
         var dragPlaceholder = false
         var hasTimerActivity = false
+        var hasRecordingActivity = false
+        var hasShelfActivity = false
+        var hasTeleprompterActivity = false
         var hasWatchActivity = false
         var hasDownloadActivity = false
         var downloadName: String?

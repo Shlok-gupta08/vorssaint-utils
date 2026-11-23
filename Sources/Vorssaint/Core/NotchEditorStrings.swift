@@ -91,6 +91,7 @@ struct NotchEditorStrings {
         case .scratchpad: return scratchpadSummary
         case .agents: return agentsSummary
         case .watch: return watchSummary
+        case .teleprompter: return "Voice-tracked teleprompter right beneath your camera."
         }
     }
 }

@@ -79,8 +79,8 @@ enum NotchAgentTests {
             let second = home.appending(path: ".t3/userdata/providers/antigravity/two/antigravity-acp/acp_token.json")
             try FileManager.default.createDirectory(at: second.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data(contentsOf: credential).write(to: second)
-            suite.expect(AgentAntigravityQuota.credentialURLs(home: home).isEmpty,
-                         "multiple accounts cannot silently contribute mixed quota readings")
+            suite.expect(AgentAntigravityQuota.credentialURLs(home: home).count == 2,
+                         "multiple Antigravity ACP accounts are each discovered for independent quota tracking")
         } catch { suite.expect(false, "cloud quota fixture: \(error)") }
         suite.expect(AgentAntigravityQuota.Credential.decode(line("{\"access_token\":\"incomplete\"}")) == nil,
                      "incomplete credential files do not authorize quota requests")
@@ -2605,6 +2605,13 @@ enum NotchAgentTests {
         let antigravityLimits = NotchAgentTile(card: .limits, provider: .antigravity)
         let supported = NotchAgentSupport.tiles(cards: [.limits, .spend, .live, .trend], providers: [.codex, .antigravity])
         suite.expect(supported == [codex, antigravityLimits, spend, live, trend], "Antigravity now gets its own limits card")
+        let threeProviders = NotchAgentSupport.tiles(cards: [.limits, .spend, .live, .trend],
+                                                    providers: [.claude, .codex, .antigravity])
+        let threeRows = NotchAgentSupport.rows(threeProviders, width: 424)
+        suite.expect(threeRows == [[limits, codex], [antigravityLimits, spend], [trend], [live]]
+                        && NotchAgentSupport.heightThroughTrend(threeRows)
+                            == NotchAgentSupport.contentHeight([[limits, codex], [antigravityLimits, spend], [trend]]),
+                     "a third provider keeps Trends above Active Agents and sizes the initial viewport through Trends")
         let resets = NotchAgentTile(card: .resets, provider: .codex)
         suite.expect(NotchAgentSupport.tiles(cards: [.resets, .spend], providers: [.claude, .codex]) == [resets, spend]
                         && NotchAgentSupport.tiles(cards: [.resets, .spend], providers: [.claude]) == [spend],

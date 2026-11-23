@@ -252,6 +252,9 @@ final class ScreenRecorderService: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var isPaused = false
     @Published private(set) var elapsedSeconds = 0
+    @Published private(set) var capturesSystemAudio = false
+    @Published private(set) var capturesMicrophone = false
+    var elapsedLabel: String { RecorderSupport.elapsedLabel(seconds: elapsedSeconds) }
     private var session: RecorderSession?
     private var indicator: RecorderIndicator?
     private var editors: [RecorderEditorController] = []
@@ -486,20 +489,25 @@ final class ScreenRecorderService: ObservableObject {
             QuickToolHUD.show(icon: "mic.slash", message: self.strings.microphoneUnavailableHUD)
         }
         self.session = session
+        self.capturesSystemAudio = capturesSystemAudio
+        self.capturesMicrophone = capturesMicrophone
 
         // The indicator goes up BEFORE the stream is asked to start, because
         // the capture filter names the windows it leaves out and can only name
-        // the ones that already exist. Everything else this app shows stays in
-        // the picture.
+        // the ones that already exist. When Dynamic Island owns the recording
+        // live activity, keep the region guide border and skip the separate
+        // floating pill so there is one clean surface to pause or stop from.
         let indicator = indicator ?? RecorderIndicator(
             onPause: { [weak self] in self?.togglePause() },
             onStop: { [weak self] in self?.stop() })
-        indicator.show(on: NSScreen.screens.first { $0.displayID == region.displayID },
-                       tooltip: strings.indicatorTooltip,
-                       pauseTooltip: strings.pauseButton,
-                       resumeTooltip: strings.resumeButton,
-                       stopTooltip: strings.stopButton)
-        indicator.update(elapsed: RecorderSupport.elapsedLabel(seconds: 0))
+        if !NotchSupport.routesRecordingLiveActivity() {
+            indicator.show(on: NSScreen.screens.first { $0.displayID == region.displayID },
+                           tooltip: strings.indicatorTooltip,
+                           pauseTooltip: strings.pauseButton,
+                           resumeTooltip: strings.resumeButton,
+                           stopTooltip: strings.stopButton)
+            indicator.update(elapsed: RecorderSupport.elapsedLabel(seconds: 0))
+        }
         self.indicator = indicator
 
         Task { @MainActor [weak self] in
@@ -640,6 +648,8 @@ final class ScreenRecorderService: ObservableObject {
     private func endRecordingSurfaces() {
         isRecording = false
         isPaused = false
+        capturesSystemAudio = false
+        capturesMicrophone = false
         elapsedTimer?.invalidate()
         elapsedTimer = nil
         if let sleepActivity {

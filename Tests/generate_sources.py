@@ -353,6 +353,8 @@ def main():
           + "let outputControlLock = NSLock()\nvar outputControlLifetime = UUID()\nlet halQueue = Queue()\n"
           + "var controlRefreshes: [AudioObjectID] = []\nvar listenerRefreshes = 0\n"
           + "static let outputControlListenerCallback: AudioObjectPropertyListenerProc = { _, _, _, _ in noErr }\n"
+          + "static let listenerCallback: AudioObjectPropertyListenerProc = { _, _, _, _ in noErr }\n"
+          + declaration(mixer, "    private static func outputPropertyCallback(")
           + "var listenerClient: UnsafeMutableRawPointer? { nil }\n"
           + "static func defaultOutputDeviceID() -> AudioObjectID { Hardware.device }\n"
           + "static func setOutputVolume(_ value: Float, for device: AudioObjectID) -> Bool {\n"
@@ -473,7 +475,7 @@ def main():
     shelf = "Sources/Vorssaint/Services/Shelf/ShelfService.swift"
     write("ShelfDragCompletion.swift", "import Foundation\n\nextension ShelfDragCompletionContract {\n"
           + "final class Service {\nvar activeInternalDragIDs: [UUID] = []\n"
-          + "weak var internalDragWindow: NSWindow?\nvar internalDragWasMerged = false\n"
+          + "weak var internalDragWindow: NSWindow?\nvar internalDragWasMerged = false\nvar internalDragInvertActive = false\n"
           + "var panel: NSWindow?\nvar dockedPanel: NSWindow?\n"
           + "var isPinned = false\nvar isVisible = false\nvar dockedVisible = false\n"
           + "var removed: [UUID] = []\nvar protectedIDs: Set<UUID> = []\n"
@@ -523,6 +525,8 @@ def main():
               "    func beginPickingBlurArea(", "    func endPickingBlurArea("])
           + "}\n}\n")
     write("NotchVolumeFeedback.swift", "import Foundation\nimport Combine\n"
+          + "extension NotchVolumeFeedbackTests.AppVolumeMixer {\n"
+          + declaration(mixer, "    func systemOutputSymbol(") + "}\n"
           + "extension NotchVolumeFeedbackTests {\nfinal class Service: State {\n"
           + "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
               "    private func bindVolumeEvents(", "    private func volumeChanged(",
@@ -633,6 +637,8 @@ def main():
                                                 "AppFeature.monitorDisk.isAvailable(in: ReviewDefaults.current)")
     music_visibility = music_visibility.replace("AppFeature.fanControl.isAvailable",
                                                 "AppFeature.fanControl.isAvailable(in: ReviewDefaults.current)")
+    music_visibility = music_visibility.replace("AppFeature.shelf.isAvailable",
+                                                "AppFeature.shelf.isAvailable(in: ReviewDefaults.current)")
     write("NotchMusicVisibility.swift", "import Foundation\nextension NotchMusicVisibilityTests {\n"
           + "final class Service: State {\n" + music_visibility + "}\n}\n")
     write("NotchScreenEdgeClicks.swift", "import AppKit\nextension NotchScreenEdgeClickTests {\nfinal class Service: State {\n"

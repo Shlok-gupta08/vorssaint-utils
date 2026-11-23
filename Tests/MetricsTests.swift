@@ -166,6 +166,7 @@ struct MetricsTests {
             }),
             ("wallpaper", { WallpaperContract.run(suite) }),
             ("emoji", { CommandBarEmojiContract.run(suite) }),
+            ("combined-features", { CombinedFeaturesTests.run(suite) }),
         ]
         var selected = Set<String>()
         var listOnly = false

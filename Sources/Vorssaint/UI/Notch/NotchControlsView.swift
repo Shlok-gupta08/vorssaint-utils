@@ -211,7 +211,7 @@ struct NotchAudioControls: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var level: Double? { mixer.systemOutputVolume.map { mixer.systemOutputMuted == true ? 0 : $0 } }
     private var deviceName: String {
-        mixer.outputDevices.first(where: { $0.uid == mixer.currentOutputDeviceUID })?.name ?? l10n.s.mixerSystemOutputTitle
+        mixer.currentOutputDevice?.name ?? l10n.s.mixerSystemOutputTitle
     }
 
     var body: some View {
@@ -289,7 +289,7 @@ struct NotchAudioControls: View {
         Button {
             if let muted = mixer.systemOutputMuted { adjustOutput(muted: !muted) }
         } label: {
-            Image(systemName: mixer.systemOutputMuted == true ? "speaker.slash.fill" : "speaker.wave.2.fill")
+            Image(systemName: mixer.systemOutputSymbol(muted: mixer.systemOutputMuted == true))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(mixer.systemOutputMuted == true ? Color.red : Color.white)
                 .contentTransition(.symbolEffect(.replace))
@@ -319,7 +319,7 @@ struct NotchAudioControls: View {
 
     private var outputItems: [NotchMenuItem] {
         var items = mixer.outputDevices.filter(\.canBeDefaultOutput).map { device in
-            NotchMenuItem(title: device.name, checked: device.uid == mixer.currentOutputDeviceUID) {
+            NotchMenuItem(title: device.name, checked: device.uid == mixer.currentOutputDeviceUID, symbol: device.symbol) {
                 _ = mixer.setUniversalOutputDeviceUID(device.uid)
             }
         }
@@ -387,7 +387,14 @@ private struct NotchKeyboardBrightnessControls: View {
                 HStack(spacing: 8) {
                     glyph
                     slider
-                    percent.frame(width: 57, alignment: .trailing)
+                    HStack(spacing: 5) {
+                        percent.frame(width: 36, alignment: .trailing)
+                        Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                            .hidden()
+                            .accessibilityHidden(true)
+                    }
+                    .padding(.horizontal, 4)
+                    .frame(height: 24)
                 }
                 .frame(height: 28)
             } else {

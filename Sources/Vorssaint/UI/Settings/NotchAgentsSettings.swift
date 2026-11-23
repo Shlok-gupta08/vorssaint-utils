@@ -41,6 +41,28 @@ struct NotchAgentsSettingsControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("AI Agents Studio")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Manage multiple accounts per provider, customize card widths and grid layout, and preview your Dynamic Island live.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Button {
+                    SettingsRouter.shared.request(FeatureSettingsDestination(.agents))
+                } label: {
+                    Label("Open Settings", systemImage: "slider.horizontal.3")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+            .padding(12)
+            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.accentColor.opacity(0.22), lineWidth: 0.75))
+
             Text(text.settingsDescription)
                 .font(.callout)
                 .foregroundStyle(.secondary)

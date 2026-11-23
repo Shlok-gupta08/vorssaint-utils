@@ -61,7 +61,9 @@
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Vorssaint uses Bluetooth only to read the battery level of connected peripherals. Nothing leaves your Mac.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Vorssaint uses your microphone when you start dictation or enable microphone audio for a screen recording. Speech recognition runs on your Mac. Optional text cleanup sends only the transcript to the provider you configure.</string>
+	<string>Vorssaint uses your microphone when you start dictation, voice-tracked teleprompter, or enable microphone audio for a screen recording. Speech recognition runs on your Mac. Optional text cleanup sends only the transcript to the provider you configure.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Vorssaint uses on-device speech recognition to automatically scroll your teleprompter script in sync with your voice. Audio stays on this Mac.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Show your upcoming appointments in the notch. Calendar events stay on this Mac.</string>
 	<key>NSCameraUsageDescription</key>

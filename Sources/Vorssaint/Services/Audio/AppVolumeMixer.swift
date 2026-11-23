@@ -7,13 +7,17 @@ import AudioToolbox
 import Combine
 import CoreAudio
 import Darwin
+import IOBluetooth
 
 struct MixerOutputDevice: Identifiable, Equatable {
     let id: String
     let uid: String
     let name: String
     let isDefault: Bool
-    let isHeadphones: Bool
+    let symbol: String
+    var isHeadphones: Bool {
+        ["headphones", "earpods", "airpods", "airpodspro", "airpodsmax"].contains(symbol)
+    }
     let canBeDefaultOutput: Bool
     let canBeDefaultSystemOutput: Bool
     let priorityTier: MixerRoutingSupport.PriorityTier
@@ -88,6 +92,15 @@ final class AppVolumeMixer: ObservableObject {
     /// Apps kept out of the list (issue #300), including the Finder when its
     /// own toggle hides it, so the panel can offer to bring any of them back.
     @Published private(set) var hiddenApps: [MixerHiddenApp] = []
+
+    var currentOutputDevice: MixerOutputDevice? {
+        outputDevices.first { $0.uid == currentOutputDeviceUID }
+    }
+
+    func systemOutputSymbol(muted: Bool) -> String {
+        let symbol = currentOutputDevice?.symbol ?? "speaker.wave.2.fill"
+        return muted && symbol == "speaker.wave.2.fill" ? "speaker.slash.fill" : symbol
+    }
 
     private var engines: [String: any GainEngine] = [:]
     /// Arbitrates the engine builds running off-main: it suppresses duplicate
@@ -324,6 +337,10 @@ final class AppVolumeMixer: ObservableObject {
         return noErr
     }
 
+    private static func outputPropertyCallback(for selector: AudioObjectPropertySelector) -> AudioObjectPropertyListenerProc {
+        selector == kAudioDevicePropertyDataSource ? listenerCallback : outputControlListenerCallback
+    }
+
     /// Identifies these registrations as ours. Unretained is safe here and
     /// only here: the mixer is a single instance that lives as long as the app.
     private var listenerClient: UnsafeMutableRawPointer {
@@ -362,14 +379,14 @@ final class AppVolumeMixer: ObservableObject {
         removeOutputControlListeners()
         guard let device else { return }
 
-        let selectors = Self.outputVolumeSelectors + [kAudioDevicePropertyMute]
+        let selectors = Self.outputVolumeSelectors + [kAudioDevicePropertyMute, kAudioDevicePropertyDataSource]
         for selector in selectors {
             var address = AudioObjectPropertyAddress(mSelector: selector,
                                                      mScope: kAudioObjectPropertyScopeOutput,
                                                      mElement: kAudioObjectPropertyElementMain)
             guard AudioObjectHasProperty(device, &address) else { continue }
             if AudioObjectAddPropertyListener(device, &address,
-                                              Self.outputControlListenerCallback,
+                                              Self.outputPropertyCallback(for: selector),
                                               listenerClient) == noErr {
                 outputControlListenerAddresses.append(address)
             }
@@ -383,7 +400,7 @@ final class AppVolumeMixer: ObservableObject {
         if let device = outputControlListenerDevice {
             for var address in outputControlListenerAddresses {
                 AudioObjectRemovePropertyListener(device, &address,
-                                                  Self.outputControlListenerCallback,
+                                                  Self.outputPropertyCallback(for: address.mSelector),
                                                   listenerClient)
             }
         }
@@ -828,7 +845,7 @@ final class AppVolumeMixer: ObservableObject {
                               uid: outputDevice.uid,
                               name: outputDevice.name,
                               isDefault: outputDevice.uid == device.uid,
-                              isHeadphones: outputDevice.isHeadphones,
+                              symbol: outputDevice.symbol,
                               canBeDefaultOutput: outputDevice.canBeDefaultOutput,
                               canBeDefaultSystemOutput: outputDevice.canBeDefaultSystemOutput,
                               priorityTier: outputDevice.priorityTier,
@@ -1915,7 +1932,8 @@ final class AppVolumeMixer: ObservableObject {
 
         var devices: [MixerOutputDevice] = []
         for deviceID in deviceIDs {
-            guard hasOutputStreams(deviceID) else { continue }
+            let streams = outputStreams(for: deviceID)
+            guard !streams.isEmpty else { continue }
 
             var isAlive: UInt32 = 1
             if read(deviceID, kAudioDevicePropertyDeviceIsAlive, &isAlive), isAlive == 0 {
@@ -1949,10 +1967,9 @@ final class AppVolumeMixer: ObservableObject {
                                              uid: uid,
                                              name: name,
                                              isDefault: uid == defaultUID,
-                                             isHeadphones: MixerRoutingSupport.outputLooksLikeHeadphones(
-                                                name: name,
-                                                uid: uid,
-                                                dataSourceName: dataSourceName),
+                                             symbol: outputSymbol(name: name, uid: uid,
+                                                                  dataSourceName: dataSourceName,
+                                                                  transportType: transportType, streams: streams),
                                              canBeDefaultOutput: canBeDefaultOutput,
                                              canBeDefaultSystemOutput: canBeDefaultSystemOutput,
                                              priorityTier: MixerRoutingSupport.PriorityTier(
@@ -1975,7 +1992,7 @@ final class AppVolumeMixer: ObservableObject {
                                              uid: AirPlayRouteManager.airPlaySentinelUID,
                                              name: airPlayName,
                                              isDefault: false,
-                                             isHeadphones: false,
+                                             symbol: "airplay.audio",
                                              canBeDefaultOutput: false,
                                              canBeDefaultSystemOutput: false,
                                              priorityTier: .hardware,
@@ -2022,13 +2039,60 @@ final class AppVolumeMixer: ObservableObject {
         return nameRef as String
     }
 
-    private static func hasOutputStreams(_ deviceID: AudioObjectID) -> Bool {
+    private static func outputStreams(for deviceID: AudioObjectID) -> [AudioObjectID] {
         var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams,
                                                  mScope: kAudioObjectPropertyScopeOutput,
                                                  mElement: kAudioObjectPropertyElementMain)
         var size: UInt32 = 0
-        return AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &size) == noErr
-            && size >= MemoryLayout<AudioObjectID>.size
+        guard AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &size) == noErr,
+              size >= MemoryLayout<AudioObjectID>.size else { return [] }
+        var streams = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &streams) == noErr else { return [] }
+        return streams
+    }
+
+    private static func outputSymbol(name: String, uid: String, dataSourceName: String?,
+                                     transportType: UInt32, streams: [AudioObjectID]) -> String {
+        let terminals = streams.map { stream in
+            var terminal: UInt32 = 0
+            _ = read(stream, kAudioStreamPropertyTerminalType, &terminal)
+            return terminal
+        }
+        let speaker = "speaker.wave.2.fill"
+        if transportType == kAudioDeviceTransportTypeHDMI || transportType == kAudioDeviceTransportTypeDisplayPort
+            || terminals.contains(kAudioStreamTerminalTypeHDMI)
+            || terminals.contains(kAudioStreamTerminalTypeDisplayPort) {
+            return "tv"
+        }
+        if transportType == kAudioDeviceTransportTypeAirPlay {
+            let route = name.lowercased()
+            return ["homepod", "speaker", "soundbar"].contains(where: route.contains) ? speaker : "tv"
+        }
+        if transportType == kAudioDeviceTransportTypeBluetooth || transportType == kAudioDeviceTransportTypeBluetoothLE,
+           let device = connectedBluetoothOutput(name: name, uid: uid), device.deviceClassMajor == 0x04 {
+            switch device.deviceClassMinor {
+            case 0x01, 0x02, 0x06:
+                return NotchAccessorySupport.symbol(for: .audio, name: name)
+            case 0x05, 0x07, 0x0A: return speaker
+            case 0x0E, 0x0F: return "tv"
+            default: break
+            }
+        }
+        if terminals.contains(kAudioStreamTerminalTypeHeadphones)
+            || MixerRoutingSupport.outputLooksLikeHeadphones(name: name, uid: uid, dataSourceName: dataSourceName) {
+            return NotchAccessorySupport.symbol(for: .audio, name: name)
+        }
+        return transportType == kAudioDeviceTransportTypeBuiltIn ? "macbook" : speaker
+    }
+
+    private static func connectedBluetoothOutput(name: String, uid: String) -> IOBluetoothDevice? {
+        let devices = (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] ?? []).filter { $0.isConnected() }
+        let normalizedUID = uid.lowercased().filter { $0.isHexDigit }
+        return devices.first { device in
+            guard let address = device.addressString else { return false }
+            let normalizedAddress = address.lowercased().filter { $0.isHexDigit }
+            return normalizedAddress.count == 12 && normalizedUID.contains(normalizedAddress)
+        } ?? devices.first { $0.name == name }
     }
 
     private static func canBeDefault(_ deviceID: AudioObjectID,

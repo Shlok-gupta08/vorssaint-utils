@@ -16,6 +16,8 @@ struct ShelfSettings: View {
     @AppStorage(DefaultsKey.shelfEdgeDragEnabled) private var edgeDrag = false
     @AppStorage(DefaultsKey.shelfCloseAfterDrop) private var closeAfterDrop = false
     @AppStorage(DefaultsKey.shelfRemoveAfterDrop) private var removeAfterDrop = true
+    @AppStorage(DefaultsKey.shelfDragInvertModifier) private var dragInvertModifier = ShelfDragInvertModifier.option.rawValue
+    @AppStorage(DefaultsKey.shelfLiveActivitySeconds) private var liveActivitySeconds = ShelfLiveActivitySupport.defaultDuration
     @AppStorage(DefaultsKey.shelfClearOnClose) private var clearOnClose = false
     @AppStorage(DefaultsKey.notchShelf) private var opensInIsland = true
     @State private var showingAppPicker = false
@@ -148,6 +150,52 @@ struct ShelfSettings: View {
                         Text(l10n.s.shelfRemoveAfterDropCaption)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Picker("Opposite action modifier", selection: $dragInvertModifier) {
+                            ForEach(ShelfDragInvertModifier.allCases) { mod in
+                                Text(mod.displayName).tag(mod.rawValue)
+                            }
+                        }
+                        Text(removeAfterDrop
+                             ? "Hold this key while dragging out to copy files instead of moving them."
+                             : "Hold this key while dragging out to move files instead of copying them.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if islandShowsFiles {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Drop live activity timer")
+                                Spacer()
+                                Text(liveActivitySeconds == 0 ? "Off" : "\(liveActivitySeconds)s")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Slider(
+                                value: Binding(
+                                    get: { Double(ShelfLiveActivitySupport.sanitizedDuration(liveActivitySeconds)) },
+                                    set: {
+                                        let next = ShelfLiveActivitySupport.sanitizedDuration(Int($0.rounded()))
+                                        liveActivitySeconds = next
+                                        ShelfService.shared.syncLiveActivityPreference()
+                                    }
+                                ),
+                                in: 0...60,
+                                step: 15
+                            )
+                            HStack {
+                                ForEach(ShelfLiveActivitySupport.steps, id: \.self) { step in
+                                    Text(step == 0 ? "Off" : "\(step)s")
+                                        .font(.system(size: 10, design: .rounded))
+                                        .foregroundStyle(liveActivitySeconds == step ? .primary : .secondary)
+                                    if step != ShelfLiveActivitySupport.steps.last { Spacer() }
+                                }
+                            }
+                            Text("After dropping files into the Shelf, keep a live pill active in the Dynamic Island for this duration so hovering opens the Shelf directly. Resets with each new drop.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     VStack(alignment: .leading, spacing: 3) {
                         Toggle(l10n.s.shelfClearOnClose, isOn: $clearOnClose)

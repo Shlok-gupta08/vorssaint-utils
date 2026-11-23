@@ -11,10 +11,12 @@ enum NotchVolumeFeedbackTests {
         static var shared = AppVolumeMixer()
         struct OutputDevice {
             let uid: String
-            let name: String
-            let isHeadphones: Bool
+            let symbol: String
         }
         var outputDevices: [OutputDevice] = []
+        var currentOutputDevice: OutputDevice? {
+            outputDevices.first { $0.uid == currentOutputDeviceUID }
+        }
         @Published var currentOutputDeviceUID: String? = "speakers"
         @Published var systemOutputVolume: Double? = 0.3
         @Published var systemOutputMuted: Bool? = false
@@ -61,19 +63,17 @@ enum NotchVolumeFeedbackTests {
         let iconMixer = AppVolumeMixer()
         AppVolumeMixer.shared = iconMixer
         let icons = Service()
-        for (name, headphones, symbol) in [("MacBook Air Speakers", false, "speaker.wave.2.fill"),
-            ("Wired Headphones", true, "headphones"), ("AirPods Pro", true, "airpodspro"),
-            ("AirPods Max", true, "airpodsmax"), ("AirPods", true, "airpods"),
-            ("Apple EarPods (USB-C)", true, "earpods"), ("EARPODS", true, "earpods"),
-            ("Bluetooth Headphones", true, "headphones")] {
-            iconMixer.outputDevices = [.init(uid: "active", name: name, isHeadphones: headphones),
-                                       .init(uid: "inactive", name: "Other Headphones", isHeadphones: true)]
+        for symbol in ["macbook", "tv", "headphones", "airpodspro", "airpodsmax", "airpods",
+                       "earpods", "speaker.wave.2.fill"] {
+            iconMixer.outputDevices = [.init(uid: "active", symbol: symbol),
+                                       .init(uid: "inactive", symbol: "headphones")]
             iconMixer.currentOutputDeviceUID = "active"
             icons.showVolume(0.5)
-            suite.expect(icons.notice?.symbol == symbol, "volume feedback uses the active output's icon: \(name)")
+            suite.expect(icons.notice?.symbol == symbol, "volume feedback uses the active output's icon: \(symbol)")
             icons.showVolume(0.5, muted: true)
-            suite.expect(icons.notice?.symbol == (headphones ? symbol : "speaker.slash.fill") && icons.notice?.level == 0,
-                         "muted feedback preserves headphone identity and shows a zero level")
+            let mutedSymbol = symbol == "speaker.wave.2.fill" ? "speaker.slash.fill" : symbol
+            suite.expect(icons.notice?.symbol == mutedSymbol && icons.notice?.level == 0,
+                         "muted feedback uses the same output icon policy and shows a zero level")
         }
         iconMixer.currentOutputDeviceUID = "missing"
         icons.showVolume(0.5)

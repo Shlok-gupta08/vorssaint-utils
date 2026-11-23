@@ -302,6 +302,7 @@ if (( TEST )); then
         Sources/Vorssaint/Services/Notch/NotchAgentSupport.swift
         Sources/Vorssaint/Core/NotchLockScreenStrings.swift
         Sources/Vorssaint/Services/Notch/NotchLockScreenSupport.swift
+        Sources/Vorssaint/Services/AgentUsage/AgentAccounts.swift
         Sources/Vorssaint/Services/AgentUsage/AgentUsageModels.swift
         Sources/Vorssaint/Services/AgentUsage/AgentPricing.swift
         Sources/Vorssaint/Services/AgentUsage/AgentLogParser.swift
@@ -321,7 +322,10 @@ if (( TEST )); then
         Sources/Vorssaint/Services/Notch/NotchNotificationSupport.swift
         Sources/Vorssaint/Services/Notch/NotchNotificationReaderCore.swift
         Sources/Vorssaint/Services/Notch/NotchCalendarSupport.swift
+        Sources/Vorssaint/Services/Notch/NotchShortcutIdentity.swift
         Sources/Vorssaint/Services/Notch/NotchShortcutsSupport.swift
+        Sources/Vorssaint/Services/Notch/NotchFocusSupport.swift
+        Sources/Vorssaint/Services/Notch/NotchTeleprompterSupport.swift
         Sources/Vorssaint/Services/Notch/NotchCallSupport.swift
         Sources/Vorssaint/Services/Notch/NotchKeepAwakeSupport.swift
         Sources/Vorssaint/Services/Notch/NotchSupport.swift

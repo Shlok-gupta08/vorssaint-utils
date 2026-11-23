@@ -111,6 +111,8 @@ struct AgentLimits: Equatable {
     var windows: [AgentLimitWindow]
     let observedAt: Date
     let source: Source
+    var accountID: String? = nil
+    var accountLabel: String? = nil
 }
 
 /// The subscription an account is on, when the agent's local files say.
@@ -130,6 +132,8 @@ struct AgentLiveSession: Equatable, Identifiable {
     var project: String
     var tokens: AgentTokens
     var cost: Double
+    var accountID: String? = nil
+    var accountLabel: String? = nil
 }
 
 /// Something worth a moment in the closed island.

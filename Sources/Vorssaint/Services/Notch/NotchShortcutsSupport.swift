@@ -9,6 +9,7 @@ struct NotchShortcutSession: Equatable, Identifiable {
     let executable: String
     let started: Date
     var executions: Int
+    var identity: NotchShortcutIdentity? = nil
 
     func elapsed(at date: Date) -> String {
         let seconds = Int(max(0, date.timeIntervalSince(started)))
@@ -122,6 +123,12 @@ struct NotchShortcutsLifecycle {
         sessions = sessions.filter { alive.contains($0.key) }
         stacks = stacks.filter { alive.contains($0.key) }
         pendingHidden.formIntersection(alive)
+    }
+
+    mutating func attachIdentity(_ identity: NotchShortcutIdentity?, for pid: Int32) {
+        guard let identity, var session = sessions[pid] else { return }
+        session.identity = identity
+        sessions[pid] = session
     }
 
     var ordered: [NotchShortcutSession] {

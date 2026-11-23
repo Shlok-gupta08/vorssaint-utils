@@ -79,7 +79,7 @@ struct NotchLayoutEditor: View {
                                 .position(center)
                                 .zIndex(draggingID == button.id ? 3 : 1)
                         }
-                        if items.count < NotchQuickAccessConfiguration.maximumPerSide {
+                        if items.count < NotchQuickAccessConfiguration.maximum(for: side) {
                             Button { addingSide = side } label: {
                                 Image(systemName: "plus").font(.system(size: 15, weight: .semibold))
                                     .frame(width: 30, height: 30)
@@ -92,7 +92,7 @@ struct NotchLayoutEditor: View {
                             .popover(isPresented: Binding(get: { addingSide == side }, set: { if !$0 { addingSide = nil } }),
                                      arrowEdge: side == .left ? .trailing : side == .right ? .leading : .top) {
                                 NotchActionChooser(title: editor.addButton) { action in
-                                    guard configuration.buttons.filter({ $0.side == side }).count < NotchQuickAccessConfiguration.maximumPerSide else { return }
+                                    guard configuration.buttons.filter({ $0.side == side }).count < NotchQuickAccessConfiguration.maximum(for: side) else { return }
                                     configuration.buttons.append(NotchQuickButton(action: action, side: side))
                                     addingSide = nil
                                 }
@@ -228,7 +228,7 @@ struct NotchLayoutEditor: View {
                 }, set: { configuration.move(button.id, to: $0) })) {
                     ForEach(NotchQuickAccessSide.allCases, id: \.self) { side in
                         Text(side.title(l10n)).tag(side)
-                            .disabled(side != button.side && configuration.buttons.filter { $0.side == side }.count >= NotchQuickAccessConfiguration.maximumPerSide)
+                            .disabled(side != button.side && configuration.buttons.filter { $0.side == side }.count >= NotchQuickAccessConfiguration.maximum(for: side))
                     }
                 }.pickerStyle(.segmented)
                 HStack {

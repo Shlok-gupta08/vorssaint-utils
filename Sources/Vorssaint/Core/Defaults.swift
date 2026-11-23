@@ -193,6 +193,8 @@ enum DefaultsKey {
     static let shelfEdgeDragEnabled = "shelfEdgeDragEnabled"
     static let shelfCloseAfterDrop = "shelfCloseAfterDrop"
     static let shelfRemoveAfterDrop = "shelfRemoveAfterDrop"
+    static let shelfDragInvertModifier = "shelfDragInvertModifier" // option | command | control | shift | none
+    static let shelfLiveActivitySeconds = "shelfLiveActivitySeconds" // 0, 15, 30, 45, 60 (0 = off)
     static let shelfClearOnClose = "shelfClearOnClose"
     static let shelfShortcutAddsFinderSelection = "shelfShortcutAddsFinderSelection"
     static let shelfAutomaticExclusions = "shelfAutomaticExclusions" // [bundle id] blocks automatic opening only
@@ -847,6 +849,15 @@ enum DefaultsKey {
     static let notchAgentsLimitThreshold = "notchAgentsLimitThreshold"
     static let notchAgentsDailyBudget = "notchAgentsDailyBudget"
     static let notchAgentsPriceUpdates = "notchAgentsPriceUpdates"
+    static let notchAgentsAccounts = "notchAgentsAccounts"           // JSON [AgentAccount]
+    static let notchAgentsLayoutConfig = "notchAgentsLayoutConfig"   // JSON NotchAgentLayoutConfig
+    static let notchRecordingLiveActivity = "notchRecordingLiveActivity"
+    static let notchFocusEnabled = "notchFocusEnabled"
+    static let notchFocusHideNative = "notchFocusHideNative"
+    static let notchTeleprompterEnabled = "notchTeleprompterEnabled"
+    static let notchTeleprompterScripts = "notchTeleprompterScripts" // JSON [TeleprompterScript]
+    static let notchTeleprompterSelectedID = "notchTeleprompterSelectedID"
+    static let notchTeleprompterSettings = "notchTeleprompterSettings" // JSON TeleprompterSettings
     static let notchEnabled = "notchEnabled"
     static let notchShortcutsEnabled = "notchShortcutsEnabled"
     static let notchCallsEnabled = "notchCallsEnabled"
@@ -1304,6 +1315,8 @@ enum Defaults {
         // keeps the value shipped releases always had.
         DefaultsKey.shelfCloseAfterDrop: false,
         DefaultsKey.shelfRemoveAfterDrop: true,
+        DefaultsKey.shelfDragInvertModifier: "option",
+        DefaultsKey.shelfLiveActivitySeconds: 15,
         DefaultsKey.shelfClearOnClose: false,
         DefaultsKey.shelfShortcutAddsFinderSelection: false,
         DefaultsKey.shelfAutomaticExclusions: [String](),
@@ -1433,6 +1446,15 @@ enum Defaults {
         DefaultsKey.notchAgentsLimitThreshold: NotchAgentSupport.defaultLimitThreshold,
         DefaultsKey.notchAgentsDailyBudget: 0.0,
         DefaultsKey.notchAgentsPriceUpdates: true,
+        DefaultsKey.notchAgentsAccounts: "",
+        DefaultsKey.notchAgentsLayoutConfig: "",
+        DefaultsKey.notchRecordingLiveActivity: true,
+        DefaultsKey.notchFocusEnabled: true,
+        DefaultsKey.notchFocusHideNative: true,
+        DefaultsKey.notchTeleprompterEnabled: true,
+        DefaultsKey.notchTeleprompterScripts: "",
+        DefaultsKey.notchTeleprompterSelectedID: "",
+        DefaultsKey.notchTeleprompterSettings: "",
         DefaultsKey.notchLyricsEnabled: true,
         DefaultsKey.notchLyricsOnline: false,
         DefaultsKey.notchLiveEqualizer: false,

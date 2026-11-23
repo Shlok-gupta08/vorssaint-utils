@@ -23,6 +23,10 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchCalendarCountdown) private var calendarCountdown = false
     @AppStorage(DefaultsKey.notchCalendarTimeLeft) private var calendarTimeLeft = false
     @AppStorage(DefaultsKey.notchAgentsEnabled) private var agentsEnabled = true
+    @AppStorage(DefaultsKey.notchTeleprompterEnabled) private var teleprompterEnabled = true
+    @AppStorage(DefaultsKey.notchRecordingLiveActivity) private var recordingLiveActivity = true
+    @AppStorage(DefaultsKey.notchFocusEnabled) private var focusEnabled = true
+    @AppStorage(DefaultsKey.notchFocusHideNative) private var focusHideNative = true
     @AppStorage(DefaultsKey.notchShortcutsEnabled) private var shortcutsEnabled = true
     @AppStorage(DefaultsKey.notchCallsEnabled) private var callsEnabled = false
     @AppStorage(DefaultsKey.notchWatchEnabled) private var watchEnabled = true
@@ -111,7 +115,7 @@ struct NotchSettings: View {
     private var configuration: [String] {
         [String(enabled), String(shortcutsEnabled), String(callsEnabled), String(calendarEnabled), String(calendarCountdown), String(calendarTimeLeft), String(notificationsEnabled), String(dismissNativeNotifications), String(gesturesEnabled), String(lyricsEnabled), String(lyricsOnline), String(queueEnabled), String(liveEqualizer), String(showPlayingMusic), String(hideMusicWhenPlayerActive), String(includeOtherPlayers), idle, hiddenControls, controlOrder, size,
          String(timerEnabled), String(timerSoundEnabled), String(cameraEnabled), String(accessoriesEnabled), String(outlineEnabled), String(customWidth), String(customHeight), String(cameraFitWidth), String(cameraFitHeight), String(capsuleFitWidth), String(capsuleFitHeight), String(capsuleFitDrop), String(hapticFeedback), String(shelfWindow), String(dragReveal), String(captureControls), String(quickPanel), String(appPanel), String(hoverExpand), String(hideUntilHover), String(autoHideWithoutNotch), String(hideInFullscreen), String(coversMenus), display, displayPreferences, preferredDisplay, silhouette, String(hover), hidden, order, String(volume),
-         String(brightness), String(keyboardLight), String(microphone), String(battery), String(clipboard), String(clipboardWindow), String(capture), String(trackChange), captureAction, String(showInCaptures), String(returnHome), homeModule, String(opensActivity), String(scratchpad), String(agentsEnabled), String(watchEnabled), String(keepAwakeActivity), String(expandedScale)]
+         String(brightness), String(keyboardLight), String(microphone), String(battery), String(clipboard), String(clipboardWindow), String(capture), String(trackChange), captureAction, String(showInCaptures), String(returnHome), homeModule, String(opensActivity), String(scratchpad), String(agentsEnabled), String(watchEnabled), String(keepAwakeActivity), String(expandedScale), String(teleprompterEnabled), String(recordingLiveActivity), String(focusEnabled), String(focusHideNative)]
     }
 
     private var access: Binding<NotchQuickAccessConfiguration> {
@@ -752,6 +756,10 @@ struct NotchSettings: View {
             destination(FeatureStrings.clipboard(l10n.language).title, symbol: "doc.on.clipboard", value: $clipboardWindow, available: AppFeature.clipboardHistory.isAvailable)
             switchRow("doc.on.clipboard", text.clipboardActivity, caption: text.privacy, isOn: $clipboard)
         case .captures:
+            switchRow("record.circle.fill", "Screen recording live activity",
+                      caption: "Show a live recording pill with elapsed timer, pause/resume, and stop controls in Dynamic Island.",
+                      isOn: $recordingLiveActivity)
+                .disabled(!AppFeature.screenRecorder.isAvailable)
             switchRow("camera.viewfinder", text.captureActivity, isOn: $capture).disabled(!AppFeature.screenshot.isAvailable)
             if capture {
                 ScreenshotDefaultActionPicker(strings: FeatureStrings.screenshot(l10n.language), selection: $captureAction)
@@ -768,6 +776,15 @@ struct NotchSettings: View {
         case .watch:
             NotchWatchSettingsControls()
                 .toggleStyle(TrailingSwitchToggleStyle())
+        case .teleprompter:
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Configure scripts, voice tracking, font size, mirror mode, and countdown in the dedicated Teleprompter settings.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Button("Open Teleprompter Settings") {
+                    SettingsRouter.shared.request(FeatureSettingsDestination(.teleprompter))
+                }
+                .buttonStyle(.borderedProminent)
+            }
         case .mixer, .system, .tools:
             EmptyView()
         }
@@ -781,7 +798,7 @@ struct NotchSettings: View {
                           caption: FeatureStrings.notchActivities(l10n.language).keepAwakeActivityHint, isOn: $keepAwakeActivity)
                     .disabled(!AppFeature.keepAwake.isAvailable)
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
-                    ForEach([NotchModule.timer, .calendar, .downloads, .agents, .watch]) { module in
+                    ForEach([NotchModule.timer, .calendar, .downloads, .agents, .watch, .teleprompter]) { module in
                         Button { showModule(module) } label: {
                             Label(module.title(l10n.language), systemImage: module.symbol)
                                 .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
@@ -813,6 +830,10 @@ struct NotchSettings: View {
                 }
             }
             SettingsCard {
+                switchRow("record.circle.fill", "Screen recording live activity",
+                          caption: "Prioritized alongside Timer with built-in elapsed clock, pause/resume, and stop controls.",
+                          isOn: $recordingLiveActivity)
+                    .disabled(!AppFeature.screenRecorder.isAvailable)
                 switchRow("square.stack.3d.up.fill", "Shortcuts live activity",
                           caption: "Keep running shortcuts centered, with other activities in side pills.", isOn: $shortcutsEnabled)
             }
@@ -951,6 +972,19 @@ struct NotchSettings: View {
                 }
                 if accessoriesEnabled { Text(FeatureStrings.notchActivities(l10n.language).accessoryDescription).font(.caption).foregroundStyle(.secondary) }
                 if enabled, (volume || brightness || keyboardLight), !permissions.accessibility { PermissionRow(kind: .accessibility) }
+            }
+            SettingsCard(title: "Focus") {
+                switchRow("moon.fill", "Focus On / Off pill",
+                          caption: "Show an iOS-style Focus status notification in Dynamic Island whenever Focus turns on or off.",
+                          isOn: $focusEnabled)
+                if focusEnabled {
+                    switchRow("bell.slash.fill", "Hide macOS Focus banner",
+                              caption: "Take over the native macOS Focus notification at the system level so only Dynamic Island appears.",
+                              isOn: $focusHideNative)
+                    if focusHideNative, !permissions.accessibility {
+                        PermissionRow(kind: .accessibility)
+                    }
+                }
             }
         }
     }
@@ -1235,6 +1269,7 @@ struct NotchSettings: View {
             (module != .timer || timerEnabled) && (module != .camera || cameraEnabled)
                 && (module != .calendar || calendarEnabled) && (module != .notifications || notificationsEnabled)
                 && (module != .agents || agentsEnabled) && (module != .watch || watchEnabled)
+                && (module != .teleprompter || teleprompterEnabled)
                 && !hidden.split(separator: ",").contains(Substring(module.rawValue))
         } set: { shown in
             if module == .timer { timerEnabled = shown }
@@ -1243,6 +1278,7 @@ struct NotchSettings: View {
             if module == .notifications { notificationsEnabled = shown }
             if module == .agents { agentsEnabled = shown }
             if module == .watch { watchEnabled = shown }
+            if module == .teleprompter { teleprompterEnabled = shown }
             var values = Set(hidden.split(separator: ",").map(String.init))
             if shown { values.remove(module.rawValue) } else { values.insert(module.rawValue) }
             hidden = values.sorted().joined(separator: ",")

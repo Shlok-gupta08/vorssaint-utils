@@ -92,6 +92,8 @@ struct AgentUsageSnapshot: Equatable {
     /// Today's hours, from midnight.
     var hours: [AgentBucket] = []
     var limits: [AgentProvider: AgentLimits] = [:]
+    /// Per-account limits keyed by `AgentAccount.id` for multi-account setups.
+    var accountLimits: [String: AgentLimits] = [:]
     var plans: [AgentProvider: AgentPlan] = [:]
     var live: [AgentLiveSession] = []
     var claudeBlock: AgentBlock?

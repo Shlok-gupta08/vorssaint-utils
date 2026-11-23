@@ -139,7 +139,7 @@ struct MixerSection: View {
                             .tag(MixerRoutingSupport.systemDefaultSelectionID)
                     }
                     ForEach(universalOutputDevices) { device in
-                        Text(outputDeviceTitle(device))
+                        Label(outputDeviceTitle(device), systemImage: device.symbol)
                             .tag(device.uid)
                     }
                     if let selected = mixer.currentOutputDeviceUID,
@@ -158,9 +158,7 @@ struct MixerSection: View {
 
             if let volume = mixer.systemOutputVolume {
                 HStack(spacing: 8) {
-                    Image(systemName: mixer.systemOutputMuted == true || volume <= 0.001
-                          ? "speaker.slash.fill"
-                          : "speaker.wave.2.fill")
+                    Image(systemName: mixer.systemOutputSymbol(muted: mixer.systemOutputMuted == true || volume <= 0.001))
                         .font(.system(size: 10.5, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 16)
@@ -818,7 +816,7 @@ struct SoundOutputSwitcherControls: View {
                     } else {
                         ForEach(universalOutputDevices) { device in
                             Toggle(isOn: selectionBinding(for: device.uid)) {
-                                Text(outputDeviceTitle(device))
+                                Label(outputDeviceTitle(device), systemImage: device.symbol)
                                     .font(.system(size: 10.5))
                                     .lineLimit(1)
                                     .truncationMode(.middle)
@@ -1062,7 +1060,7 @@ private struct MixerRow: View {
             Text(l10n.s.mixerOutputDefault)
                 .tag(MixerRoutingSupport.systemDefaultSelectionID)
             ForEach(mixer.outputDevices) { device in
-                Text(outputDeviceTitle(device))
+                Label(outputDeviceTitle(device), systemImage: device.symbol)
                     .tag(device.uid)
             }
             if let selected = app.selectedOutputDeviceUID,

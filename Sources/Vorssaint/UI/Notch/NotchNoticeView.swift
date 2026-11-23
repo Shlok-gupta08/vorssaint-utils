@@ -20,6 +20,7 @@ struct NotchNoticeView: View {
         switch notice.event {
         // A warning reads as one in any agent's color; other AI notices wear it.
         case .agents: return notice.symbol.hasPrefix("exclamationmark") ? .orange : notice.agent?.tint ?? .white
+        case .focus: return notice.focusState?.tintColor ?? .indigo
         default: return .white
         }
     }
@@ -99,6 +100,12 @@ struct NotchNoticeView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else if let level = notice.level {
             NotchMeter(value: level, height: 5, tint: tint)
+        } else if notice.event == .focus {
+            Text(notice.detail)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(notice.focusState?.isActive == true ? tint : .white.opacity(0.55))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         } else {
             Text(notice.detail)
                 .font(.system(size: 11, weight: .medium))

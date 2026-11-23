@@ -17,6 +17,8 @@ struct NotchNotice: Equatable {
     var notificationID: UUID? = nil
     /// The agent an AI notice is about, which tints its mark.
     var agent: AgentProvider? = nil
+    /// The Focus state a Focus On/Off pill represents, which tints its mark and status.
+    var focusState: NotchFocusState? = nil
     /// A banner that replaces one still on screen keeps at least its width,
     /// so a burst of messages does not resize the island with each one.
     var minimumWingWidth: CGFloat = 0
@@ -226,7 +228,7 @@ final class NotchService: ObservableObject {
     private let menuSpaceQueue = DispatchQueue(label: "com.vorssaint.notch-menu-space", qos: .utility)
     /// The display the island is on. The pointer choice keeps it there until
     /// the island rests, so a preference sync never moves an open island.
-    private var displayID: CGDirectDisplayID?
+    private(set) var displayID: CGDirectDisplayID?
     private var followsPointer = false
     /// Every other display shows a copy of the closed island.
     private var showsOnAllDisplays = false
@@ -325,6 +327,19 @@ final class NotchService: ObservableObject {
         NotchTimerSupport.isEnabled() && NotchTimerService.shared.session.hasSession
     }
 
+    var hasRecordingActivity: Bool {
+        NotchSupport.routesRecordingLiveActivity() && NotchSystemRecordingService.shared.isActive(on: displayID)
+    }
+
+    var hasShelfActivity: Bool {
+        NotchSupport.routesShelf() && ShelfService.shared.hasLiveActivity
+    }
+
+    var hasTeleprompterActivity: Bool {
+        TeleprompterWordAligner.isEnabled()
+            && (NotchTeleprompterService.shared.isPlaying || NotchTeleprompterService.shared.isPaused)
+    }
+
     var hasWatchActivity: Bool {
         NotchWatchSupport.isEnabled() && NotchWatchService.shared.isActive
     }
@@ -376,8 +391,12 @@ final class NotchService: ObservableObject {
     private var sharedCompactActivity: NotchCompactActivity? {
         // A new song waiting for its notice is not drawn yet.
         let available = awaitsTrackNotice ? compactActivities.filter { $0 != .music } : compactActivities
-        if available.contains(.shortcuts) { return .shortcuts }
         if available.contains(.call) { return .call }
+        let musicPlaying = NotchMusicService.shared.playback?.isPlaying == true
+        if available.contains(.music), musicPlaying {
+            return .music
+        }
+        if available.contains(.shortcuts) { return .shortcuts }
         return activitySelection.current(available: pillActivityOrder.filter { available.contains($0) })
     }
 
@@ -392,9 +411,12 @@ final class NotchService: ObservableObject {
     }
 
     var compactActivities: [NotchCompactActivity] {
-        NotchSupport.compactActivities(timer: hasTimerActivity, watch: hasWatchActivity, downloads: hasDownloadActivity,
-                                      agents: hasAgentActivity, calendar: hasCalendarActivity,
-                                      music: hasMusicActivity, keepAwake: hasKeepAwakeActivity, call: hasCallActivity, shortcuts: hasShortcutActivity)
+        NotchSupport.compactActivities(timer: hasTimerActivity, recording: hasRecordingActivity,
+                                      watch: hasWatchActivity, downloads: hasDownloadActivity,
+                                      shelf: hasShelfActivity, agents: hasAgentActivity,
+                                      calendar: hasCalendarActivity, music: hasMusicActivity,
+                                      keepAwake: hasKeepAwakeActivity, call: hasCallActivity,
+                                      shortcuts: hasShortcutActivity, teleprompter: hasTeleprompterActivity)
     }
 
     var showsCompactActivityPicker: Bool {
@@ -717,6 +739,12 @@ final class NotchService: ObservableObject {
         case .timer:
             return geometry.compactTimerGeometry(showsDownloads: companion == .downloads,
                                                  wing: timerStripWing(for: companion, in: geometry))
+        case .recording:
+            return geometry.compactTimerGeometry(showsDownloads: false, wing: 72)
+        case .shelf:
+            return geometry.compactTimerGeometry(showsDownloads: false, wing: 66)
+        case .teleprompter:
+            return geometry.compactTimerGeometry(showsDownloads: false, wing: 66)
         case .downloads:
             let name = NotchDownloadService.shared.items.first { $0.active && !$0.completed }?.name
             return geometry.compactDownloadGeometry(wing: NotchDownloadSupport.compactWing(for: name, in: geometry))
@@ -859,6 +887,9 @@ final class NotchService: ObservableObject {
         if expandedPillActivity == .shortcuts && !showingSections {
             return CGSize(width: min(360, geometry.screen.width - 32), height: geometry.safeContentTop + 68)
         }
+        if expandedPillActivity == .recording && !showingSections {
+            return CGSize(width: min(392, geometry.screen.width - 32), height: geometry.safeContentTop + 82)
+        }
         if showingCall {
             return CGSize(width: min(420, geometry.screen.width - 32), height: geometry.safeContentTop + 250)
         }
@@ -924,6 +955,8 @@ final class NotchService: ObservableObject {
         let sliders = controls.filter { $0 == .volume || $0 == .brightness }.count
         let shortcuts = controls.filter { $0 != .volume && $0 != .brightness && $0 != .music }.count
         let musicExtras = NotchLyricsSupport.isEnabled() || NotchQueueSupport.isEnabled()
+        let agents = module == .agents && !detail && !panel
+            ? agentsContentSize(width: geometry.contentWidth) : nil
         return geometry.expandedSize(module: module, detail: detail, panel: panel, detailHeight: detailHeight,
                                      shortcutCount: shortcuts,
                                      sliderCount: sliders, controlsHaveMusic: controls.contains(.music),
@@ -940,19 +973,26 @@ final class NotchService: ObservableObject {
                                      timerMode: NotchTimerService.shared.session.hasSession
                                         ? NotchTimerService.shared.session.mode : NotchTimerSupport.savedMode(),
                                      timerShowsSeconds: NotchTimerService.shared.showsSeconds,
-                                     agentsHeight: module == .agents && !detail && !panel
-                                        ? agentsContentHeight(width: geometry.contentWidth) : nil)
+                                     agentsHeight: agents?.height, agentsTrendHeight: agents?.trendHeight)
     }
 
     /// The AI page is as tall as the cards it shows; nil while the logs are
     /// first read, when the page fills the island with its progress.
-    private func agentsContentHeight(width: CGFloat) -> CGFloat? {
+    private func agentsContentSize(width: CGFloat) -> (height: CGFloat, trendHeight: CGFloat)? {
         let usage = AgentUsageService.shared.snapshot
         guard usage.loaded else { return nil }
         let providers = NotchAgentSupport.providers().filter(usage.seen.contains)
-        guard !providers.isEmpty else { return 0 }
-        return NotchAgentSupport.contentHeight(NotchAgentSupport.rows(
-            NotchAgentSupport.tiles(cards: NotchAgentSupport.cards(), providers: providers), width: width))
+        guard !providers.isEmpty else { return (0, 0) }
+        let config = NotchAgentLayoutConfig.current()
+        let accounts = AgentAccountRegistry.accounts()
+        let tiles = NotchAgentSupport.customizedTiles(
+            cards: NotchAgentSupport.cards(),
+            providers: providers,
+            accounts: accounts,
+            config: config
+        )
+        let rows = NotchAgentSupport.rows(tiles, width: width, config: config)
+        return (NotchAgentSupport.contentHeight(rows, config: config), NotchAgentSupport.heightThroughTrend(rows))
     }
     var expandedGeometry: NotchGeometry {
         var result = expandedPillActivity != nil && expandedPillActivity != pillDeckPrimaryActivity
@@ -1130,7 +1170,7 @@ final class NotchService: ObservableObject {
     func pillSecondaryWidth(for activity: NotchCompactActivity, in base: NotchGeometry? = nil) -> CGFloat {
         let base = base ?? self.geometry
         let geometry = base.floats ? base : NotchAttachedActivityLayout.satelliteGeometry(base)
-        var compact = max(activity == .timer ? 68 : 0,
+        var compact = max((activity == .timer || activity == .recording) ? 68 : 0,
                           NotchPillActivityLayout.compactWidth(bodyHeight: geometry.stripBodyHeight,
                                                              shoulder: NotchCapsuleLayout.side(geometry)))
         if activity == .agents {
@@ -1139,6 +1179,11 @@ final class NotchService: ObservableObject {
             let reading = NotchAgentSupport.stripReading(snapshot, readout: .elapsed, display: .remaining, now: Date())
             compact = max(compact, NotchCapsuleLayout.agentCompactSurface(
                 providers: providers, reading: reading, geometry: geometry).width)
+        }
+        if activity == .shortcuts {
+            let reading = NotchShortcutsService.shared.primary?.elapsed(at: Date()) ?? "0:00"
+            compact = max(compact, NotchAttachedActivityLayout.compactWidth(reading: reading, providers: 0,
+                shoulder: NotchCapsuleLayout.side(geometry)))
         }
         if base.isNotched {
             let now = Date()
@@ -1149,9 +1194,17 @@ final class NotchService: ObservableObject {
                 let snapshot = AgentUsageService.shared.snapshot
                 providers = max(1, Set(snapshot.live.map(\.provider)).count)
                 reading = NotchAgentSupport.stripReading(snapshot, readout: .elapsed, display: .remaining, now: now)
+            case .shortcuts:
+                reading = NotchShortcutsService.shared.primary?.elapsed(at: now)
             case .timer:
                 let timer = NotchTimerService.shared
                 reading = NotchTimerSupport.compactText(for: timer.session, at: timer.now, locale: .current)
+            case .recording:
+                reading = NotchSystemRecordingService.shared.elapsedLabel
+            case .shelf:
+                reading = ShelfLiveActivitySupport.countdownText(ShelfService.shared.liveActivityRemaining)
+            case .teleprompter:
+                reading = "\(Int((NotchTeleprompterService.shared.progress * 100).rounded()))%"
             case .calendar:
                 reading = NotchCalendarService.shared.countdown.map {
                     NotchCalendarSupport.countdownText(until: $0.target, now: now)
@@ -1197,8 +1250,8 @@ final class NotchService: ObservableObject {
         let working = Set(AgentUsageService.shared.snapshot.live.map(\.provider)).count
         switch activity {
         case .shortcuts:
-            return layout.surface(content: 20 + layout.width("Shortcuts", font: layout.titleFont)
-                + layout.width(NotchShortcutsService.shared.primary?.elapsed(at: Date()) ?? "0:00", font: layout.readingFont) + 20,
+            return layout.surface(content: layout.width("Shortcuts", font: layout.titleFont)
+                + 2 * max(18, layout.width(NotchShortcutsService.shared.primary?.elapsed(at: Date()) ?? "0:00", font: layout.readingFont)) + 16,
                 maximum: layout.Maximum.activity, geometry: geometry)
         case .call:
             let call = NotchCallService.shared.primary
@@ -1218,6 +1271,21 @@ final class NotchService: ObservableObject {
                                                                               locale: Locale(identifier: language.rawValue)),
                                        companion: companion, workingAgents: working,
                                        downloadPercent: download?.fraction != nil, geometry: geometry, language: language)
+        case .recording:
+            let label = NotchSystemRecordingService.shared.elapsedLabel
+            return layout.surface(content: layout.symbolWidth + layout.spacing + layout.width(NotchAgentSupport.readingShape(label), font: layout.readingFont),
+                                  maximum: layout.Maximum.activity, geometry: geometry)
+        case .shelf:
+            let shelf = ShelfService.shared
+            let count = "\(shelf.itemCount)"
+            let countdown = ShelfLiveActivitySupport.countdownText(shelf.liveActivityRemaining)
+            return layout.surface(content: layout.symbolWidth + layout.spacing + layout.width(count, font: layout.titleFont)
+                                  + layout.spacing + layout.width(countdown, font: layout.smallFont),
+                                  maximum: layout.Maximum.activity, geometry: geometry)
+        case .teleprompter:
+            let pct = "\(Int((NotchTeleprompterService.shared.progress * 100).rounded()))%"
+            return layout.surface(content: layout.symbolWidth + layout.spacing + layout.width(pct, font: layout.readingFont),
+                                  maximum: layout.Maximum.activity, geometry: geometry)
         case .downloads:
             return layout.downloadSurface(name: download?.name ?? FeatureStrings.notchFiles(language).downloadsTitle,
                                           hasProgress: download?.fraction != nil, geometry: geometry, language: language)
@@ -1325,6 +1393,7 @@ final class NotchService: ObservableObject {
         NotchDownloadService.shared.syncWithPreferences()
         NotchCalendarService.shared.syncWithPreferences()
         NotchShortcutsService.shared.syncWithPreferences()
+        NotchFocusService.shared.syncWithPreferences()
         NotchCallService.shared.syncWithPreferences()
         NotchNotificationService.shared.syncWithPreferences()
         NotchAudioLevelService.shared.syncWithPreferences()
@@ -1344,6 +1413,8 @@ final class NotchService: ObservableObject {
             + String(AppFeature.fanControl.isAvailable)
             + String(NotchSupport.routesShelf()) + String(NotchSupport.revealsShelfDrag())
             + String(NotchSupport.routesCaptureControls())
+            + String(NotchSupport.routesRecordingLiveActivity())
+            + String(NotchFocusSupport.isEnabled())
         if signature != settingsSignature {
             settingsSignature = signature
             bindEvents()
@@ -1390,6 +1461,7 @@ final class NotchService: ObservableObject {
         NotchTimerService.shared.stop()
         NotchAccessoryService.shared.stop()
         NotchWatchService.shared.stop()
+        NotchTeleprompterService.shared.stop()
         let cancelCapture = captureControlsCancel
         endCaptureControls()
         cancelCapture?()
@@ -1443,6 +1515,7 @@ final class NotchService: ObservableObject {
         NotchDownloadService.shared.stop()
         NotchCalendarService.shared.stop()
         NotchShortcutsService.shared.stop()
+        NotchFocusService.shared.stop()
         NotchCallService.shared.stop()
         NotchNotificationService.shared.stop()
         AgentUsageService.shared.pause()
@@ -1521,6 +1594,10 @@ final class NotchService: ObservableObject {
     func openActivity(_ module: NotchModule) {
         if let activity = compactActivity, [.shortcuts, .call].contains(activity), module == .controls {
             open(module, activity: activity)
+            return
+        }
+        if compactActivity == .recording, module == .captures {
+            open(module, activity: .recording)
             return
         }
         let opensActivity = UserDefaults.standard.object(forKey: DefaultsKey.notchOpensActivity) as? Bool ?? true
@@ -2374,6 +2451,18 @@ final class NotchService: ObservableObject {
 
     /// Opens the Dynamic Island settings on one section's options.
     func openSettings(showing module: NotchModule) {
+        if module == .agents {
+            collapse()
+            SettingsRouter.shared.request(FeatureSettingsDestination(.agents))
+            (NSApp.delegate as? AppDelegate)?.openSettingsWindow()
+            return
+        }
+        if module == .teleprompter {
+            collapse()
+            SettingsRouter.shared.request(FeatureSettingsDestination(.teleprompter))
+            (NSApp.delegate as? AppDelegate)?.openSettingsWindow()
+            return
+        }
         SettingsRouter.shared.notchModule = module
         openSettings()
     }
@@ -2537,6 +2626,16 @@ final class NotchService: ObservableObject {
         awaitsTrackNotice = false
         syncMenuSpaceMonitoring()
         if notice == nil { refreshPresentation() }
+    }
+
+    @discardableResult
+    func showFocus(_ state: NotchFocusState) -> Bool {
+        guard NotchSupport.routes(.focus) else { return false }
+        return show(NotchNotice(event: .focus,
+                                title: state.name,
+                                detail: state.isActive ? "On" : "Off",
+                                symbol: state.symbol,
+                                focusState: state))
     }
 
     func showBrightness(_ level: Double) -> Bool {
@@ -2893,9 +2992,15 @@ final class NotchService: ObservableObject {
         // service property. Update SwiftUI's layout along with the native host.
         if let windowHost, windowHost.targetSize != size { objectWillChange.send() }
         windowHost?.setSeparatesPills(usesPillActivityDeck || fullscreenCompact)
+        let outlineTint: NSColor = compactActivityIsVisible
+            ? (compactActivity == .recording ? .systemRed
+               : compactActivity == .timer ? .systemOrange
+               : compactActivity == .shelf ? .systemCyan
+               : .white)
+            : .white
         windowHost?.setOutline(enabled: !usesPillActivityDeck && !fullscreenCompact
                                && UserDefaults.standard.bool(forKey: DefaultsKey.notchOutlineEnabled),
-                               color: compactActivityIsVisible && compactActivity == .timer ? .systemOrange : .white)
+                               color: outlineTint)
         windowHost?.present(size: size, geometry: expanded ? expandedGeometry : geometry, animated: animated,
                             transitionContent: contentTransition,
                             quickAccess: expanded && captureControls == nil && !access.buttons.isEmpty ? access : nil,
@@ -4133,9 +4238,8 @@ final class NotchService: ObservableObject {
         dictationPhase = phase
         if phase.presentsIsland && (!wasPresenting || phase == .requestingPermission) {
             prepareDictationPresentation()
-            // Dictation takes the surface immediately, without waiting for a
-            // reveal, departure, paused track, or an expanded page to finish.
-            refreshPresentation(animated: false, transitionContent: .replace)
+            // Expand smoothly with the same native spring physics used on collapse.
+            refreshPresentation(animated: true, transitionContent: .reveal)
             routeDictationDisplay()
             return
         }
@@ -4172,6 +4276,54 @@ final class NotchService: ObservableObject {
                     self?.receiveDictationPhase(phase)
                 }.store(in: &subscriptions)
         } else { dictationPhase = .idle }
+        if NotchSupport.routesRecordingLiveActivity() {
+            let recorder = NotchSystemRecordingService.shared
+            recorder.startMonitoring()
+            Publishers.CombineLatest3(recorder.$isActive.removeDuplicates(),
+                                      recorder.$isPaused.removeDuplicates(),
+                                      recorder.$elapsedSeconds.removeDuplicates())
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] isRecording, _, _ in
+                    guard let self else { return }
+                    if !isRecording && self.expanded && self.expandedPillActivity == .recording {
+                        self.collapse()
+                    }
+                    self.syncMenuSpaceMonitoring()
+                    self.objectWillChange.send()
+                    self.refreshPresentation()
+                }.store(in: &subscriptions)
+        } else {
+            NotchSystemRecordingService.shared.stopMonitoring()
+        }
+        if AppFeature.shelf.isAvailable && NotchSupport.routesShelf() {
+            let shelf = ShelfService.shared
+            shelf.$liveActivityRemaining.removeDuplicates()
+                .combineLatest(shelf.$items.map(\.count).removeDuplicates())
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _, _ in
+                    self?.syncMenuSpaceMonitoring()
+                    self?.objectWillChange.send()
+                    self?.refreshPresentation()
+                }.store(in: &subscriptions)
+        }
+        if modules.contains(.teleprompter) {
+            let prompter = NotchTeleprompterService.shared
+            prompter.$isPlaying.removeDuplicates()
+                .combineLatest(prompter.$isPaused.removeDuplicates())
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _, _ in
+                    self?.syncMenuSpaceMonitoring()
+                    self?.objectWillChange.send()
+                    self?.refreshPresentation()
+                }.store(in: &subscriptions)
+        }
+        if NotchSupport.routes(.focus) {
+            NotchFocusService.shared.stateChanged
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] state in
+                    self?.showFocus(state)
+                }.store(in: &subscriptions)
+        }
         if modules.contains(.timer) {
             let timer = NotchTimerService.shared
             timer.$session.removeDuplicates().combineLatest(timer.$showsSeconds.removeDuplicates())
@@ -4463,10 +4615,7 @@ final class NotchService: ObservableObject {
         guard volume.isFinite else { return false }
         let value = muted == true ? 0 : min(1, max(0, volume))
         let mixer = AppVolumeMixer.shared
-        let output = mixer.outputDevices.first { $0.uid == mixer.currentOutputDeviceUID }
-        let symbol = output?.isHeadphones == true
-            ? NotchAccessorySupport.symbol(for: .audio, name: output?.name ?? "")
-            : (value == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+        let symbol = mixer.systemOutputSymbol(muted: value == 0)
         return show(NotchNotice(event: .volume, title: FeatureStrings.notch(L10n.shared.language).volume,
                                 detail: "\(Int((value * 100).rounded()))%",
                                 symbol: symbol, level: value))
@@ -4527,6 +4676,9 @@ final class NotchService: ObservableObject {
         if !NotchCameraSupport.canPresent(expanded: expanded && !showingSections, selected: selected,
             appPanel: showingAppPanel, captureControls: captureControls != nil) {
             CameraPreviewService.shared.hideEmbedded()
+        }
+        if AppFeature.shelf.isAvailable {
+            ShelfService.shared.setLiveActivityPaused(expanded && selected == .files && !showingSections && !showingAppPanel)
         }
         let musicWanted = modules.contains(.music) && ((expanded && (selected == .music || (selected == .controls && NotchSupport.controls().contains(.music)))
             && !showingAppPanel && !showingSections)

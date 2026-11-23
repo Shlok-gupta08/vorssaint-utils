@@ -78,27 +78,66 @@ struct CameraPreviewView: View {
             && (hovering || showsCameraMenu) && service.isCenterStageSupported
     }
 
+    private var showsStudioLight: Bool {
+        service.state == .running && service.session != nil
+            && (hovering || showsCameraMenu) && service.isStudioLightSupported
+    }
+
+    private var showsEdgeLight: Bool {
+        service.state == .running && service.session != nil
+            && (hovering || showsCameraMenu) && service.isEdgeLightSupported
+    }
+
     @ViewBuilder
     private var controls: some View {
-        if showsMenu || showsCenterStage || onStop != nil {
-            // A camera name too long to share the row leaves the picker its
-            // icon, so neither control is cut off at the image's edges.
+        if showsMenu || showsCenterStage || showsStudioLight || showsEdgeLight || onStop != nil {
+            // Gracefully step down labels before anything clips at the image edges.
             ViewThatFits(in: .horizontal) {
-                controlRow(showsCameraName: true, showsCenterStageTitle: true)
-                controlRow(showsCameraName: false, showsCenterStageTitle: true)
-                controlRow(showsCameraName: false, showsCenterStageTitle: false)
+                controlRow(showsCameraName: true, showsEffectTitles: true)
+                controlRow(showsCameraName: false, showsEffectTitles: true)
+                controlRow(showsCameraName: false, showsEffectTitles: false)
             }
             .padding([.horizontal, .bottom], 10)
         }
     }
 
-    private func controlRow(showsCameraName: Bool, showsCenterStageTitle: Bool) -> some View {
+    private func controlRow(showsCameraName: Bool, showsEffectTitles: Bool) -> some View {
         HStack(spacing: 6) {
             if showsMenu {
                 cameraMenu(showsName: showsCameraName).transition(.opacity)
             }
             if showsCenterStage {
-                centerStageButton(showsTitle: showsCenterStageTitle).transition(.opacity)
+                effectToggleButton(
+                    symbol: "person.fill.viewfinder",
+                    label: strings.centerStageLabel,
+                    isEnabled: service.isCenterStageEnabled,
+                    activeColor: Color.accentColor,
+                    showsTitle: showsEffectTitles,
+                    action: service.toggleCenterStage
+                )
+                .transition(.opacity)
+            }
+            if showsStudioLight {
+                effectToggleButton(
+                    symbol: "sun.max.fill",
+                    label: "Studio Light",
+                    isEnabled: service.isStudioLightEnabled,
+                    activeColor: Color.orange,
+                    showsTitle: showsEffectTitles,
+                    action: service.toggleStudioLight
+                )
+                .transition(.opacity)
+            }
+            if showsEdgeLight {
+                effectToggleButton(
+                    symbol: "rectangle.inset.filled",
+                    label: "Edge Light",
+                    isEnabled: service.isEdgeLightEnabled,
+                    activeColor: Color(red: 1.0, green: 0.84, blue: 0.48),
+                    showsTitle: showsEffectTitles,
+                    action: service.toggleEdgeLight
+                )
+                .transition(.opacity)
             }
             if let onStop {
                 Button(action: onStop) {
@@ -119,29 +158,34 @@ struct CameraPreviewView: View {
         }
     }
 
-    private func centerStageButton(showsTitle: Bool) -> some View {
-        Button(action: service.toggleCenterStage) {
+    private func effectToggleButton(symbol: String,
+                                    label: String,
+                                    isEnabled: Bool,
+                                    activeColor: Color,
+                                    showsTitle: Bool,
+                                    action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack(spacing: 5) {
-                Image(systemName: "person.fill.viewfinder")
+                Image(systemName: symbol)
                     .font(.system(size: 10, weight: .semibold))
                 if showsTitle {
-                    Text(strings.centerStageLabel)
+                    Text(label)
                         .font(.caption)
                         .lineLimit(1)
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, showsTitle ? 10 : 8)
             .padding(.vertical, 5)
             .background(
-                service.isCenterStageEnabled
-                    ? Color.accentColor.opacity(0.75)
+                isEnabled
+                    ? activeColor.opacity(0.75)
                     : Color.black.opacity(0.55),
                 in: Capsule()
             )
             .overlay(
                 Capsule().strokeBorder(
-                    service.isCenterStageEnabled
-                        ? Color.white.opacity(0.35)
+                    isEnabled
+                        ? Color.white.opacity(0.38)
                         : Color.white.opacity(0.14),
                     lineWidth: 1
                 )
@@ -151,7 +195,9 @@ struct CameraPreviewView: View {
         .buttonStyle(NotchButtonStyle(cornerRadius: 12, lifts: false))
         .foregroundStyle(.white)
         .fixedSize()
-        .accessibilityLabel(strings.centerStageLabel)
+        .help(label)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(isEnabled ? .isSelected : [])
     }
 
     private func cameraMenu(showsName: Bool) -> some View {

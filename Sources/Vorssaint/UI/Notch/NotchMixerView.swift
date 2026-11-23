@@ -204,7 +204,7 @@ private struct NotchMasterFader: View {
             Button {
                 if let muted = mixer.systemOutputMuted { adjustOutput(muted: !muted) }
             } label: {
-                Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                Image(systemName: mixer.systemOutputSymbol(muted: muted))
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(muted ? Color.red : Color.white)
                     .contentTransition(.symbolEffect(.replace))
@@ -249,13 +249,13 @@ private struct NotchOutputDeviceMenu: View {
     @ObservedObject private var mixer = AppVolumeMixer.shared
     @ObservedObject private var l10n = L10n.shared
     private var deviceName: String {
-        mixer.outputDevices.first(where: { $0.uid == mixer.currentOutputDeviceUID })?.name ?? l10n.s.mixerOutputUnavailable
+        mixer.currentOutputDevice?.name ?? l10n.s.mixerOutputUnavailable
     }
 
     private var current: String { mixer.outputSwitchError ?? deviceName }
     private var items: [NotchMenuItem] {
         mixer.outputDevices.filter(\.canBeDefaultOutput).map { device in
-            NotchMenuItem(title: device.name, checked: device.uid == mixer.currentOutputDeviceUID) {
+            NotchMenuItem(title: device.name, checked: device.uid == mixer.currentOutputDeviceUID, symbol: device.symbol) {
                 _ = mixer.setUniversalOutputDeviceUID(device.uid)
             }
         }
@@ -326,7 +326,8 @@ private struct NotchMixerOptions: View {
                                         width: 200, lines: 1, alignment: .trailing,
                                         items: soundEffectsDevices.map { device in
                                             NotchMenuItem(title: device.name,
-                                                          checked: device.uid == mixer.currentSystemSoundOutputDeviceUID) {
+                                                          checked: device.uid == mixer.currentSystemSoundOutputDeviceUID,
+                                                          symbol: device.symbol) {
                                                 _ = mixer.setSystemSoundOutputDeviceUID(device.uid)
                                             }
                                         })
@@ -583,7 +584,8 @@ private struct NotchAppFader: View {
             Picker(l10n.s.mixerOutputTooltip, selection: outputSelection) {
                 Text(l10n.s.mixerOutputDefault).tag(MixerRoutingSupport.systemDefaultSelectionID)
                 ForEach(mixer.outputDevices) { device in
-                    Text(device.isDefault ? "\(device.name) (\(l10n.s.mixerOutputCurrent))" : device.name).tag(device.uid)
+                    Label(device.isDefault ? "\(device.name) (\(l10n.s.mixerOutputCurrent))" : device.name,
+                          systemImage: device.symbol).tag(device.uid)
                 }
                 if let selected = app.selectedOutputDeviceUID,
                    MixerRoutingSupport.needsUnavailableOutputRow(selectedUID: selected,

@@ -123,7 +123,28 @@ final class NotchNotificationService: ObservableObject {
 
     func icon(for app: String) -> NSImage? { appIcons[app] }
 
-    private func accept(_ live: [NotchSystemNotification]) {
+    private func accept(_ rawLive: [NotchSystemNotification]) {
+        var focusIDs: [UUID] = []
+        let live = rawLive.filter { item in
+            if NotchFocusService.shared.isFocusNotification(item.content) {
+                focusIDs.append(item.id)
+                return false
+            }
+            return true
+        }
+        // When Focus banner takeover is enabled, immediately dismiss any Focus banner
+        // spotted by NotificationCenter's proven reader without mirroring it in the inbox.
+        if !focusIDs.isEmpty, NotchFocusSupport.hidesNativeBanner(), let reader {
+            let idsToHide = Set(focusIDs)
+            queue.async {
+                if NotchNotificationSupport.movesNativeWindow {
+                    let failed = reader.hideNative(idsToHide)
+                    for id in failed { _ = reader.closeNative(id) }
+                } else {
+                    for id in idsToHide { _ = reader.closeNative(id) }
+                }
+            }
+        }
         let sources = Dictionary(uniqueKeysWithValues: Set(live.map { $0.content.app }).map {
             ($0, NotchNotificationSources.source(for: [$0])?.bundleIdentifier)
         })

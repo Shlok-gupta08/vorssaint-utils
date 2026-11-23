@@ -75,6 +75,7 @@ struct NotchCapsuleNoticeView: View {
         switch notice.event {
         // A warning reads as one in any agent's color; other AI notices wear it.
         case .agents: return notice.symbol.hasPrefix("exclamationmark") ? .orange : notice.agent?.tint ?? .white
+        case .focus: return notice.focusState?.tintColor ?? .indigo
         default: return .white
         }
     }
@@ -126,9 +127,17 @@ struct NotchCapsuleNoticeView: View {
             mark
             Text(notice.title).capsuleTitle().layoutPriority(1)
             if !notice.detail.isEmpty {
-                Text(notice.detail).capsuleDetail()
-                    .truncationMode(notice.event == .accessory ? .middle : .tail)
-                    .padding(.leading, CapsuleLayout.groupSpacing - CapsuleLayout.spacing)
+                if notice.event == .focus {
+                    Text(notice.detail)
+                        .font(Font(CapsuleLayout.titleFont as CTFont))
+                        .foregroundStyle(notice.focusState?.isActive == true ? tint : .white.opacity(0.55))
+                        .lineLimit(1)
+                        .padding(.leading, CapsuleLayout.groupSpacing - CapsuleLayout.spacing)
+                } else {
+                    Text(notice.detail).capsuleDetail()
+                        .truncationMode(notice.event == .accessory ? .middle : .tail)
+                        .padding(.leading, CapsuleLayout.groupSpacing - CapsuleLayout.spacing)
+                }
             }
         }
     }
@@ -402,7 +411,7 @@ private struct NotchCapsuleCompanionMark: View {
                     NotchCapsuleCalendarStrip.clockMark(countdown, now: context.date)
                 }
             }
-        case .timer, .keepAwake, .watch, .call, .shortcuts:
+        case .timer, .recording, .shelf, .teleprompter, .keepAwake, .watch, .call, .shortcuts:
             EmptyView()
         }
     }

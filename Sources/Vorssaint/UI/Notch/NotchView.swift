@@ -277,6 +277,7 @@ struct NotchView: View {
         ZStack(alignment: .top) {
             if service.expanded && activity == service.expandedPillActivity {
                 if activity == .shortcuts { NotchShortcutsPanel(service: service) }
+                else if activity == .recording { NotchRecordingPanel(service: service) }
                 else if service.showingCall { NotchCallPanel(service: service) }
                 else { expanded }
             } else if focused, service.noticeExpanded, let notice = service.notice, let content = notice.notification {
@@ -315,6 +316,9 @@ struct NotchView: View {
         case .music: NotchMusicStrip(service: service, displayGeometry: geometry)
         case .agents: NotchAgentStrip(service: service, displayGeometry: geometry)
         case .timer: NotchTimerStrip(service: service, displayGeometry: geometry)
+        case .recording: NotchRecordingStrip(service: service, displayGeometry: geometry)
+        case .shelf: NotchShelfStrip(service: service, displayGeometry: geometry)
+        case .teleprompter: NotchTeleprompterStrip(service: service, displayGeometry: geometry)
         case .downloads: NotchDownloadStrip(service: service, displayGeometry: geometry)
         case .calendar: NotchCalendarStrip(service: service, displayGeometry: geometry)
         case .watch: NotchWatchStrip(service: service, displayGeometry: geometry)
@@ -331,6 +335,9 @@ struct NotchView: View {
             case .shortcuts: NotchShortcutsStrip(geometry: service.activitySatelliteGeometry, size: size)
             case .call: NotchCallStrip(geometry: service.activitySatelliteGeometry, size: size)
             case .timer: NotchCapsuleTimerStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
+            case .recording: NotchCapsuleRecordingStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
+            case .shelf: NotchCapsuleShelfStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
+            case .teleprompter: NotchCapsuleTeleprompterStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
             case .watch: NotchCapsuleWatchStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
             case .downloads: NotchCapsuleDownloadStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
             case .agents: NotchCapsuleAgentStrip(service: service, size: size, displayGeometry: service.activitySatelliteGeometry)
@@ -343,6 +350,9 @@ struct NotchView: View {
             case .shortcuts: NotchShortcutsStrip(geometry: service.compactActivityGeometry, size: size)
             case .call: NotchCallStrip(geometry: service.compactActivityGeometry, size: size)
             case .timer: NotchTimerStrip(service: service)
+            case .recording: NotchRecordingStrip(service: service)
+            case .shelf: NotchShelfStrip(service: service)
+            case .teleprompter: NotchTeleprompterStrip(service: service)
             case .watch: NotchWatchStrip(service: service)
             case .downloads: NotchDownloadStrip(service: service)
             case .agents: NotchAgentStrip(service: service)
@@ -708,6 +718,7 @@ struct NotchView: View {
             case .scratchpad: NotchScratchpadView(service: service)
             case .agents: NotchAgentsView(size: pageSize)
             case .watch: NotchWatchView(size: pageSize)
+            case .teleprompter: NotchTeleprompterView(size: pageSize)
             }
         }
     }
@@ -886,6 +897,7 @@ extension NotchModule: PanelOrderItem {
         case .scratchpad: return FeatureStrings.scratchpad(language).pageTitle
         case .agents: return FeatureStrings.notchAgents(language).title
         case .watch: return FeatureStrings.notchWatch(language).title
+        case .teleprompter: return "Teleprompter"
         }
     }
 }
@@ -1165,6 +1177,9 @@ private final class NotchActivityObservation: ObservableObject {
         switch activity {
         case .music: changes = NotchMusicService.shared.objectWillChange
         case .timer: changes = NotchTimerService.shared.objectWillChange
+        case .recording: changes = NotchSystemRecordingService.shared.objectWillChange
+        case .shelf: changes = ShelfService.shared.objectWillChange
+        case .teleprompter: changes = NotchTeleprompterService.shared.objectWillChange
         case .downloads: changes = NotchDownloadService.shared.objectWillChange
         case .agents: changes = AgentUsageService.shared.objectWillChange
         case .watch: changes = NotchWatchService.shared.objectWillChange
@@ -1204,6 +1219,9 @@ struct NotchPillCompactMark: View {
     private var tint: Color {
         switch activity {
         case .timer: return .orange
+        case .recording: return NotchSystemRecordingService.shared.isPaused ? .orange : Color(red: 1.0, green: 0.34, blue: 0.32)
+        case .shelf: return .cyan
+        case .teleprompter: return NotchTeleprompterService.shared.isPaused ? .orange : .cyan
         case .agents: return usage.snapshot.live.first?.provider.tint ?? .cyan
         case .calendar: return .mint
         case .keepAwake: return .yellow
@@ -1263,6 +1281,8 @@ struct NotchPillCompactMark: View {
             EmptyView()
         case .shortcuts:
             NotchShortcutsGlyph(side: physicalSide ? 16 : 14)
+        case .recording:
+            NotchRecordingGlyph(paused: NotchSystemRecordingService.shared.isPaused, size: physicalSide ? 12 : 10)
         case .watch:
             NotchWatchEye(size: physicalSide ? 15 : 13, hidden: watch.state == .hidden)
         case .keepAwake:
@@ -1294,6 +1314,30 @@ struct NotchPillCompactMark: View {
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .lineLimit(1) }
             }
+        case .recording:
+            let reading = NotchSystemRecordingService.shared.elapsedLabel
+            if physicalSide { sideReading(reading) }
+            else {
+                Text(reading)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .lineLimit(1)
+            }
+        case .shelf:
+            let reading = ShelfLiveActivitySupport.countdownText(ShelfService.shared.liveActivityRemaining)
+            if physicalSide { sideReading(reading) }
+            else {
+                Text(reading)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .lineLimit(1)
+            }
+        case .teleprompter:
+            let reading = "\(Int((NotchTeleprompterService.shared.progress * 100).rounded()))%"
+            if physicalSide { sideReading(reading) }
+            else {
+                Text(reading)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .lineLimit(1)
+            }
         case .agents:
             EmptyView()
         case .call:
@@ -1305,7 +1349,11 @@ struct NotchPillCompactMark: View {
                 }
             } else { Circle().fill(.mint).frame(width: 6, height: 6) }
         case .shortcuts:
-            Circle().fill(.cyan).frame(width: 5, height: 5)
+            if let session = NotchShortcutsService.shared.primary {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    sideReading(session.elapsed(at: context.date))
+                }
+            }
         case .watch:
             Circle().fill(watch.state == .hidden ? Color.secondary : Color.green).frame(width: 6, height: 6)
         case .keepAwake:

@@ -237,6 +237,90 @@ enum ShelfInteractionSupport {
     static func offersMoveOutside(removeAfterDrop: Bool, dragIncludesPinned: Bool) -> Bool {
         removeAfterDrop && !dragIncludesPinned
     }
+
+    /// Resolves whether dragging out should move vs copy after applying the
+    /// user's optional invert modifier key. Pinned items always copy.
+    static func effectiveMovesOutside(removeAfterDrop: Bool,
+                                      dragIncludesPinned: Bool,
+                                      invertPressed: Bool) -> Bool {
+        guard !dragIncludesPinned else { return false }
+        return invertPressed ? !removeAfterDrop : removeAfterDrop
+    }
+
+    /// Drag operation mask offered to outside destinations. When the invert
+    /// modifier is held, strictly offer the inverted operation alone so Finder
+    /// and other drop targets cannot override it with their default heuristic.
+    static func outsideDragOperationMask(removeAfterDrop: Bool,
+                                         dragIncludesPinned: Bool,
+                                         invertPressed: Bool) -> NSDragOperation {
+        let moves = effectiveMovesOutside(removeAfterDrop: removeAfterDrop,
+                                          dragIncludesPinned: dragIncludesPinned,
+                                          invertPressed: invertPressed)
+        if invertPressed {
+            return moves ? .move : .copy
+        }
+        return moves ? [.copy, .move] : .copy
+    }
+}
+
+/// Modifier key that temporarily flips Shelf drag-out between Move and Copy.
+enum ShelfDragInvertModifier: String, CaseIterable, Identifiable {
+    case none, option, command, control, shift
+
+    var id: String { rawValue }
+
+    var eventFlag: NSEvent.ModifierFlags? {
+        switch self {
+        case .none: return nil
+        case .option: return .option
+        case .command: return .command
+        case .control: return .control
+        case .shift: return .shift
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .none: return "Off"
+        case .option: return "Option (⌥)"
+        case .command: return "Command (⌘)"
+        case .control: return "Control (⌃)"
+        case .shift: return "Shift (⇧)"
+        }
+    }
+
+    static func current(in defaults: UserDefaults = .standard) -> ShelfDragInvertModifier {
+        let raw = defaults.string(forKey: DefaultsKey.shelfDragInvertModifier) ?? ShelfDragInvertModifier.option.rawValue
+        return ShelfDragInvertModifier(rawValue: raw) ?? .option
+    }
+
+    func isPressed(in flags: NSEvent.ModifierFlags = NSEvent.modifierFlags) -> Bool {
+        guard let flag = eventFlag else { return false }
+        return flags.contains(flag)
+    }
+}
+
+/// Countdown duration choices for the Shelf Drop Live Activity pill.
+enum ShelfLiveActivitySupport {
+    static let defaultDuration = 15
+    static let steps = [0, 15, 30, 45, 60]
+
+    static func sanitizedDuration(_ seconds: Int) -> Int {
+        guard seconds > 0 else { return 0 }
+        let clamped = min(60, max(0, seconds))
+        return Int((Double(clamped) / 15.0).rounded()) * 15
+    }
+
+    static func duration(in defaults: UserDefaults = .standard) -> Int {
+        if defaults.object(forKey: DefaultsKey.shelfLiveActivitySeconds) == nil {
+            return defaultDuration
+        }
+        return sanitizedDuration(defaults.integer(forKey: DefaultsKey.shelfLiveActivitySeconds))
+    }
+
+    static func countdownText(_ seconds: Int) -> String {
+        "\(max(0, seconds))s"
+    }
 }
 
 /// Types accepted by the native shelf drop targets.

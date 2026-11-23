@@ -49,6 +49,12 @@ final class AgentAntigravityUsageReader {
         for profile in (try? FileManager.default.contentsOfDirectory(at: profiles, includingPropertiesForKeys: nil)) ?? [] {
             roots.append(profile.appending(path: "antigravity-acp/conversations"))
         }
+        // Also pool any user-added custom Antigravity account directories.
+        for account in AgentAccountRegistry.enabledAccounts(for: .antigravity, home: home) where !account.isAutoDiscovered && !account.sourcePath.isEmpty {
+            let base = account.expandedURL
+            roots.append(base.appending(path: "conversations"))
+            roots.append(base.appending(path: "antigravity-acp/conversations"))
+        }
         return roots
     }
 

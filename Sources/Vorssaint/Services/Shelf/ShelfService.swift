@@ -121,7 +121,10 @@ final class ShelfService: ObservableObject {
             // Emptying the shelf (removing or dragging out the last item) always
             // dismisses the docked shelf; only an explicit open holds an empty
             // one, and that never runs through here.
-            if items.isEmpty { dockedForcedOpen = false }
+            if items.isEmpty {
+                dockedForcedOpen = false
+                clearLiveActivity()
+            }
             scheduleDockedSync()
         }
     }
@@ -157,6 +160,73 @@ final class ShelfService: ObservableObject {
     /// I work", not "reopen a floating panel on every launch".
     @Published private(set) var isPinned = false
     @Published private(set) var automaticExclusions: [String] = []
+    /// Remaining countdown seconds for the Shelf Drop Live Activity pill in the Dynamic Island.
+    @Published private(set) var liveActivityRemaining: Int = 0
+    private var liveActivityTimer: Timer?
+    private var liveActivityPaused = false
+    private var internalDragInvertActive = false
+
+    var hasLiveActivity: Bool {
+        liveActivityRemaining > 0 && !items.isEmpty && ShelfLiveActivitySupport.duration() > 0
+    }
+
+    var shouldIgnoreModifierKeysForActiveDrag: Bool {
+        isInternalDragActive && ShelfDragInvertModifier.current() != .none
+    }
+
+    func triggerLiveActivity() {
+        let duration = ShelfLiveActivitySupport.duration()
+        guard duration > 0, !items.isEmpty else {
+            clearLiveActivity()
+            return
+        }
+        liveActivityRemaining = duration
+        startLiveActivityTimerIfNeeded()
+    }
+
+    func setLiveActivityPaused(_ paused: Bool) {
+        guard liveActivityPaused != paused else { return }
+        liveActivityPaused = paused
+        if paused {
+            liveActivityTimer?.invalidate()
+            liveActivityTimer = nil
+        } else if liveActivityRemaining > 0 && !items.isEmpty {
+            startLiveActivityTimerIfNeeded()
+        }
+    }
+
+    func syncLiveActivityPreference() {
+        let duration = ShelfLiveActivitySupport.duration()
+        if duration <= 0 || items.isEmpty {
+            clearLiveActivity()
+        } else if liveActivityRemaining > duration {
+            liveActivityRemaining = duration
+        }
+    }
+
+    func clearLiveActivity() {
+        liveActivityTimer?.invalidate()
+        liveActivityTimer = nil
+        if liveActivityRemaining != 0 {
+            liveActivityRemaining = 0
+        }
+    }
+
+    private func startLiveActivityTimerIfNeeded() {
+        guard !liveActivityPaused, liveActivityTimer == nil, liveActivityRemaining > 0 else { return }
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            guard !self.liveActivityPaused else { return }
+            if self.items.isEmpty || ShelfLiveActivitySupport.duration() <= 0 || self.liveActivityRemaining <= 1 {
+                self.clearLiveActivity()
+            } else {
+                self.liveActivityRemaining -= 1
+            }
+        }
+        timer.tolerance = 0.1
+        RunLoop.main.add(timer, forMode: .common)
+        liveActivityTimer = timer
+    }
 
     private var panel: NSPanel?
     private var hotKeyRef: EventHotKeyRef?
@@ -1345,19 +1415,21 @@ final class ShelfService: ObservableObject {
         }
     }
 
-    func beginInternalDrag(ids: [UUID], from window: NSWindow?) {
+    func beginInternalDrag(ids: [UUID], from window: NSWindow?, invertModifierPressed: Bool = false) {
         internalDragWindow = window
         if let window, window === NotchService.shared.presentationWindow {
             NotchService.shared.fileDragChanged(true, internalDrag: true)
         }
         activeInternalDragIDs = ids
         internalDragWasMerged = false
+        internalDragInvertActive = invertModifierPressed
     }
 
     func finishInternalDrag(dropAccepted: Bool) -> [UUID] {
         defer {
             activeInternalDragIDs = []
             internalDragWasMerged = false
+            internalDragInvertActive = false
             if let window = internalDragWindow, window === NotchService.shared.presentationWindow {
                 NotchService.shared.fileDragChanged(false, internalDrag: true)
             }
@@ -1373,16 +1445,22 @@ final class ShelfService: ObservableObject {
         let notch = NotchService.shared
         let source = internalDragWindow
         let fromNotch = source != nil && source === notch.presentationWindow
+        let invertModifier = internalDragInvertActive || ShelfDragInvertModifier.current().isPressed()
         let draggedIDs = finishInternalDrag(dropAccepted: dropAccepted)
         endInteraction()
         guard !draggedIDs.isEmpty else { return }
 
         let defaults = UserDefaults.standard
         let removableIDs = ShelfInteractionSupport.removableAfterDrag(draggedIDs, protectedIDs: protectedIDs)
+        let defaultRemove = defaults.bool(forKey: DefaultsKey.shelfRemoveAfterDrop)
+        let effectiveRemove = ShelfInteractionSupport.effectiveMovesOutside(
+            removeAfterDrop: defaultRemove,
+            dragIncludesPinned: false,
+            invertPressed: invertModifier)
         if ShelfInteractionSupport.shouldRemoveAfterDrag(
             dropAccepted: dropAccepted,
             draggedItemCount: removableIDs.count,
-            removeAfterDrop: defaults.bool(forKey: DefaultsKey.shelfRemoveAfterDrop)) {
+            removeAfterDrop: effectiveRemove) {
             removeItems(removableIDs)
         }
         if ShelfInteractionSupport.shouldCloseAfterDrag(
@@ -1404,15 +1482,16 @@ final class ShelfService: ObservableObject {
 
     /// Retaining a file in the Shelf after use must offer copy-only outside
     /// the app; otherwise a destination may move it and leave a stale saved
-    /// URL. Internal drops remain moves so stacking still works naturally.
+    /// URL. Holding the configured invert modifier flips Move <-> Copy.
     func sourceOperationMask(for context: NSDraggingContext) -> NSDragOperation {
         if context == .withinApplication { return .move }
         let protected = protectedIDs
-        return ShelfInteractionSupport.offersMoveOutside(
+        let invertPressed = internalDragInvertActive || ShelfDragInvertModifier.current().isPressed()
+        if invertPressed { internalDragInvertActive = true }
+        return ShelfInteractionSupport.outsideDragOperationMask(
             removeAfterDrop: UserDefaults.standard.bool(forKey: DefaultsKey.shelfRemoveAfterDrop),
-            dragIncludesPinned: activeInternalDragIDs.contains(where: protected.contains))
-            ? [.copy, .move]
-            : .copy
+            dragIncludesPinned: activeInternalDragIDs.contains(where: protected.contains),
+            invertPressed: invertPressed)
     }
 
     var isInternalDragActive: Bool {
@@ -1439,6 +1518,7 @@ final class ShelfService: ObservableObject {
             discardOwnedPayloads(in: additions)
             return false
         }
+        triggerLiveActivity()
         // Only a genuinely external drop counts as an add: mergeInternalDrag
         // reaches the shared merge below too, but that path is a removal
         // plus a reparent of an existing tile, not new content arriving.
@@ -1793,6 +1873,7 @@ final class ShelfService: ObservableObject {
         startContentThumbnails(for: [item])
         lastAddedID = item.id
         addSerial &+= 1
+        triggerLiveActivity()
         noteInteraction()
         return true
     }

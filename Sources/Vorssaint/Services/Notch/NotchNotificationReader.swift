@@ -15,7 +15,7 @@ extension NotchNotificationReaderCore where Access == NotchNativeNotificationAcc
                   sourceApplicationName: { labels in
                       guard !labels.isEmpty else { return nil }
                       return NotchNotificationSources.source(for: labels)?.name
-                  }, allowsNativeClose: { NotchNotificationSupport.dismissesNative() }, nativeCloseTitle: closeTitle,
+                  }, allowsNativeClose: { NotchNotificationSupport.dismissesNative() || NotchFocusSupport.hidesNativeBanner() }, nativeCloseTitle: closeTitle,
                   displays: {
                       var count: UInt32 = 0
                       guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }

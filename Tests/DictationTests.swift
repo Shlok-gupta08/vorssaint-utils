@@ -32,7 +32,7 @@ enum DictationTests {
         let added = access
         expect(access.addSpeechHistory(label: "Speech history") && access == added, "adding the history shortcut twice does not duplicate it")
         var full = NotchQuickAccessConfiguration(buttons: NotchQuickAccessSide.allCases.flatMap { side in
-            (0..<NotchQuickAccessConfiguration.maximumPerSide).map { _ in NotchQuickButton(action: .settings, side: side) }
+            (0..<NotchQuickAccessConfiguration.maximum(for: side)).map { _ in NotchQuickButton(action: .settings, side: side) }
         })
         let originalLayout = full
         expect(!full.addSpeechHistory(label: "Speech history") && full == originalLayout, "a full layout never loses another quick button")

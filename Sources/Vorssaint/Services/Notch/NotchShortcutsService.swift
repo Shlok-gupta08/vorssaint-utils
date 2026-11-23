@@ -156,7 +156,16 @@ final class NotchShortcutsService: ObservableObject {
             var path = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
             return proc_pidpath(session.pid, &path, UInt32(path.count)) > 0 && String(cString: path) == session.executable
         }
-        let next = lifecycle.ordered
+        let next = lifecycle.ordered.map { session -> NotchShortcutSession in
+            var enriched = session
+            if enriched.identity == nil {
+                enriched.identity = NotchShortcutIdentityResolver.resolve(pid: session.pid, executable: session.executable)
+            }
+            return enriched
+        }
+        for enriched in next where enriched.identity != nil {
+            lifecycle.attachIdentity(enriched.identity, for: enriched.pid)
+        }
         DispatchQueue.main.async { [weak self] in
             guard let self, self.running, self.generation == token else { return }
             if self.sessions != next { self.sessions = next }

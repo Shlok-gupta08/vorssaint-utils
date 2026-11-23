@@ -95,8 +95,8 @@ enum NotchActivityTests {
         state.apply(.init(pid: 43, executable: path, date: now.addingTimeInterval(4), started: false))
         suite.expect(state.ordered.isEmpty, "the last completion removes the activity")
         suite.expect(NotchPillActivityLayout.ordered([.music, .call, .shortcuts, .agents], preferred: .music)
-                     == [.shortcuts, .call, .music, .agents],
-                     "running shortcuts stay central above calls and a preferred music pill")
+                     == [.call, .shortcuts, .music, .agents],
+                     "calls lead running shortcuts and paused music")
         suite.expect(NotchSupport.compactActivities(timer: false, downloads: false, agents: false,
             calendar: false, music: true, shortcuts: true) == [.shortcuts, .music],
                      "other active activities remain available beside Shortcuts")
@@ -110,8 +110,8 @@ enum NotchActivityTests {
                      == [.agents, .music, .downloads, .calendar, .watch, .timer, .keepAwake],
                      "the floating pill prioritizes active work over passive timers")
         suite.expect(NotchPillActivityLayout.visible(all, preferred: .calendar)
-                     == [.calendar, .agents, .music, .downloads],
-                     "a person's primary choice stays central and the deck caps itself at four pills")
+                     == [.calendar, .agents, .music, .downloads, .watch, .timer, .keepAwake],
+                     "a person's primary choice stays central and more than four live activities remain visible together")
         suite.expect(NotchPillActivityLayout.surfaceWidth(primary: 180, secondary: [42, 42, 42], available: 500)
                      == 180 + 42 * 3 + NotchPillActivityLayout.spacing * 3,
                      "compact side activities add only their pills and the real gaps between them")
@@ -120,6 +120,11 @@ enum NotchActivityTests {
         let playing = NotchPillActivityLayout.Context(musicPlaying: true, agentsActive: true)
         suite.expect(NotchPillActivityLayout.ordered(all, preferred: nil, context: playing).first == .music,
                      "playing music leads background agent work without a manual override")
+        for preferred: NotchCompactActivity? in [nil, .shortcuts, .agents, .music] {
+            suite.expect(NotchPillActivityLayout.ordered([.shortcuts, .agents, .music], preferred: preferred,
+                context: playing).prefix(2) == [.music, .shortcuts],
+                "playing music stays central and running shortcuts take the first side pill")
+        }
         let urgent = NotchPillActivityLayout.Context(musicPlaying: true, agentsActive: true, calendarImminent: true)
         suite.expect(NotchPillActivityLayout.ordered(all, preferred: nil, context: urgent).first == .calendar,
                      "an imminent meeting takes priority over playing music")

@@ -156,13 +156,17 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         }
     }
 
-    /// A dictation shortcut owns the surface immediately. Invalidate native
-    /// motion completions and remove any forward-filled fade or reveal mask.
+    /// A dictation shortcut owns the surface immediately. Invalidate pending
+    /// completions and release pill separation so the native silhouette springs
+    /// smoothly from the resting contour into the dictation panel.
     func interruptForDictation() {
         animationGeneration += 1
         isAnimating = false
         hidesWhenSettled = false
+        changesActivityMode = false
+        targetSeparatesPills = false
         canvas.stopMotion()
+        canvas.setSeparatesPills(false)
         canvas.removeActivityHandoffShell()
         canvas.restoreContent()
         quickAccessContainer?.motion.setVisible(false, animated: false)

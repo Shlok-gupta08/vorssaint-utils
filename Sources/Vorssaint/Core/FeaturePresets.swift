@@ -116,7 +116,7 @@ extension AppFeature {
                 ? .mouse : .idle
         case .notchNotifications, .notchGestures, .notchTimer, .notchQueue, .notchDownloads: return .idle
         // It reads only while something is being watched, and stops on its own.
-        case .notchWatch: return .idle
+        case .notchWatch, .teleprompter: return .idle
         case .notchAccessories: return .periodic
         // Log changes arrive as file events; a timer keeps countdowns and
         // limits current while the section is on.

@@ -337,10 +337,12 @@ final class AgentUsageService: ObservableObject {
     private func startPolling() {
         antigravityActivity?.stop()
         antigravityActivity = nil
-        if enabled.contains(.antigravity) {
+        // Always run the T3/Antigravity activity monitor when any provider is enabled
+        // because T3 Code can run Antigravity, Codex, and Claude multi-instance threads.
+        if !enabled.isEmpty {
             let reader = AgentAntigravityActivity(queue: queue, changed: { [weak self] live in
                 guard let self, self.readerSession >= 0 else { return }
-                self.antigravityLive = live
+                self.antigravityLive = live.filter { self.enabled.contains($0.provider) }
                 self.schedulePublish()
             }, limitsChanged: { [weak self] limits in
                 self?.noteLimits(limits)
@@ -575,12 +577,20 @@ final class AgentUsageService: ObservableObject {
         if let codex = AgentPlans.codex(planType: store.codexPlan) { plans[.codex] = codex }
         if let antigravityPlan { plans[.antigravity] = antigravityPlan }
         var next = store.snapshot(plans: plans, providers: enabled, now: Date())
+        next.accountLimits = store.accountLimits.filter { enabled.contains($0.value.provider) }
         // Transcripts remain a source of historical counters, never a live
-        // signal. Their last step can stay RUNNING long after the server stops.
+        // signal for Antigravity. T3 multi-instance live runs for any enabled
+        // provider merge cleanly alongside file-log turns.
         next.live.removeAll { $0.provider == .antigravity }
-        next.live.append(contentsOf: antigravityLive)
+        let existingIDs = Set(next.live.map(\.id))
+        for session in antigravityLive where enabled.contains(session.provider) && !existingIDs.contains(session.id) {
+            next.live.append(session)
+            next.seen.insert(session.provider)
+        }
+        for (_, limits) in next.accountLimits {
+            next.seen.insert(limits.provider)
+        }
         next.live.sort { $0.started < $1.started }
-        if !antigravityLive.isEmpty { next.seen.insert(.antigravity) }
         published = next
         checkBudget(next)
         let checked = enabled.contains(.claude) ? claudeAppSamples.last(where: {

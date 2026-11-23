@@ -692,12 +692,18 @@ final class ShelfTileView: NSView, NSDraggingSource {
             draggingItem.setDraggingFrame(bounds, contents: entry.icon)
             return draggingItem
         }
-        shelf.beginInternalDrag(ids: draggedIDs, from: window)
+        shelf.beginInternalDrag(ids: draggedIDs, from: window, invertModifierPressed: ShelfDragInvertModifier.current().isPressed(in: event.modifierFlags))
         shelf.beginInteraction()
         beginDraggingSession(with: draggingItems, event: event, source: self)
     }
 
     // MARK: NSDraggingSource
+
+    func ignoreModifierKeys(for session: NSDraggingSession) -> Bool {
+        // When the user's invert modifier is active, prevent AppKit's default
+        // Option/Command mask rewriting from fighting our explicit Move/Copy mask.
+        ShelfService.shared.shouldIgnoreModifierKeysForActiveDrag
+    }
 
     func draggingSession(_ session: NSDraggingSession,
                          sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {

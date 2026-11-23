@@ -538,6 +538,8 @@ struct SettingsView: View {
         case .dictation: DictationSettings()
         case .textSnippets: TextSnippetsSettings()
         case .notch: NotchSettings()
+        case .agents: AIAgentsSettingsView()
+        case .teleprompter: TeleprompterSettingsView()
         case .radialMenu: RadialMenuSettings()
         case .commandBar: CommandBarSettings()
         case .energy: EnergySettings(focus: router.destination.sectionAnchor)

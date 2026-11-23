@@ -31,6 +31,10 @@ enum NotchActivityObservationTests {
     typealias NotchCalendarService = Source<Other>
     typealias NotchShortcutsService = Source<Other>
     typealias NotchCallService = Source<Other>
+    typealias ScreenRecorderService = Source<Other>
+    typealias NotchSystemRecordingService = Source<Other>
+    typealias ShelfService = Source<Other>
+    typealias NotchTeleprompterService = Source<Other>
 
     static func run(_ suite: TestSuite) {
         var musicChanges = 0, timerChanges = 0

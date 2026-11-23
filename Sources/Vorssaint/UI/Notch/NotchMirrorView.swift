@@ -58,12 +58,18 @@ struct NotchMirrorView: View {
 
     @ViewBuilder private func content(geometry: NotchGeometry, strip: NotchGeometry, size: CGSize,
                                       activity: NotchCompactActivity?) -> some View {
-        if let activity {
+        let mirrorDisplayID = NSScreen.screens.first(where: { $0.frame == mirror.geometry.screen })?.notchDisplayID
+        let effectiveActivity: NotchCompactActivity? = (activity == .recording && !NotchSystemRecordingService.shared.isActive(on: mirrorDisplayID))
+            ? nil : activity
+        if let activity = effectiveActivity {
             if geometry.floats {
                 switch activity {
                 case .shortcuts: NotchShortcutsStrip(geometry: geometry, size: size)
                 case .call: NotchCallStrip(geometry: geometry, size: size)
                 case .timer: NotchCapsuleTimerStrip(service: service, size: size, displayGeometry: geometry)
+                case .recording: NotchCapsuleRecordingStrip(service: service, size: size, displayGeometry: geometry)
+                case .shelf: NotchCapsuleShelfStrip(service: service, size: size, displayGeometry: geometry)
+                case .teleprompter: NotchCapsuleTeleprompterStrip(service: service, size: size, displayGeometry: geometry)
                 case .watch: NotchCapsuleWatchStrip(service: service, size: size, displayGeometry: geometry)
                 case .downloads: NotchCapsuleDownloadStrip(service: service, size: size, displayGeometry: geometry)
                 case .agents: NotchCapsuleAgentStrip(service: service, size: size, displayGeometry: geometry)
@@ -76,6 +82,9 @@ struct NotchMirrorView: View {
                 case .shortcuts: NotchShortcutsStrip(geometry: strip, size: size)
                 case .call: NotchCallStrip(geometry: strip, size: size)
                 case .timer: NotchTimerStrip(service: service, displayGeometry: strip)
+                case .recording: NotchRecordingStrip(service: service, displayGeometry: strip)
+                case .shelf: NotchShelfStrip(service: service, displayGeometry: strip)
+                case .teleprompter: NotchTeleprompterStrip(service: service, displayGeometry: strip)
                 case .watch: NotchWatchStrip(service: service, displayGeometry: strip)
                 case .downloads: NotchDownloadStrip(service: service, displayGeometry: strip)
                 case .agents: NotchAgentStrip(service: service, displayGeometry: strip)

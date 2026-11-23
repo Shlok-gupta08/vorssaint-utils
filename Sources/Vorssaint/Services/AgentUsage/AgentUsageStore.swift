@@ -17,6 +17,7 @@ final class AgentUsageStore {
     private let summary = AgentUsageSummaryCache()
     private var antigravityDatabaseHistory = false
     private(set) var limits: [AgentProvider: AgentLimits] = [:]
+    private(set) var accountLimits: [String: AgentLimits] = [:]
     private(set) var codexPlan: String?
     private var codexPlanObserved = Date.distantPast
     /// Open turns by log file.
@@ -267,11 +268,19 @@ final class AgentUsageStore {
 
     func setLimits(_ reading: AgentLimits) {
         limits[reading.provider] = reading
+        if let accountID = reading.accountID {
+            accountLimits[accountID] = reading
+        }
     }
 
     /// Keeps the newer of two readings of an account, whichever way each
     /// one arrived.
     func updateLimits(_ reading: AgentLimits) {
+        if let accountID = reading.accountID {
+            if (accountLimits[accountID]?.observedAt ?? .distantPast) <= reading.observedAt {
+                accountLimits[accountID] = reading
+            }
+        }
         if (limits[reading.provider]?.observedAt ?? .distantPast) <= reading.observedAt {
             limits[reading.provider] = reading
         }
@@ -279,6 +288,7 @@ final class AgentUsageStore {
 
     func clearLimits(_ provider: AgentProvider) {
         limits[provider] = nil
+        accountLimits = accountLimits.filter { $0.value.provider != provider }
     }
 
     /// A turn that has written nothing for this long is not being worked on:
@@ -455,6 +465,9 @@ struct AgentLogRoot: Equatable {
                     roots.append(AgentLogRoot(provider: .antigravity, url: canonical(brain)))
                 }
             }
+        }
+        for custom in AgentAccountRegistry.customLogRoots() where !roots.contains(custom) {
+            roots.append(custom)
         }
         return roots
     }

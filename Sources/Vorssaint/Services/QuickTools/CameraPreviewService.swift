@@ -24,6 +24,10 @@ final class CameraPreviewService: ObservableObject {
     @Published private(set) var isEmbeddedPresented = false
     @Published private(set) var isCenterStageSupported = false
     @Published private(set) var isCenterStageEnabled = false
+    @Published private(set) var isStudioLightSupported = false
+    @Published private(set) var isStudioLightEnabled = false
+    @Published private(set) var isEdgeLightSupported = false
+    @Published private(set) var isEdgeLightEnabled = false
     private var captureGeneration = UUID()
     private var sessionRequest: CameraPreviewRequest?
     private var sessionObservers: [NSObjectProtocol] = []
@@ -197,7 +201,7 @@ final class CameraPreviewService: ObservableObject {
             return
         }
         selectedDeviceID = device.uniqueID
-        updateCenterStageSupport(for: device)
+        updateVideoEffectsSupport(for: device)
         let session = AVCaptureSession()
         let request = CameraPreviewRequest()
         sessionRequest = request
@@ -227,13 +231,17 @@ final class CameraPreviewService: ObservableObject {
             DispatchQueue.main.async {
                 guard let self, self.isPresented, self.session === session else { return }
                 self.state = isRunning ? .running : .unavailable
-                if !isRunning { self.stopSession() }
+                if isRunning {
+                    self.refreshVideoEffectsState()
+                } else {
+                    self.stopSession()
+                }
             }
         }
     }
 
     private func stopSession() {
-        resetCenterStage()
+        resetVideoEffects()
         sessionObservers.forEach(NotificationCenter.default.removeObserver)
         sessionObservers.removeAll()
         sessionRequest?.cancel(); sessionRequest = nil
@@ -263,41 +271,238 @@ final class CameraPreviewService: ObservableObject {
         AVCaptureDevice.centerStageControlMode = .cooperative
         let next = !isCenterStageEnabled
         if next, let device = devices.first(where: { $0.uniqueID == selectedDeviceID }) {
-            if !device.activeFormat.isCenterStageSupported,
-               let supportedFormat = device.formats.first(where: { $0.isCenterStageSupported }) {
-                try? device.lockForConfiguration()
-                device.activeFormat = supportedFormat
-                device.unlockForConfiguration()
-            }
+            ensureCompatibleFormat(for: device, wantsCenterStage: true, wantsStudioLight: isStudioLightEnabled, wantsEdgeLight: isEdgeLightEnabled)
         }
         AVCaptureDevice.isCenterStageEnabled = next
         isCenterStageEnabled = AVCaptureDevice.isCenterStageEnabled
     }
 
-    private func updateCenterStageSupport(for device: AVCaptureDevice?) {
-        let supported = device?.formats.contains(where: { $0.isCenterStageSupported }) == true
-        isCenterStageSupported = supported
-        if supported {
-            AVCaptureDevice.centerStageControlMode = .cooperative
-            AVCaptureDevice.isCenterStageEnabled = false
-            isCenterStageEnabled = false
-        } else {
-            isCenterStageEnabled = false
+    func toggleStudioLight() {
+        guard isStudioLightSupported else { return }
+        let next = !isStudioLightEnabled
+        if next, let device = devices.first(where: { $0.uniqueID == selectedDeviceID }) {
+            ensureCompatibleFormat(for: device, wantsCenterStage: isCenterStageEnabled, wantsStudioLight: true, wantsEdgeLight: isEdgeLightEnabled)
+        }
+        Self.applyStudioLightEnabled(next)
+        isStudioLightEnabled = Self.readStudioLightEnabled() ?? next
+    }
+
+    func toggleEdgeLight() {
+        guard isEdgeLightSupported else { return }
+        let next = !isEdgeLightEnabled
+        if next, let device = devices.first(where: { $0.uniqueID == selectedDeviceID }) {
+            ensureCompatibleFormat(for: device, wantsCenterStage: isCenterStageEnabled, wantsStudioLight: isStudioLightEnabled, wantsEdgeLight: true)
+        }
+        Self.applyEdgeLightEnabled(next)
+        isEdgeLightEnabled = next
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            guard let self, self.isPresented else { return }
+            if let actual = Self.readEdgeLightEnabled() {
+                self.isEdgeLightEnabled = actual
+            }
         }
     }
 
-    private func resetCenterStage() {
+    private func ensureCompatibleFormat(for device: AVCaptureDevice,
+                                        wantsCenterStage: Bool,
+                                        wantsStudioLight: Bool,
+                                        wantsEdgeLight: Bool) {
+        let current = device.activeFormat
+        let satisfies: (AVCaptureDevice.Format) -> Bool = { format in
+            (!wantsCenterStage || format.isCenterStageSupported)
+                && (!wantsStudioLight || Self.formatSupportsStudioLight(format))
+                && (!wantsEdgeLight || Self.formatSupportsEdgeLight(format))
+        }
+        guard !satisfies(current) else { return }
+        let candidate = device.formats.first(where: satisfies)
+            ?? device.formats.first(where: {
+                (wantsStudioLight && Self.formatSupportsStudioLight($0))
+                    || (wantsEdgeLight && Self.formatSupportsEdgeLight($0))
+                    || (wantsCenterStage && $0.isCenterStageSupported)
+            })
+        guard let candidate else { return }
+        try? device.lockForConfiguration()
+        device.activeFormat = candidate
+        device.unlockForConfiguration()
+    }
+
+    private func updateVideoEffectsSupport(for device: AVCaptureDevice?) {
+        let centerStageSupported = device?.formats.contains(where: { $0.isCenterStageSupported }) == true
+        isCenterStageSupported = centerStageSupported
+        if centerStageSupported {
+            AVCaptureDevice.centerStageControlMode = .cooperative
+            isCenterStageEnabled = AVCaptureDevice.isCenterStageEnabled
+        } else {
+            isCenterStageEnabled = false
+        }
+
+        let studioSupported = Self.classBool(AVCaptureDevice.self, "isEligibleForStudioLighting") == true
+            || device?.formats.contains(where: { Self.formatSupportsStudioLight($0) }) == true
+        isStudioLightSupported = studioSupported
+        isStudioLightEnabled = studioSupported ? (Self.readStudioLightEnabled() ?? false) : false
+
+        let edgeSupported = Self.classBool(AVCaptureDevice.self, "isEligibleForRingLight") == true
+            || (device.map { Self.instanceBool($0, "isRingLightAvailable") == true } ?? false)
+            || device?.formats.contains(where: { Self.formatSupportsEdgeLight($0) }) == true
+        isEdgeLightSupported = edgeSupported
+        isEdgeLightEnabled = edgeSupported ? (Self.readEdgeLightEnabled() ?? false) : false
+    }
+
+    private func refreshVideoEffectsState() {
+        if isCenterStageSupported {
+            isCenterStageEnabled = AVCaptureDevice.isCenterStageEnabled
+        }
+        if isStudioLightSupported, let studio = Self.readStudioLightEnabled() {
+            isStudioLightEnabled = studio
+        }
+        if isEdgeLightSupported, let edge = Self.readEdgeLightEnabled() {
+            isEdgeLightEnabled = edge
+        }
+    }
+
+    private func resetVideoEffects() {
         if isCenterStageSupported && isCenterStageEnabled {
             AVCaptureDevice.isCenterStageEnabled = false
         }
         isCenterStageEnabled = false
         isCenterStageSupported = false
+        isStudioLightEnabled = false
+        isStudioLightSupported = false
+        isEdgeLightEnabled = false
+        isEdgeLightSupported = false
+    }
+
+    // MARK: - macOS Video Effects Bridge (Studio Light & Edge Light)
+
+    private static let studioLightingEffectKey = "AVControlCenterVideoEffectStudioLighting" as NSString
+    private static let ringLightEffectKey = "AVControlCenterVideoEffectRingLight" as NSString
+
+    private static func controlCenterModuleState() -> NSObject? {
+        guard let bundleID = Bundle.main.bundleIdentifier,
+              let cls = NSClassFromString("AVControlCenterModuleState") as? NSObject.Type else { return nil }
+        let selector = NSSelectorFromString("moduleStateForBundleID:")
+        guard cls.responds(to: selector) else { return nil }
+        return cls.perform(selector, with: bundleID)?.takeUnretainedValue() as? NSObject
+    }
+
+    private static func classBool(_ cls: AnyClass, _ selectorName: String) -> Bool? {
+        let selector = NSSelectorFromString(selectorName)
+        guard let meta: AnyClass = object_getClass(cls),
+              cls.responds(to: selector),
+              let imp = class_getMethodImplementation(meta, selector) else { return nil }
+        typealias Fn = @convention(c) (AnyClass, Selector) -> Bool
+        return unsafeBitCast(imp, to: Fn.self)(cls, selector)
+    }
+
+    private static func instanceBool(_ object: AnyObject, _ selectorName: String) -> Bool? {
+        let selector = NSSelectorFromString(selectorName)
+        guard let cls: AnyClass = object_getClass(object),
+              object.responds(to: selector),
+              let imp = class_getMethodImplementation(cls, selector) else { return nil }
+        typealias Fn = @convention(c) (AnyObject, Selector) -> Bool
+        return unsafeBitCast(imp, to: Fn.self)(object, selector)
+    }
+
+    private static func formatSupportsStudioLight(_ format: AVCaptureDevice.Format) -> Bool {
+        instanceBool(format, "isStudioLightSupported") == true
+            || instanceBool(format, "isStudioLightingSupported") == true
+    }
+
+    private static func formatSupportsEdgeLight(_ format: AVCaptureDevice.Format) -> Bool {
+        instanceBool(format, "isEdgeLightSupported") == true
+            || instanceBool(format, "isRingLightSupported") == true
+    }
+
+    private static func readStudioLightEnabled() -> Bool? {
+        if let direct = classBool(AVCaptureDevice.self, "isStudioLightEnabled")
+            ?? classBool(AVCaptureDevice.self, "isStudioLightingEnabled") {
+            return direct
+        }
+        return readModuleEffectEnabled(studioLightingEffectKey)
+    }
+
+    private static func applyStudioLightEnabled(_ enabled: Bool) {
+        if let state = controlCenterModuleState() {
+            let setSupported = NSSelectorFromString("setStudioLightingSupported:")
+            if state.responds(to: setSupported),
+               let cls: AnyClass = object_getClass(state),
+               let imp = class_getMethodImplementation(cls, setSupported) {
+                typealias Fn = @convention(c) (AnyObject, Selector, Bool) -> Void
+                unsafeBitCast(imp, to: Fn.self)(state, setSupported, true)
+            }
+            _ = setModuleEffectEnabled(enabled, for: studioLightingEffectKey, on: state)
+        }
+        let forceSel = NSSelectorFromString("forceStudioLightingEnabled:")
+        if let meta: AnyClass = object_getClass(AVCaptureDevice.self),
+           AVCaptureDevice.responds(to: forceSel),
+           let imp = class_getMethodImplementation(meta, forceSel) {
+            typealias Fn = @convention(c) (AnyClass, Selector, Bool) -> Void
+            unsafeBitCast(imp, to: Fn.self)(AVCaptureDevice.self, forceSel, enabled)
+        }
+    }
+
+    private static func readEdgeLightEnabled() -> Bool? {
+        if let direct = classBool(AVCaptureDevice.self, "isEdgeLightEnabled")
+            ?? classBool(AVCaptureDevice.self, "isRingLightEnabled") {
+            if direct { return true }
+        }
+        if let state = controlCenterModuleState() {
+            if let enabled = readModuleEffectEnabled(ringLightEffectKey, on: state), enabled {
+                return true
+            }
+            if instanceBool(state, "ringLightActive") == true {
+                return true
+            }
+        }
+        return classBool(AVCaptureDevice.self, "isEdgeLightEnabled")
+            ?? classBool(AVCaptureDevice.self, "isRingLightEnabled")
+    }
+
+    private static func applyEdgeLightEnabled(_ enabled: Bool) {
+        if let state = controlCenterModuleState(), let cls: AnyClass = object_getClass(state) {
+            let setSupported = NSSelectorFromString("setRingLightSupported:")
+            if state.responds(to: setSupported), let imp = class_getMethodImplementation(cls, setSupported) {
+                typealias Fn = @convention(c) (AnyObject, Selector, Bool) -> Void
+                unsafeBitCast(imp, to: Fn.self)(state, setSupported, true)
+            }
+            _ = setModuleEffectEnabled(enabled, for: ringLightEffectKey, on: state)
+            let setActive = NSSelectorFromString("setRingLightActive:")
+            if state.responds(to: setActive), let imp = class_getMethodImplementation(cls, setActive) {
+                typealias Fn = @convention(c) (AnyObject, Selector, Bool) -> Bool
+                _ = unsafeBitCast(imp, to: Fn.self)(state, setActive, enabled)
+            }
+            let setMode = NSSelectorFromString("setRingLightMode:")
+            if state.responds(to: setMode), let imp = class_getMethodImplementation(cls, setMode) {
+                typealias Fn = @convention(c) (AnyObject, Selector, Int) -> Bool
+                _ = unsafeBitCast(imp, to: Fn.self)(state, setMode, enabled ? 1 : 0)
+            }
+        }
+    }
+
+    private static func readModuleEffectEnabled(_ effect: NSString, on existingState: NSObject? = nil) -> Bool? {
+        guard let state = existingState ?? controlCenterModuleState(),
+              let cls: AnyClass = object_getClass(state) else { return nil }
+        let selector = NSSelectorFromString("isEnabledForVideoEffect:")
+        guard state.responds(to: selector),
+              let imp = class_getMethodImplementation(cls, selector) else { return nil }
+        typealias Fn = @convention(c) (AnyObject, Selector, NSString) -> Bool
+        return unsafeBitCast(imp, to: Fn.self)(state, selector, effect)
+    }
+
+    @discardableResult
+    private static func setModuleEffectEnabled(_ enabled: Bool, for effect: NSString, on state: NSObject) -> Bool {
+        guard let cls: AnyClass = object_getClass(state) else { return false }
+        let selector = NSSelectorFromString("setEnabled:forVideoEffect:")
+        guard state.responds(to: selector),
+              let imp = class_getMethodImplementation(cls, selector) else { return false }
+        typealias Fn = @convention(c) (AnyObject, Selector, Bool, NSString) -> Bool
+        return unsafeBitCast(imp, to: Fn.self)(state, selector, enabled, effect)
     }
 
     private func activateCamera(_ device: AVCaptureDevice, rememberChoice: Bool) {
         guard device.uniqueID != selectedDeviceID else { return }
         selectedDeviceID = device.uniqueID
-        updateCenterStageSupport(for: device)
+        updateVideoEffectsSupport(for: device)
         if rememberChoice {
             // The system remembers this choice per app, so the next preview
             // opens on the same camera without a key of our own. Only an
@@ -322,7 +527,11 @@ final class CameraPreviewService: ObservableObject {
             DispatchQueue.main.async {
                 guard let self, self.isPresented, self.session === session else { return }
                 self.state = isRunning ? .running : .unavailable
-                if !isRunning { self.stopSession() }
+                if isRunning {
+                    self.refreshVideoEffectsState()
+                } else {
+                    self.stopSession()
+                }
             }
         }
     }

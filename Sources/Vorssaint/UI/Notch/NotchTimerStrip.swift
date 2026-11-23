@@ -132,7 +132,7 @@ struct NotchCompanionMark: View {
         case .music:
             NotchMusicCover(artwork: music.artwork, side: geometry.compactMusicArtworkSide,
                             radius: geometry.compactMusicArtworkRadius)
-        case .timer, .keepAwake, .watch, .call, .shortcuts:
+        case .timer, .recording, .shelf, .teleprompter, .keepAwake, .watch, .call, .shortcuts:
             EmptyView()
         }
     }
@@ -170,7 +170,7 @@ struct NotchCompanionMark: View {
             return geometry.compactMusicArtworkInset
         case .calendar:
             return geometry.compactActivityEdgeInset(boxHeight: 9, radius: 0)
-        case .downloads, .timer, .keepAwake, .watch, .call, .shortcuts:
+        case .downloads, .timer, .recording, .shelf, .teleprompter, .keepAwake, .watch, .call, .shortcuts:
             let side = min(13, NotchTimerSupport.stripIconSize(height: geometry.compactActivityContentHeight))
             return geometry.compactActivityEdgeInset(boxHeight: side, radius: side / 2)
         }
@@ -191,7 +191,7 @@ struct NotchCompanionMark: View {
             let playback = NotchMusicService.shared.playback
             let title = playback?.track.title ?? FeatureStrings.radialMenu(language).mediaNowPlaying
             return [title, playback?.track.artist].compactMap { $0 }.joined(separator: ", ")
-        case .timer, .keepAwake, .watch, .call, .shortcuts:
+        case .timer, .recording, .shelf, .teleprompter, .keepAwake, .watch, .call, .shortcuts:
             return companion.title(language)
         }
     }

@@ -49,11 +49,162 @@ enum NotchAgentLimitFocus: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// Customizable Notch layout configuration for the AI Agents page and pill.
+struct NotchAgentLayoutConfig: Codable, Equatable {
+    enum ColumnMode: String, CaseIterable, Identifiable, Codable {
+        case auto, twoColumn, singleColumn
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .auto: return "Auto"
+            case .twoColumn: return "2 Columns"
+            case .singleColumn: return "1 Column"
+            }
+        }
+    }
+
+    enum Density: String, CaseIterable, Identifiable, Codable {
+        case standard, compact
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .standard: return "Standard"
+            case .compact: return "Compact"
+            }
+        }
+    }
+
+    enum AccountCardMode: String, CaseIterable, Identifiable, Codable {
+        case separateAccounts, combinedByProvider
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .separateAccounts: return "Separate Card per Account"
+            case .combinedByProvider: return "Combined by Provider"
+            }
+        }
+    }
+
+    enum Preset: String, CaseIterable, Identifiable {
+        case balanced, limitsFocus, liveOps, compact
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .balanced: return "Balanced"
+            case .limitsFocus: return "Limits Focus"
+            case .liveOps: return "Live Ops"
+            case .compact: return "Compact"
+            }
+        }
+    }
+
+    var columnMode: ColumnMode = .auto
+    var density: Density = .standard
+    var accountCardMode: AccountCardMode = .separateAccounts
+    /// Card raw values explicitly forced to full width (or half width when in halfWidthCards).
+    var fullWidthCards: Set<String> = []
+    var halfWidthCards: Set<String> = []
+    var showAccountLabelInPill: Bool = true
+
+    static let `default` = NotchAgentLayoutConfig()
+
+    static func current(in defaults: UserDefaults = .standard) -> NotchAgentLayoutConfig {
+        guard let raw = defaults.string(forKey: DefaultsKey.notchAgentsLayoutConfig),
+              !raw.isEmpty,
+              let data = raw.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(NotchAgentLayoutConfig.self, from: data) else {
+            return .default
+        }
+        return decoded
+    }
+
+    func save(to defaults: UserDefaults = .standard) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        guard let data = try? encoder.encode(self),
+              let raw = String(data: data, encoding: .utf8) else { return }
+        defaults.set(raw, forKey: DefaultsKey.notchAgentsLayoutConfig)
+    }
+
+    func isFullWidth(card: NotchAgentCard) -> Bool {
+        if fullWidthCards.contains(card.rawValue) { return true }
+        if halfWidthCards.contains(card.rawValue) { return false }
+        return card.fullWidth
+    }
+
+    mutating func setFullWidth(_ full: Bool, for card: NotchAgentCard) {
+        if full {
+            fullWidthCards.insert(card.rawValue)
+            halfWidthCards.remove(card.rawValue)
+        } else {
+            halfWidthCards.insert(card.rawValue)
+            fullWidthCards.remove(card.rawValue)
+        }
+    }
+
+    func cardHeight(fullWidth: Bool) -> CGFloat {
+        switch (density, fullWidth) {
+        case (.standard, true): return NotchAgentSupport.chartHeight
+        case (.standard, false): return NotchAgentSupport.cardHeight
+        case (.compact, true): return 96
+        case (.compact, false): return 78
+        }
+    }
+
+    static func applyPreset(_ preset: Preset, to defaults: UserDefaults = .standard) {
+        var config = current(in: defaults)
+        switch preset {
+        case .balanced:
+            config = .default
+            defaults.set(NotchAgentCard.allCases.map(\.rawValue).joined(separator: ","), forKey: DefaultsKey.notchAgentsCardOrder)
+            defaults.set("", forKey: DefaultsKey.notchAgentsHiddenCards)
+        case .limitsFocus:
+            config.columnMode = .twoColumn
+            config.density = .standard
+            config.accountCardMode = .separateAccounts
+            config.fullWidthCards = []
+            config.halfWidthCards = []
+            defaults.set([NotchAgentCard.limits, .live, .spend, .trend, .resets, .models, .projects, .activity].map(\.rawValue).joined(separator: ","), forKey: DefaultsKey.notchAgentsCardOrder)
+            defaults.set([NotchAgentCard.projects, .activity].map(\.rawValue).joined(separator: ","), forKey: DefaultsKey.notchAgentsHiddenCards)
+        case .liveOps:
+            config.columnMode = .twoColumn
+            config.density = .standard
+            config.accountCardMode = .separateAccounts
+            config.fullWidthCards = [NotchAgentCard.live.rawValue]
+            config.halfWidthCards = []
+            defaults.set([NotchAgentCard.live, .limits, .spend, .models, .trend, .projects, .resets, .activity].map(\.rawValue).joined(separator: ","), forKey: DefaultsKey.notchAgentsCardOrder)
+            defaults.set([NotchAgentCard.activity].map(\.rawValue).joined(separator: ","), forKey: DefaultsKey.notchAgentsHiddenCards)
+        case .compact:
+            config.columnMode = .twoColumn
+            config.density = .compact
+            config.accountCardMode = .combinedByProvider
+            config.fullWidthCards = []
+            config.halfWidthCards = [NotchAgentCard.trend.rawValue]
+            defaults.set([NotchAgentCard.limits, .live, .spend, .trend].map(\.rawValue).joined(separator: ","), forKey: DefaultsKey.notchAgentsCardOrder)
+            defaults.set([NotchAgentCard.models, .projects, .activity, .resets].map(\.rawValue).joined(separator: ","), forKey: DefaultsKey.notchAgentsHiddenCards)
+        }
+        config.save(to: defaults)
+    }
+}
+
 struct NotchAgentTile: Identifiable, Equatable {
     let card: NotchAgentCard
-    /// The account a limits card belongs to.
+    /// The provider a limits/resets card belongs to.
     let provider: AgentProvider?
-    var id: String { card.rawValue + (provider.map { "." + $0.rawValue } ?? "") }
+    /// Optional specific account when separate-account mode is enabled.
+    var accountID: String? = nil
+    var accountLabel: String? = nil
+    var accountAccentHex: String? = nil
+    var customFullWidth: Bool? = nil
+
+    var effectiveFullWidth: Bool { customFullWidth ?? card.fullWidth }
+
+    var id: String {
+        var base = card.rawValue
+        if let provider { base += "." + provider.rawValue }
+        if let accountID { base += "@" + accountID }
+        return base
+    }
 }
 
 enum NotchAgentSupport {
@@ -260,7 +411,13 @@ enum NotchAgentSupport {
     static let pairWidth: CGFloat = 390
 
     static func tiles(cards: [NotchAgentCard], providers: [AgentProvider]) -> [NotchAgentTile] {
-        cards.flatMap { card -> [NotchAgentTile] in
+        var ordered = cards
+        if providers.count >= 3, cards.contains(.limits),
+           let live = cards.firstIndex(of: .live), let trend = cards.firstIndex(of: .trend), live < trend {
+            ordered.remove(at: live)
+            ordered.insert(.live, at: trend)
+        }
+        return ordered.flatMap { card -> [NotchAgentTile] in
             switch card {
             case .limits: return providers.map { NotchAgentTile(card: .limits, provider: $0) }
             // Banked resets belong to a Codex account.
@@ -270,14 +427,65 @@ enum NotchAgentSupport {
         }
     }
 
+    /// Account-aware and layout-customized tile builder for the revamped AI Agents page.
+    static func customizedTiles(cards: [NotchAgentCard],
+                                providers: [AgentProvider],
+                                accounts: [AgentAccount],
+                                config: NotchAgentLayoutConfig) -> [NotchAgentTile] {
+        let activeProviders = Set(providers)
+        let enabledAccounts = accounts.filter { $0.enabled && activeProviders.contains($0.provider) }
+        return cards.flatMap { card -> [NotchAgentTile] in
+            let fullWidth = config.isFullWidth(card: card)
+            switch card {
+            case .limits:
+                if config.accountCardMode == .separateAccounts {
+                    var result: [NotchAgentTile] = []
+                    var coveredProviders = Set<AgentProvider>()
+                    var countByProvider: [AgentProvider: Int] = [:]
+                    for account in enabledAccounts {
+                        countByProvider[account.provider, default: 0] += 1
+                    }
+                    // Follow the user's explicit account order so rearranging accounts rearranges their cards.
+                    for account in enabledAccounts {
+                        coveredProviders.insert(account.provider)
+                        let multi = (countByProvider[account.provider] ?? 0) > 1
+                        let customLabel = multi || account.label != account.provider.displayName ? account.label : nil
+                        result.append(NotchAgentTile(
+                            card: .limits, provider: account.provider,
+                            accountID: account.id,
+                            accountLabel: customLabel,
+                            accountAccentHex: account.accentHex,
+                            customFullWidth: fullWidth))
+                    }
+                    for provider in providers where !coveredProviders.contains(provider) {
+                        result.append(NotchAgentTile(card: .limits, provider: provider, customFullWidth: fullWidth))
+                    }
+                    return result
+                }
+                return providers.map { NotchAgentTile(card: .limits, provider: $0, customFullWidth: fullWidth) }
+            case .resets:
+                return providers.contains(.codex)
+                    ? [NotchAgentTile(card: .resets, provider: .codex, customFullWidth: fullWidth)] : []
+            default:
+                return [NotchAgentTile(card: card, provider: nil, customFullWidth: fullWidth)]
+            }
+        }
+    }
+
     /// Cards pair up in reading order; a chart, or a card left without a
     /// partner, takes the whole row.
-    static func rows(_ tiles: [NotchAgentTile], width: CGFloat) -> [[NotchAgentTile]] {
-        let pairs = width >= pairWidth
+    static func rows(_ tiles: [NotchAgentTile], width: CGFloat,
+                     config: NotchAgentLayoutConfig = .default) -> [[NotchAgentTile]] {
+        let pairs: Bool
+        switch config.columnMode {
+        case .auto: pairs = width >= pairWidth
+        case .twoColumn: pairs = width >= 280
+        case .singleColumn: pairs = false
+        }
         var rows: [[NotchAgentTile]] = []
         var waiting: NotchAgentTile?
         for tile in tiles {
-            if tile.card.fullWidth || !pairs {
+            if tile.effectiveFullWidth || !pairs {
                 if let waiting { rows.append([waiting]) }
                 waiting = nil
                 rows.append([tile])
@@ -292,21 +500,29 @@ enum NotchAgentSupport {
         return rows
     }
 
-    static func height(of row: [NotchAgentTile]) -> CGFloat {
-        row.contains { $0.card.fullWidth } ? chartHeight : cardHeight
+    static func height(of row: [NotchAgentTile], config: NotchAgentLayoutConfig = .default) -> CGFloat {
+        config.cardHeight(fullWidth: row.contains { $0.effectiveFullWidth })
     }
 
     /// A full-width live card after a pair can instead occupy the right
     /// column across both rows, leaving the other two cards stacked at left.
     static func liveColumn(at index: Int, rows: [[NotchAgentTile]]) -> Bool {
         rows.indices.contains(index) && rows.indices.contains(index + 1)
-            && rows[index].count == 2 && !rows[index].contains { $0.card.fullWidth }
+            && rows[index].count == 2 && !rows[index].contains { $0.effectiveFullWidth }
             && rows[index + 1].count == 1 && rows[index + 1][0].card == .live
+            && !rows[index + 1][0].effectiveFullWidth
     }
 
-    static func contentHeight(_ rows: [[NotchAgentTile]]) -> CGFloat {
+    /// With three or more limits cards, keep the trend chart in the initial view.
+    static func heightThroughTrend(_ rows: [[NotchAgentTile]]) -> CGFloat {
+        guard rows.joined().filter({ $0.card == .limits }).count >= 3,
+              let trend = rows.firstIndex(where: { $0.contains { $0.card == .trend } }) else { return 0 }
+        return contentHeight(Array(rows[...trend]))
+    }
+
+    static func contentHeight(_ rows: [[NotchAgentTile]], config: NotchAgentLayoutConfig = .default) -> CGFloat {
         guard !rows.isEmpty else { return 0 }
-        return rows.map(height).reduce(0, +) + spacing * CGFloat(rows.count - 1)
+        return rows.map { height(of: $0, config: config) }.reduce(0, +) + spacing * CGFloat(rows.count - 1)
     }
 }
 
